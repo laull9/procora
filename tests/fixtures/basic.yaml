@@ -1,0 +1,13 @@
+version: 1
+project: demo
+
+tasks:
+  database:
+    command: postgres
+
+  api:
+    command: cargo
+    args: ["run", "-p", "api"]
+    depends_on:
+      database:
+        condition: started

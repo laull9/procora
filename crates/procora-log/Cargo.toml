@@ -1,0 +1,19 @@
+[package]
+name = "procora-log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+flate2.workspace = true
+procora-core = { path = "../procora-core" }
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true

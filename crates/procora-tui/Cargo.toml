@@ -1,0 +1,18 @@
+[package]
+name = "procora-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+crossterm.workspace = true
+procora-protocol = { path = "../procora-protocol" }
+procora-core = { path = "../procora-core" }
+ratatui.workspace = true
+
+[dev-dependencies]
+procora-core = { path = "../procora-core" }
+
+[lints]
+workspace = true

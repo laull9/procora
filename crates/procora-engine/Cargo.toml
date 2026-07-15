@@ -1,0 +1,17 @@
+[package]
+name = "procora-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+procora-core = { path = "../procora-core" }
+serde.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+procora-config = { path = "../procora-config" }
+
+[lints]
+workspace = true
