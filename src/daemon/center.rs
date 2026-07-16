@@ -1,10 +1,10 @@
 use std::{
     collections::{BTreeMap, VecDeque},
-    fs,
     path::{Path, PathBuf},
 };
 
 use crate::config::{DiscoveryError, discover_path};
+use crate::platform::canonicalize;
 use crate::protocol::{
     CenterEventDto, CenterEventKindDto, CenterRequest, CenterResponse, EventBatchDto,
     ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
@@ -358,7 +358,7 @@ impl Center {
                 .ok_or_else(|| CenterError::NotFound(name.clone())),
             ServiceSelectorDto::Path(path) => {
                 let canonical =
-                    fs::canonicalize(path).map_err(|source| CenterError::InvalidSelectorPath {
+                    canonicalize(path).map_err(|source| CenterError::InvalidSelectorPath {
                         path: path.clone(),
                         source,
                     })?;

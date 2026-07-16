@@ -6,7 +6,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use procora::config::{DiscoveryError, discover_path};
+use procora::{
+    config::{DiscoveryError, discover_path},
+    platform::canonicalize,
+};
 
 /// 创建当前测试独占的临时目录。
 fn temporary_directory(label: &str) -> PathBuf {
@@ -38,7 +41,7 @@ fn 目录只选择唯一合法配置() {
     assert_eq!(discovered.compiled.spec.project, "demo");
     assert_eq!(
         discovered.config_path,
-        fs::canonicalize(directory.join("procora.yaml")).unwrap()
+        canonicalize(directory.join("procora.yaml")).unwrap()
     );
     fs::remove_dir_all(directory).unwrap();
 }
@@ -85,7 +88,7 @@ fn 目录忽略非procora名称的配置文件() {
     assert_eq!(discovered.compiled.spec.project, "demo");
     assert_eq!(
         discovered.config_path,
-        fs::canonicalize(directory.join("procora.yaml")).unwrap()
+        canonicalize(directory.join("procora.yaml")).unwrap()
     );
     fs::remove_dir_all(directory).unwrap();
 }

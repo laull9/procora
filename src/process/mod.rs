@@ -4,7 +4,7 @@ mod helper;
 
 use std::{
     io,
-    process::{ChildStderr, ChildStdout, ExitStatus, Stdio},
+    process::{ChildStderr, ChildStdout, Command, ExitStatus, Stdio},
     time::Duration,
 };
 
@@ -229,7 +229,9 @@ fn spawn_task_with_environment(
     task: &TaskSpec,
     clear_environment: bool,
 ) -> io::Result<ManagedChild> {
-    let mut command = CommandWrap::with_new(&task.command, |command| {
+    let mut process = process_command(&task.command, &task.args);
+    {
+        let command = &mut process;
         if clear_environment {
             command.env_clear();
             #[cfg(windows)]
@@ -240,7 +242,6 @@ fn spawn_task_with_environment(
             }
         }
         command
-            .args(&task.args)
             .envs(&task.env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -248,7 +249,8 @@ fn spawn_task_with_environment(
         if let Some(cwd) = &task.cwd {
             command.current_dir(cwd);
         }
-    });
+    }
+    let mut command = CommandWrap::from(process);
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
     #[cfg(windows)]
@@ -265,9 +267,10 @@ pub fn spawn_health_check(
     healthcheck: &HealthCheckSpec,
     task: &TaskSpec,
 ) -> io::Result<ManagedChild> {
-    let mut command = CommandWrap::with_new(&healthcheck.command, |command| {
+    let mut process = process_command(&healthcheck.command, &healthcheck.args);
+    {
+        let command = &mut process;
         command
-            .args(&healthcheck.args)
             .envs(&task.env)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -275,10 +278,25 @@ pub fn spawn_health_check(
         if let Some(cwd) = healthcheck.cwd.as_ref().or(task.cwd.as_ref()) {
             command.current_dir(cwd);
         }
-    });
+    }
+    let mut command = CommandWrap::from(process);
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
     #[cfg(windows)]
     command.wrap(JobObject);
     command.spawn().map(|inner| ManagedChild { inner })
+}
+
+/// 创建直接执行的命令，并在 Windows 上适配受支持的系统内建命令。
+fn process_command(program: &str, arguments: &[String]) -> Command {
+    #[cfg(windows)]
+    if program.eq_ignore_ascii_case("echo") {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/D", "/S", "/C", "echo"]).args(arguments);
+        return command;
+    }
+
+    let mut command = Command::new(program);
+    command.args(arguments);
+    command
 }

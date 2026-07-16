@@ -6,6 +6,7 @@ use std::{
 use thiserror::Error;
 
 use super::{CompiledProject, ConfigError, ConfigFormat, load_path};
+use crate::platform::canonicalize;
 
 /// 服务配置发现完成后的规范化结果。
 #[derive(Debug)]
@@ -76,7 +77,7 @@ pub enum DiscoveryError {
 /// 当路径不可访问、配置无效、目录没有合法配置或存在多个合法配置时返回错误。
 pub fn discover_path(path: impl AsRef<Path>) -> Result<DiscoveredProject, DiscoveryError> {
     let input = path.as_ref();
-    let canonical = fs::canonicalize(input).map_err(|source| DiscoveryError::Access {
+    let canonical = canonicalize(input).map_err(|source| DiscoveryError::Access {
         path: input.to_path_buf(),
         source,
     })?;
