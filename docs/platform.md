@@ -12,10 +12,10 @@ Release 固定构建六个目标 triple：`x86_64-unknown-linux-gnu`、`aarch64-
 
 ## 2. 平台层边界
 
-`procora-platform` 只提供操作系统原语和能力探测，上层 `procora-process`、`procora-monitor`、`procora-daemon` 负责组合业务语义。建议内部结构：
+`procora::platform` 只提供操作系统原语和能力探测，上层 `procora::process`、`procora::monitor`、`procora::daemon` 负责组合业务语义。建议内部结构：
 
 ```text
-procora-platform/src/
+procora::platform/src/
 ├── lib.rs              # 公共类型与能力集合
 ├── process.rs          # 跨平台进程身份和控制接口
 ├── ipc.rs              # 本地端点抽象
@@ -72,7 +72,7 @@ procora-platform/src/
 - Linux/macOS：Unix domain socket，服务端用内核提供的 peer credentials 校验连接者有效 UID 与 Center 相同。
 - Windows：Named Pipe，使用只允许对象所有者、系统和管理员访问的受保护 DACL。
 
-`procora-protocol` 负责帧和 DTO，平台层负责可靠字节流、端点生命周期和 peer 身份。单条请求限制为 1 MiB、响应限制为 8 MiB，连接具有读写超时和并发上限；daemon 启动时处理陈旧端点，但删除前必须确认没有活跃实例。锁文件、peer 身份、实例 ID 和握手共同构成本地边界。
+`procora::protocol` 负责帧和 DTO，平台层负责可靠字节流、端点生命周期和 peer 身份。单条请求限制为 1 MiB、响应限制为 8 MiB，连接具有读写超时和并发上限；daemon 启动时处理陈旧端点，但删除前必须确认没有活跃实例。锁文件、peer 身份、实例 ID 和握手共同构成本地边界。
 
 首版协议只接受本机连接。TCP 即使绑定 loopback 也不作为本地 IPC 的默认替代，因为认证、端口冲突和防火墙语义更复杂。
 

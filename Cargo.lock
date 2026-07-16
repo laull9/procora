@@ -1809,164 +1809,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "procora-cli"
+name = "procora"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crossterm",
  "directories",
+ "flate2",
+ "fs2",
+ "interprocess",
+ "notify",
+ "petgraph",
  "process-wrap",
- "procora-config",
- "procora-core",
- "procora-daemon",
- "procora-platform",
- "procora-protocol",
- "procora-source",
- "procora-tui",
- "strsim",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "procora-config"
-version = "0.1.0"
-dependencies = [
- "procora-core",
+ "ratatui",
+ "rusqlite",
+ "rustix",
+ "sd-notify",
  "serde",
  "serde-saphyr",
  "serde_json",
  "serde_path_to_error",
- "thiserror 2.0.18",
- "toml",
-]
-
-[[package]]
-name = "procora-core"
-version = "0.1.0"
-dependencies = [
- "petgraph",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "procora-daemon"
-version = "0.1.0"
-dependencies = [
- "fs2",
- "interprocess",
- "procora-config",
- "procora-core",
- "procora-engine",
- "procora-log",
- "procora-monitor",
- "procora-platform",
- "procora-process",
- "procora-protocol",
- "procora-source",
- "procora-storage",
- "rustix",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
- "widestring",
-]
-
-[[package]]
-name = "procora-engine"
-version = "0.1.0"
-dependencies = [
- "procora-config",
- "procora-core",
- "serde",
- "uuid",
-]
-
-[[package]]
-name = "procora-log"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "procora-core",
- "serde",
- "thiserror 2.0.18",
- "uuid",
-]
-
-[[package]]
-name = "procora-monitor"
-version = "0.1.0"
-dependencies = [
- "serde",
- "sysinfo",
-]
-
-[[package]]
-name = "procora-platform"
-version = "0.1.0"
-dependencies = [
- "directories",
- "sd-notify",
- "serde",
- "thiserror 2.0.18",
- "zbus_systemd",
-]
-
-[[package]]
-name = "procora-process"
-version = "0.1.0"
-dependencies = [
- "process-wrap",
- "procora-core",
- "tracing",
-]
-
-[[package]]
-name = "procora-protocol"
-version = "0.1.0"
-dependencies = [
- "procora-core",
- "serde",
- "uuid",
-]
-
-[[package]]
-name = "procora-source"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "notify",
- "procora-config",
- "serde",
- "serde_json",
  "sha2",
+ "strsim",
+ "sysinfo",
  "tar",
  "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
  "ureq",
- "zip",
-]
-
-[[package]]
-name = "procora-storage"
-version = "0.1.0"
-dependencies = [
- "rusqlite",
- "thiserror 2.0.18",
  "uuid",
-]
-
-[[package]]
-name = "procora-tui"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "procora-config",
- "procora-core",
- "procora-protocol",
- "ratatui",
+ "widestring",
+ "zbus_systemd",
+ "zip",
 ]
 
 [[package]]

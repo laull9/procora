@@ -5,7 +5,7 @@
 ## 已完成
 
 - [x] 调研三平台进程、systemd、CLI、TUI、配置、监测、IPC 与文件监听依赖。
-- [x] 建立分层 Cargo workspace 和统一依赖、lint、release 配置。
+- [x] 建立分层模块和统一依赖、lint、release 配置。
 - [x] 建立 core、config、engine、process、monitor、log、platform 模块骨架。
 - [x] 建立 source、storage、protocol、daemon、tui、cli 模块骨架。
 - [x] 支持 YAML、TOML、JSON 到同一 `ProjectSpec` 的基础反序列化。
@@ -14,7 +14,7 @@
 - [x] 接入 sysinfo 单进程资源快照和 notify 本地入口监听。
 - [x] 提供 `validate`、`graph`、`doctor` 诊断命令及基础测试。
 - [x] 建立 Linux-only systemd feature，提供 ready 通知和 unit 列表查询入口。
-- [x] 将根包改为虚拟 workspace，并把 `procora` 二进制和 CLI 测试迁入 cli crate。
+- [x] 收拢为单一 `procora` crate，并将全部集成测试迁入根 `tests/`。
 - [x] 以协议快照驱动 TUI，实现任务主从详情、直接依赖、日志未连接状态和紧凑布局。
 - [x] 实现 TUI 的方向键/jk 选择、Tab/左右切页、数字直达和退出按键。
 - [x] 固定 `Center → Service → Task` 三级模型，并实现合法服务名称校验。
@@ -35,7 +35,7 @@
 
 - [x] 将原始配置 DTO 与领域 `ProjectSpec` 分离，补默认值、路径解析和多错误聚合。
 - [x] 为 YAML/TOML/JSON 补精确字段路径、行列号和无效配置夹具。
-- [x] 为 `procora-process` 增加真实子进程、整树停止、迟到退出和输出排空测试。
+- [x] 为 `procora::process` 增加真实子进程、整树停止、迟到退出和输出排空测试。
 - [x] 实现 Engine 命令/事件类型、单写者事件循环和带 `generation/run_id` 的身份校验。
 - [x] 实现 `started`、`healthy`、`completed_successfully` 依赖条件调度。
 - [x] 实现优雅停止、强制回收以及 `never/on-failure/always` 重启退避。

@@ -26,13 +26,37 @@ jobs:
       - name: 检查格式
         run: cargo fmt --all -- --check
       - name: 运行 Clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - name: 运行测试
-        run: cargo test --locked --workspace --all-features
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  platform-tests:
+    name: ${{ matrix.name }} 测试
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            features: ""
+          - name: Linux x86_64 systemd
+            runner: ubuntu-24.04
+            features: --all-features
+          - name: macOS ARM64
+            runner: macos-15
+            features: --all-features
+          - name: Windows x86_64
+            runner: windows-2025
+            features: --all-features
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 运行平台测试
+        run: cargo test --locked ${{ matrix.features }}
 
   build:
     name: ${{ matrix.target }}
-    needs: verify
+    needs: [verify, platform-tests]
     strategy:
       fail-fast: false
       matrix:
@@ -62,7 +86,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: 构建发布二进制
-        run: cargo build --locked --release --target ${{ matrix.target }} -p procora-cli
+        run: cargo build --locked --release --target ${{ matrix.target }}
       - name: 打包 Unix 二进制
         if: matrix.archive == 'tar.gz'
         shell: bash

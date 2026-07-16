@@ -10,7 +10,7 @@
 
 | 领域 | 选型 | 接入位置 | 决策依据 |
 | --- | --- | --- | --- |
-| 异步运行时 | [`tokio`](https://docs.rs/tokio/latest/tokio/) | process、daemon | 进程、信号、网络与有界 channel 能力完整；各 crate 只打开所需 feature |
+| 异步运行时 | [`tokio`](https://docs.rs/tokio/latest/tokio/) | process、daemon | 进程、信号、网络与有界 channel 能力完整；根 manifest 只打开当前模块所需 feature |
 | CLI | [`clap`](https://docs.rs/clap/latest/clap/) | cli | derive API、子命令、帮助和错误输出成熟 |
 | TUI | [`ratatui`](https://docs.rs/ratatui/latest/ratatui/) + [`crossterm`](https://docs.rs/crossterm/latest/crossterm/) | tui | Ratatui 默认推荐 Crossterm，覆盖 Linux、macOS、Windows 终端 |
 | 领域序列化 | [`serde`](https://docs.rs/serde/latest/serde/) | core、protocol 等 | 配置前端与协议 DTO 共用稳定数据模型接口，但不共用结构体 |
@@ -28,13 +28,13 @@
 | 依赖下载 | [`ureq`](https://docs.rs/ureq/latest/ureq/) | source | 阻塞流式 HTTP(S) 下载；SSH 来源交给当前用户已配置认证的 OpenSSH `scp` |
 | 归档解包 | [`zip`](https://docs.rs/zip/latest/zip/) / [`tar`](https://docs.rs/tar/latest/tar/) / `flate2` | source | 自动识别 ZIP、tar、tar.gz/tgz 和 gzip；只接受安装根目录内的安全条目 |
 | 内容摘要 | [`sha2`](https://docs.rs/sha2/latest/sha2/) | source | 下载后验证可选 SHA-256，并把实际摘要写入版本清单 |
-| 诊断日志 | [`tracing`](https://docs.rs/tracing/latest/tracing/) + [`tracing-subscriber`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) | cli、daemon、process | 结构化内部诊断与异步 span；任务 stdout/stderr 仍由 `procora-log` 独立管理 |
+| 诊断日志 | [`tracing`](https://docs.rs/tracing/latest/tracing/) + [`tracing-subscriber`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/) | cli、daemon、process | 结构化内部诊断与异步 span；任务 stdout/stderr 仍由 `procora::log` 独立管理 |
 | 错误 | [`thiserror`](https://docs.rs/thiserror/latest/thiserror/) / [`anyhow`](https://docs.rs/anyhow/latest/anyhow/) | library / binary | 库暴露稳定错误枚举，入口程序补充上下文并统一呈现 |
 | 运行身份 | [`uuid`](https://docs.rs/uuid/latest/uuid/) | log、protocol、storage | 生成 daemon、run 和协议会话等不透明身份 |
 
 ## 3. systemd 选型
 
-systemd 只存在于 Linux，因此放入 `procora-platform/systemd` feature：
+systemd 只存在于 Linux，因此放入 `procora::platform::systemd` feature：
 
 - [`sd-notify`](https://docs.rs/sd-notify/latest/sd_notify/)：纯 Rust、轻量，用于 daemon 就绪、状态和 watchdog 通知。
 - [`zbus_systemd`](https://docs.rs/zbus_systemd/latest/zbus_systemd/)：基于 zbus 的 systemd D-Bus 类型代理，用于查询和控制 unit。

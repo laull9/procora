@@ -6,7 +6,7 @@
 
 ## 2. 阶段 0：架构与工作区基线
 
-目标：把当前最小工程整理为可持续演进的 workspace。
+目标：把当前最小工程整理为可持续演进的单一 crate。
 
 交付物：
 
@@ -18,8 +18,8 @@
 
 验收条件：
 
-- Linux、macOS、Windows 上 workspace 构建和空测试通过。
-- crate 依赖符合[总体架构](architecture.md)中的单向规则。
+- Linux、macOS、Windows 上单一 crate 构建和空测试通过。
+- 模块依赖符合[总体架构](architecture.md)中的单向规则。
 - 不存在提前占位但没有明确消费者的公共接口。
 
 ## 3. 阶段 1：配置与任务图

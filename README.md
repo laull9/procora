@@ -107,16 +107,16 @@ tasks:
 
 ## 代码边界
 
-- `procora-core`：服务名称、Task 标识、项目规范和依赖图。
-- `procora-config`：格式解析、配置发现、完整校验和图编译。
-- `procora-engine`：单服务内部的 Task 状态与调度规则。
-- `procora-daemon`：中心服务器、多个 `ServiceHost`、名称/路径解析和本地 IPC。
-- `procora-storage`：SQLite 中心注册表、服务当前状态和状态历史。
-- `procora-log`：服务目录内的 Service/Task 文件日志、gzip 轮转和内存尾部缓存。
-- `procora-source`：配置监听，以及项目依赖下载、SSH 获取、解包、缓存和版本验证。
-- `procora-protocol`：CLI/TUI 与中心服务器之间的稳定 DTO。
-- `procora-cli`：命令解析、中心进程拉起和 TUI 连接生命周期。
-- `procora-tui`：服务及其 Task 的终端视图。
+- `procora::core`：服务名称、Task 标识、项目规范和依赖图。
+- `procora::config`：格式解析、配置发现、完整校验和图编译。
+- `procora::engine`：单服务内部的 Task 状态与调度规则。
+- `procora::daemon`：中心服务器、多个 `ServiceHost`、名称/路径解析和本地 IPC。
+- `procora::storage`：SQLite 中心注册表、服务当前状态和状态历史。
+- `procora::log`：服务目录内的 Service/Task 文件日志、gzip 轮转和内存尾部缓存。
+- `procora::source`：配置监听，以及项目依赖下载、SSH 获取、解包、缓存和版本验证。
+- `procora::protocol`：CLI/TUI 与中心服务器之间的稳定 DTO。
+- `procora::cli`：命令解析、中心进程拉起和 TUI 连接生命周期。
+- `procora::tui`：服务及其 Task 的终端视图。
 
 完整设计从[文档索引](docs/README.md)开始；近期实现事项见 [TODO](TODO.md)。
 
@@ -124,8 +124,8 @@ tasks:
 
 ```bash
 cargo fmt --all --check
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo test --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-代码注释和设计文档统一使用中文。关键 trait、结构体、函数和静态变量需要简短注释，单个代码文件不超过 500 行，关键行为测试统一放在各 crate 的 `tests/` 目录。
+代码注释和设计文档统一使用中文。关键 trait、结构体、函数和静态变量需要简短注释，单个代码文件不超过 500 行，关键行为测试统一放在根目录的 `tests/`。

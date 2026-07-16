@@ -10,7 +10,7 @@
 - 测试统一放在 `tests/` 目录，不在实现文件尾部堆积大型测试模块。
 - 每个关键状态转换、错误恢复和平台边界都有自动化测试。
 
-各 crate 的公共行为和二进制测试放在各自 `tests/` 下；虚拟 workspace 的根 `tests/` 只保存跨 crate 共享夹具。需要独立编译的跨 crate 端到端场景应建立专用测试 crate，共享代码放在其 `tests/support/`，不能复制到多个模块。
+所有公共行为、二进制和端到端测试都位于根 `tests/`。共享构造器和夹具位于 `tests/support/` 与 `tests/fixtures/`；测试文件按其覆盖的模块命名，避免把测试逻辑复制到多个位置。
 
 ## 2. 测试层次
 
@@ -86,20 +86,20 @@
   → 发布构建与最小启动检查
 ```
 
-平台特有用例用 capability 条件选择，但必须报告跳过原因。仅因断言不稳定而跳过测试不可接受；应改用事件同步、虚拟时钟或范围断言消除偶发性。
+Release workflow 在 Linux、macOS 和 Windows 原生 runner 上执行全部测试；Linux 分别覆盖默认 feature 与 `systemd` feature，其余发布架构至少完成构建验证。平台特有用例通过 `#[cfg]` 在对应 runner 上运行：macOS 覆盖 LaunchAgent 渲染，Windows 覆盖任务计划程序、Job Object 与 UTF-16 路径。仅因断言不稳定而跳过测试不可接受；应改用事件同步、虚拟时钟或范围断言消除偶发性。
 
 ## 5. 质量门禁
 
-工作区建立后，提交前的目标命令为：
+单一 crate 建立后，提交前的目标命令为：
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo doc --workspace --no-deps
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
+cargo doc --no-deps
 ```
 
-工作区在本地以这些命令作为质量门禁；六目标 Release workflow 负责补充三平台构建验证。涉及不安全代码时，必须在局部模块说明安全不变量并增加专门测试；默认不允许为了绕过平台库限制扩大 `unsafe` 范围。
+本地以这些命令作为质量门禁；六目标 Release workflow 负责补充三平台构建验证。涉及不安全代码时，必须在局部模块说明安全不变量并增加专门测试；默认不允许为了绕过平台库限制扩大 `unsafe` 范围。
 
 ## 6. 性能与稳定性测试
 
