@@ -12,6 +12,8 @@ Procora 不制作 deb、rpm、pkg、dmg、msi 等平台原生安装包。每个 
 
 Unix 目标发布 `procora-<target>.tar.gz`，Windows 目标发布 `procora-<target>.zip`。每个归档旁都包含同名 `.sha256` 文件。流水线也可手动运行，但必须显式输入要创建或更新的 Release 标签。
 
+工作流中的 JavaScript Actions 统一使用 Node 24 版本并固定完整提交 SHA。构建产物首次上传失败时会等待 10 秒后覆盖重试一次；重试仍失败则终止发布，不会带着缺失平台的产物创建 Release。
+
 ## 一键安装
 
 macOS/Linux 安装脚本检测系统和架构，下载对应 tar.gz，验证 SHA-256，并默认安装到 `$HOME/.local/bin/procora`：
