@@ -69,3 +69,16 @@ fn task日志会保留间隙标记和最新内容() {
     assert_eq!(app.log_text(&task_id).as_deref(), Some("first\nsecond\n"));
     assert!(app.has_log_gap(&task_id));
 }
+
+#[test]
+fn 相同状态和空日志不会触发重复重绘() {
+    let snapshot = support::snapshot();
+    let mut app = App::new(snapshot.clone());
+    let task_id = TaskId::from_str("api").unwrap();
+
+    assert!(!app.replace_snapshot(snapshot));
+    assert!(app.set_feedback("连接异常"));
+    assert!(!app.set_feedback("连接异常"));
+    assert!(!app.append_log(task_id, &[], false));
+    assert!(!app.handle_key(KeyCode::Char('z')));
+}

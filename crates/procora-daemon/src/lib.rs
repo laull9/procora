@@ -6,6 +6,7 @@ mod host_logs;
 mod host_view;
 mod ipc;
 mod managed;
+mod project;
 mod status;
 
 pub use center::{Center, CenterError};

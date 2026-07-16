@@ -1,15 +1,21 @@
 //! Procora 终端界面的状态、渲染与输入循环。
 
 mod app;
+mod config_editor;
+mod config_ui;
 mod ui;
 
-use std::{io, time::Duration};
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 
 use crossterm::event::{self, Event, KeyEventKind};
 use procora_core::TaskId;
 use procora_protocol::{ProjectSnapshot, ServiceActionDto};
 
 pub use app::{ActiveTab, App};
+pub use config_editor::ConfigEditor;
 
 /// TUI 从实时会话获得的一批 Task 日志更新。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,6 +26,27 @@ pub struct LogUpdate {
     pub bytes: Vec<u8>,
     /// 是否跨越了已经无法读取的文件区间。
     pub gap: bool,
+}
+
+/// 打开一个带字段引导和保存前校验的配置编辑页面。
+///
+/// # Errors
+///
+/// 当配置文件无法读取或终端无法切换到 TUI 时返回错误。
+pub fn edit_config(path: &std::path::Path) -> io::Result<()> {
+    let mut editor = ConfigEditor::open(path)?;
+    ratatui::run(|terminal| {
+        loop {
+            terminal.draw(|frame| editor.render(frame))?;
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => editor.handle_key(key),
+                _ => {}
+            }
+            if editor.should_quit() {
+                break Ok(());
+            }
+        }
+    })
 }
 
 /// TUI 与一个中心服务器服务会话之间的最小交互接口。
@@ -54,12 +81,18 @@ pub trait LiveSession {
 pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
     let mut app = App::new(snapshot);
     ratatui::run(|terminal| {
+        let mut dirty = true;
         loop {
-            terminal.draw(|frame| app.render(frame))?;
-            if let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                app.handle_key_event(key);
+            if dirty {
+                terminal.draw(|frame| app.render(frame))?;
+                dirty = false;
+            }
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    dirty |= app.handle_key_event(key);
+                }
+                Event::Resize(_, _) => dirty = true,
+                _ => {}
             }
             if app.should_quit() {
                 break Ok(());
@@ -78,42 +111,74 @@ pub fn run_live(
     control_allowed: bool,
     session: &mut dyn LiveSession,
 ) -> io::Result<()> {
+    const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
+    const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(500);
+    const LOG_INTERVAL: Duration = Duration::from_millis(200);
+
     let mut app = App::new(snapshot);
     app.set_control_allowed(control_allowed);
     ratatui::run(|terminal| {
+        let mut dirty = true;
+        let mut next_snapshot = Instant::now();
+        let mut next_log = Instant::now();
         loop {
-            terminal.draw(|frame| app.render(frame))?;
-            if event::poll(Duration::from_millis(200))?
-                && let Event::Key(key) = event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                app.handle_key_event(key);
+            if dirty {
+                terminal.draw(|frame| app.render(frame))?;
+                dirty = false;
             }
-            if let Some(action) = app.take_pending_action() {
-                match session.manage(action) {
-                    Ok(snapshot) => {
-                        app.replace_snapshot(snapshot);
-                        app.set_feedback(action_feedback(action));
+
+            let now = Instant::now();
+            let mut deadline = next_snapshot;
+            if app.active_tab() == ActiveTab::Logs {
+                deadline = deadline.min(next_log);
+            }
+            let timeout = deadline.saturating_duration_since(now).min(INPUT_MAX_WAIT);
+            if event::poll(timeout)? {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        dirty |= app.handle_key_event(key);
                     }
-                    Err(error) => app.set_feedback(format!("操作失败：{error}")),
-                }
-            }
-            match session.poll_snapshot() {
-                Ok(Some(snapshot)) => app.replace_snapshot(snapshot),
-                Ok(None) => {}
-                Err(error) => app.set_feedback(format!("连接异常：{error}")),
-            }
-            if app.active_tab() == ActiveTab::Logs
-                && let Some(task_id) = app.selected_task().map(|task| task.task_id.clone())
-            {
-                match session.poll_log(&task_id) {
-                    Ok(Some(update)) => app.append_log(update.task_id, &update.bytes, update.gap),
-                    Ok(None) => {}
-                    Err(error) => app.set_feedback(format!("日志读取异常：{error}")),
+                    Event::Resize(_, _) => dirty = true,
+                    _ => {}
                 }
             }
             if app.should_quit() {
                 break Ok(());
+            }
+
+            if let Some(action) = app.take_pending_action() {
+                match session.manage(action) {
+                    Ok(snapshot) => {
+                        dirty |= app.replace_snapshot(snapshot);
+                        dirty |= app.set_feedback(action_feedback(action));
+                    }
+                    Err(error) => dirty |= app.set_feedback(format!("操作失败：{error}")),
+                }
+            }
+
+            let now = Instant::now();
+            if now >= next_snapshot {
+                next_snapshot = now + SNAPSHOT_INTERVAL;
+                match session.poll_snapshot() {
+                    Ok(Some(snapshot)) => dirty |= app.replace_snapshot(snapshot),
+                    Ok(None) => {}
+                    Err(error) => dirty |= app.set_feedback(format!("连接异常：{error}")),
+                }
+            }
+
+            if app.active_tab() == ActiveTab::Logs && now >= next_log {
+                next_log = now + LOG_INTERVAL;
+                if let Some(task_id) = app.selected_task().map(|task| task.task_id.clone()) {
+                    match session.poll_log(&task_id) {
+                        Ok(Some(update)) => {
+                            dirty |= app.append_log(update.task_id, &update.bytes, update.gap);
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            dirty |= app.set_feedback(format!("日志读取异常：{error}"));
+                        }
+                    }
+                }
             }
         }
     })

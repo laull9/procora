@@ -178,6 +178,7 @@ fn 中心服务器重启后恢复注册表和期望状态() {
     assert_eq!(services.len(), 1);
     assert_eq!(services[0].name, "demo");
     assert_eq!(services[0].status, ServiceStatusDto::Running);
+    drop(restored);
     fs::remove_dir_all(directory).unwrap();
 }
 

@@ -7,11 +7,17 @@ use super::{DaemonAutostart, LAUNCHD_LABEL};
 impl DaemonAutostart {
     /// 生成 Linux systemd 用户单元内容。
     pub fn systemd_unit(&self) -> String {
+        let home = self
+            .database
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
         format!(
-            "[Unit]\nDescription=Procora Center\n\n[Service]\nType=simple\nExecStart={} __daemon --endpoint {} --database {}\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n",
+            "[Unit]\nDescription=Procora Global Server\nStartLimitIntervalSec=30s\nStartLimitBurst=5\n\n[Service]\nType=simple\nEnvironment=PROCORA_HOME={}\nExecStart={} __daemon --endpoint {} --database {}\nExecStop={} down\nRestart=on-failure\nRestartSec=2s\nTimeoutStopSec=10s\nKillMode=control-group\n\n[Install]\nWantedBy=default.target\n",
+            systemd_argument(home),
             systemd_argument(&self.executable),
             systemd_argument(&self.endpoint),
             systemd_argument(&self.database),
+            systemd_argument(&self.executable),
         )
     }
 

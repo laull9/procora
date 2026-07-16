@@ -16,8 +16,14 @@ fn systemd单元以前台daemon作为主进程() {
     let unit = definition().systemd_unit();
 
     assert!(unit.contains("Type=simple"));
+    assert!(unit.contains("Description=Procora Global Server"));
+    assert!(unit.contains("Environment=PROCORA_HOME=\"/tmp/Procora & Data\""));
     assert!(unit.contains("ExecStart=\"/opt/Procora Bin/procora\" __daemon"));
+    assert!(unit.contains("ExecStop=\"/opt/Procora Bin/procora\" down"));
     assert!(unit.contains("procora-center-%%demo"));
+    assert!(unit.contains("StartLimitBurst=5"));
+    assert!(unit.contains("TimeoutStopSec=10s"));
+    assert!(unit.contains("KillMode=control-group"));
     assert!(unit.contains("WantedBy=default.target"));
 }
 
@@ -38,4 +44,17 @@ fn windows任务动作正确引用含空格参数() {
 
     assert!(action.starts_with("\"/opt/Procora Bin/procora\" __daemon"));
     assert!(action.contains("\"/tmp/Procora & Data/procora.sqlite3\""));
+}
+
+#[test]
+fn windows任务绑定当前交互登录会话() {
+    let arguments = definition().windows_task_create_arguments();
+    let arguments = arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy())
+        .collect::<Vec<_>>();
+
+    assert!(arguments.windows(2).any(|pair| pair == ["/SC", "ONLOGON"]));
+    assert!(arguments.iter().any(|argument| argument == "/IT"));
+    assert!(arguments.windows(2).any(|pair| pair == ["/RL", "LIMITED"]));
 }

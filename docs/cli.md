@@ -1,8 +1,8 @@
-# CLI 与中心服务器语义
+# CLI 与全局 Procora 服务器语义
 
 ## 1. 固定层级
 
-Procora 的用户模型固定为 `Center → Service → Task`：
+Procora 的内部模型固定为 `Center → Service → Task`；界面和命令行将 Center 称为“全局 Procora 服务器”：
 
 - Center 是当前用户级唯一后台协调进程，维护服务注册表和本地 IPC。
 - Service 由规范化目录、被选中的配置文件和配置内 `project` 名称共同确定。
@@ -12,24 +12,28 @@ Procora 的用户模型固定为 `Center → Service → Task`：
 
 ## 2. 默认入口
 
-`procora` 不带参数时以当前目录为服务目标：
+`procora [PATH]` 以当前目录、指定服务目录或显式配置文件为服务目标：
 
-1. 探测当前用户的中心服务器。
-2. 中心服务器存在时，优先按规范化目录连接已注册服务。
-3. 目录尚未注册时，在中心服务器中发现配置并注册服务。
+1. 探测当前用户的全局 Procora 服务器。
+2. 全局服务器存在时，优先按规范化目录连接已注册服务。
+3. 目录尚未注册时，在全局服务器中发现配置并注册服务。
 4. 获取一致性 Task 快照后打开 TUI。
-5. 中心服务器不存在时，在当前进程创建嵌入式 `ServiceHost`；其生命周期与 TUI 相同，TUI 退出后不保留后台宿主。
+5. 全局服务器不存在时，在当前进程创建临时 `ServiceHost`；它同样提供实时状态、服务控制和日志续读，但 TUI 退出后不保留后台宿主。
 
 这个默认入口不会仅因打开 TUI 而留下新的后台进程。需要持久托管时使用 `procora server <path>`。
 
-连接 Center 后，TUI 进入“中心前端模式”，并非只读模式。客户端先协商协议版本、中心实例 ID、当前事件游标和 `control_allowed` 能力；允许控制时可在界面内启动、停止或重启服务。客户端按游标拉取增量事件，游标过期或中心重启时重新获取完整快照。
+连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。
+
+已知命令优先于同名路径；同名路径使用 `./status` 这类显式路径。命令和子命令支持唯一前缀推断，接近但不唯一或拼写错误的输入会显示最相近命令；运行期错误统一提示通过 `procora --help` 查看完整用法。
 
 ## 3. 项目初始化与中心进程
 
-- `procora init --config yaml|json|toml`：在当前目录写入 `procora.yaml`、`procora.json` 或 `procora.toml` 示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。
-- `procora up`：确保当前用户唯一 Center 运行，完成协议握手并输出实例 ID、协议版本、服务数和控制能力。
+- `procora init --config yaml|json|toml`：在当前目录写入不依赖 Cargo 的可运行示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。交互式终端会自动进入配置编辑页，脚本使用 `--no-edit` 跳过。
+- `procora edit [path]`：发现唯一配置并打开 TUI 编辑页；右侧显示字段引导，`Ctrl-S` 完整校验后保存，未保存退出需要二次确认。
+- `procora deps [path]`：同步项目声明依赖；`--check` 仅依据版本清单、目标类型和版本命令离线复核。
+- `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
 - `procora down`：发送正常关闭请求并等待端点退出；保留中心 SQLite 状态和每个 Service 自己的日志。
-- `procora status`：只探测并显示状态，不隐式启动 Center。
+- `procora status`：只探测并显示状态，不隐式启动全局服务器。
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
 
@@ -39,7 +43,7 @@ Procora 的用户模型固定为 `Center → Service → Task`：
 
 ## 4. 服务注册与发现
 
-`procora server <path>` 会确保中心服务器运行，然后把路径交给中心服务器处理。路径是文件时只编译该显式文件；路径是目录时只扫描第一层的 `procora.yaml`、`procora.yml`、`procora.toml`、`procora.json`，并以完整配置编译结果判断合法性。其他 YAML、TOML、JSON 文件不会进入候选集合。
+`procora server <path>` 会确保全局服务器运行，然后把路径交给它处理。路径是文件时只编译该显式文件；路径是目录时只扫描第一层的 `procora.yaml`、`procora.yml`、`procora.toml`、`procora.json`，并以完整配置编译结果判断合法性。其他 YAML、TOML、JSON 文件不会进入候选集合。
 
 发现结果必须满足以下一种情况：
 
@@ -64,8 +68,8 @@ Procora 的用户模型固定为 `Center → Service → Task`：
 - `server start`：先停止旧宿主中的真实 Task，重新加载已注册配置，再按依赖条件启动新的运行代次。
 - `server restart`：按反向依赖顺序停止真实 Task，重新加载配置并替换当前 `ServiceHost`，再按拓扑顺序启动。
 - `server stop`：按反向依赖顺序优雅停止真实 Task；超过各 Task 宽限期后强制回收进程树，同时保留注册信息。
-- `server list`：稳定按服务名称排序，输出状态、Task 数量、目录和配置文件。
-- `server history`：按名称或路径查询 SQLite 中的状态变更历史；不读取日志文件。
+- `server list`：稳定按服务名称排序，输出状态、Task 数量、目录和配置文件；全局服务器未运行时只报告离线状态。
+- `server history`：按名称或路径查询 SQLite 中的状态变更历史；不读取日志文件，也不隐式启动全局服务器。
 
 中心服务器使用当前用户数据目录中的 `procora.sqlite3` 保存注册表、服务当前状态和状态历史。测试和隔离环境可通过 `PROCORA_HOME` 覆盖目录；本地 IPC 端点从该目录派生，以避免不同用户或隔离环境互相连接。
 

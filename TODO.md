@@ -28,6 +28,8 @@
 - [x] 实现 `init --config yaml/json/toml`、`up`、`down`、`status` 和 `server history`。
 - [x] 将目录配置发现限制为 `procora.yaml/yml/toml/json`，忽略其他项目配置文件。
 - [x] 实现 `enable/disable`，以 systemd user unit、LaunchAgent 或 Windows 登录任务托管 Center。
+- [x] 修复 `init` 的 Cargo 假设，增加自动打开的 `edit` TUI 配置引导与保存前校验。
+- [x] 实现 HTTP(S)/SSH 依赖下载、常见归档智能解包、文件/目录/二进制管理和版本验证。
 
 ## P0：完成首个运行闭环
 

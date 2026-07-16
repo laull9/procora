@@ -5,7 +5,11 @@ use anyhow::{Context, bail};
 use crate::TemplateFormat;
 
 /// 在目标目录创建指定格式的示例服务配置。
-pub fn initialize(directory: &Path, format: TemplateFormat, force: bool) -> anyhow::Result<()> {
+pub fn initialize(
+    directory: &Path,
+    format: TemplateFormat,
+    force: bool,
+) -> anyhow::Result<std::path::PathBuf> {
     let project = project_name(directory);
     let (filename, content) = template(format, &project);
     let path = directory.join(filename);
@@ -19,8 +23,7 @@ pub fn initialize(directory: &Path, format: TemplateFormat, force: bool) -> anyh
         .with_context(|| format!("无法创建项目目录 `{}`", directory.display()))?;
     fs::write(&path, content).with_context(|| format!("无法写入模板配置 `{}`", path.display()))?;
     println!("已创建示例服务 `{project}`：{}", path.display());
-    println!("下一步：procora validate . && procora server .");
-    Ok(())
+    Ok(path)
 }
 
 /// 从目录名生成符合服务名称约束的模板项目名。
@@ -56,19 +59,19 @@ fn template(format: TemplateFormat, project: &str) -> (&'static str, String) {
         TemplateFormat::Yaml => (
             "procora.yaml",
             format!(
-                "version: 1\nproject: {project}\n\ntasks:\n  prepare:\n    command: cargo\n    args: [\"check\"]\n\n  app:\n    command: cargo\n    args: [\"run\"]\n    restart: on-failure\n    restart_delay_ms: 500\n    shutdown_timeout_ms: 5000\n    depends_on:\n      prepare:\n        condition: completed_successfully\n"
+                "version: 1\nproject: {project}\n\n# 使用 `procora edit` 打开带字段说明的配置编辑页。\ntasks:\n  example:\n    command: procora\n    args: [\"doctor\"]\n"
             ),
         ),
         TemplateFormat::Json => (
             "procora.json",
             format!(
-                "{{\n  \"version\": 1,\n  \"project\": \"{project}\",\n  \"tasks\": {{\n    \"prepare\": {{\n      \"command\": \"cargo\",\n      \"args\": [\"check\"]\n    }},\n    \"app\": {{\n      \"command\": \"cargo\",\n      \"args\": [\"run\"],\n      \"restart\": \"on-failure\",\n      \"restart_delay_ms\": 500,\n      \"shutdown_timeout_ms\": 5000,\n      \"depends_on\": {{\n        \"prepare\": {{ \"condition\": \"completed_successfully\" }}\n      }}\n    }}\n  }}\n}}\n"
+                "{{\n  \"version\": 1,\n  \"project\": \"{project}\",\n  \"tasks\": {{\n    \"example\": {{\n      \"command\": \"procora\",\n      \"args\": [\"doctor\"]\n    }}\n  }}\n}}\n"
             ),
         ),
         TemplateFormat::Toml => (
             "procora.toml",
             format!(
-                "version = 1\nproject = \"{project}\"\n\n[tasks.prepare]\ncommand = \"cargo\"\nargs = [\"check\"]\n\n[tasks.app]\ncommand = \"cargo\"\nargs = [\"run\"]\nrestart = \"on-failure\"\nrestart_delay_ms = 500\nshutdown_timeout_ms = 5000\n\n[tasks.app.depends_on.prepare]\ncondition = \"completed_successfully\"\n"
+                "version = 1\nproject = \"{project}\"\n\n[tasks.example]\ncommand = \"procora\"\nargs = [\"doctor\"]\n"
             ),
         ),
     }

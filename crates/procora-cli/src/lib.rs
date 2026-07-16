@@ -1,7 +1,10 @@
 //! Procora 命令行参数与中心服务器客户端入口。
 
+mod project;
 mod runtime;
-mod session;
+/// TUI 使用的全局与临时实时会话。
+pub mod session;
+mod suggestion;
 mod template;
 
 use std::path::PathBuf;
@@ -14,9 +17,15 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "procora",
     version,
-    about = "以中心服务器托管本机任务服务的 TUI 管理器"
+    about = "本机任务服务管理器",
+    infer_subcommands = true,
+    subcommand_precedence_over_arg = true,
+    args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
+    /// 要在 TUI 中打开的服务目录或配置文件；省略时使用当前目录。
+    #[arg(value_name = "PATH")]
+    pub target: Option<PathBuf>,
     /// 要执行的子命令；省略时在当前目录打开 TUI。
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -33,12 +42,29 @@ pub enum Command {
         /// 允许覆盖同名配置文件。
         #[arg(long)]
         force: bool,
+        /// 创建后不自动打开配置编辑页，适合脚本环境。
+        #[arg(long)]
+        no_edit: bool,
     },
-    /// 启动当前用户唯一的中心后台服务器。
+    /// 打开配置引导与编辑页面。
+    Edit {
+        /// 配置文件或服务目录；省略时使用当前目录。
+        path: Option<PathBuf>,
+    },
+    /// 同步或离线验证项目管理依赖。
+    Deps {
+        /// 配置文件或服务目录。
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// 只验证本地安装，不下载缺失依赖。
+        #[arg(long)]
+        check: bool,
+    },
+    /// 启动当前用户的全局 Procora 服务器。
     Up,
-    /// 正常关闭当前用户的中心后台服务器。
+    /// 正常关闭当前用户的全局 Procora 服务器。
     Down,
-    /// 显示中心后台服务器的运行状态与身份。
+    /// 显示全局 Procora 服务器的运行状态。
     Status,
     /// 注册并立即启动当前用户的开机自启动托管。
     Enable,
@@ -63,13 +89,13 @@ pub enum Command {
     },
     /// 检查当前平台基础能力。
     Doctor,
-    /// 运行内部中心服务器进程。
+    /// 运行内部全局服务器进程。
     #[command(name = "__daemon", hide = true)]
     Daemon {
         /// 本地 IPC 端点名称。
         #[arg(long)]
         endpoint: String,
-        /// 中心服务器 `SQLite` 状态数据库路径。
+        /// 全局服务器 `SQLite` 状态数据库路径。
         #[arg(long)]
         database: PathBuf,
     },
@@ -86,10 +112,10 @@ pub struct ServerArgs {
     pub command: Option<ServerCommand>,
 }
 
-/// 中心服务器支持的服务管理命令。
+/// 全局 Procora 服务器支持的服务管理命令。
 #[derive(Debug, Subcommand)]
 pub enum ServerCommand {
-    /// 列出本机中心服务器中的全部服务。
+    /// 列出全局 Procora 服务器中的全部服务。
     List,
     /// 列出指定服务的持久化状态历史。
     History {
@@ -140,7 +166,16 @@ pub fn run() -> anyhow::Result<()> {
 /// 当配置加载、中心服务器连接或 TUI 终端操作失败时返回错误。
 pub fn run_with(cli: Cli) -> anyhow::Result<()> {
     initialize_tracing();
-    runtime::dispatch(cli.command)
+    if cli.command.is_none()
+        && let Some(target) = &cli.target
+        && let Some(suggestion) = suggestion::for_missing_path(target, suggestion::TOP_LEVEL)
+    {
+        anyhow::bail!(
+            "未知命令 `{}`；是否要运行 `procora {suggestion}`？",
+            target.display()
+        );
+    }
+    runtime::dispatch(cli.command, cli.target.as_deref())
 }
 
 /// 初始化遵循 `RUST_LOG` 的结构化诊断输出。

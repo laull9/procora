@@ -58,6 +58,7 @@ pub struct App {
     pending_action: Option<ServiceActionDto>,
     feedback: Option<String>,
     control_allowed: bool,
+    plain_mode: bool,
     log_buffers: BTreeMap<TaskId, Vec<u8>>,
     log_gaps: BTreeSet<TaskId>,
 }
@@ -73,6 +74,7 @@ impl App {
             pending_action: None,
             feedback: None,
             control_allowed: false,
+            plain_mode: terminal_plain_mode(),
             log_buffers: BTreeMap::new(),
             log_gaps: BTreeSet::new(),
         }
@@ -84,7 +86,13 @@ impl App {
     }
 
     /// 处理一次已经确认的按键输入。
-    pub fn handle_key(&mut self, key: KeyCode) {
+    pub fn handle_key(&mut self, key: KeyCode) -> bool {
+        let previous = (
+            self.selected,
+            self.active_tab,
+            self.should_quit,
+            self.pending_action,
+        );
         match key {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
@@ -105,23 +113,36 @@ impl App {
             }
             _ => {}
         }
+        previous
+            != (
+                self.selected,
+                self.active_tab,
+                self.should_quit,
+                self.pending_action,
+            )
     }
 
     /// 处理带修饰键的终端按键，并把 Ctrl-C 统一解释为正常退出请求。
-    pub fn handle_key_event(&mut self, key: KeyEvent) {
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> bool {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            let changed = !self.should_quit;
             self.should_quit = true;
+            changed
         } else {
-            self.handle_key(key.code);
+            self.handle_key(key.code)
         }
     }
 
     /// 使用服务器新快照替换内容并保持合理的任务选择位置。
-    pub fn replace_snapshot(&mut self, snapshot: ProjectSnapshot) {
+    pub fn replace_snapshot(&mut self, snapshot: ProjectSnapshot) -> bool {
+        if self.snapshot == snapshot {
+            return false;
+        }
         self.snapshot = snapshot;
         if self.selected >= self.snapshot.tasks.len() {
             self.selected = self.snapshot.tasks.len().saturating_sub(1);
         }
+        true
     }
 
     /// 取出一次等待执行的服务生命周期动作。
@@ -130,8 +151,13 @@ impl App {
     }
 
     /// 更新供页脚展示的最近一次操作结果。
-    pub fn set_feedback(&mut self, feedback: impl Into<String>) {
-        self.feedback = Some(feedback.into());
+    pub fn set_feedback(&mut self, feedback: impl Into<String>) -> bool {
+        let feedback = feedback.into();
+        if self.feedback.as_deref() == Some(feedback.as_str()) {
+            return false;
+        }
+        self.feedback = Some(feedback);
+        true
     }
 
     /// 返回最近一次操作或连接反馈。
@@ -149,9 +175,23 @@ impl App {
         self.control_allowed
     }
 
+    /// 设置是否使用适合低能力终端的纯文本显示。
+    pub const fn set_plain_mode(&mut self, plain: bool) {
+        self.plain_mode = plain;
+    }
+
+    /// 返回当前是否使用纯文本显示。
+    pub const fn plain_mode(&self) -> bool {
+        self.plain_mode
+    }
+
     /// 追加一批 Task 日志，并把内存展示限制在最后 64 KiB。
-    pub fn append_log(&mut self, task_id: TaskId, bytes: &[u8], gap: bool) {
+    pub fn append_log(&mut self, task_id: TaskId, bytes: &[u8], gap: bool) -> bool {
         const DISPLAY_LIMIT: usize = 64 * 1024;
+        let gap_changed = gap && !self.log_gaps.contains(&task_id);
+        if bytes.is_empty() && !gap_changed {
+            return false;
+        }
         let buffer = self.log_buffers.entry(task_id.clone()).or_default();
         buffer.extend_from_slice(bytes);
         if buffer.len() > DISPLAY_LIMIT {
@@ -160,6 +200,7 @@ impl App {
         if gap {
             self.log_gaps.insert(task_id);
         }
+        true
     }
 
     /// 返回指定 Task 当前缓存的有损 UTF-8 日志文本。
@@ -215,4 +256,11 @@ impl App {
                 .unwrap_or(self.snapshot.tasks.len() - 1);
         }
     }
+}
+
+/// 根据环境变量判断是否启用低能力终端兼容模式。
+fn terminal_plain_mode() -> bool {
+    std::env::var_os("PROCORA_TUI_PLAIN").is_some()
+        || std::env::var_os("NO_COLOR").is_some()
+        || std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb"))
 }

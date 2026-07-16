@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 crossterm.workspace = true
+procora-config = { path = "../procora-config" }
 procora-protocol = { path = "../procora-protocol" }
 procora-core = { path = "../procora-core" }
 ratatui.workspace = true

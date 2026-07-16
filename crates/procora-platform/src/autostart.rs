@@ -12,7 +12,6 @@ const SYSTEMD_UNIT_NAME: &str = "procora.service";
 /// macOS `LaunchAgent` 的固定标签。
 const LAUNCHD_LABEL: &str = "dev.procora.center";
 /// Windows 任务计划程序中的固定任务名。
-#[cfg(target_os = "windows")]
 const WINDOWS_TASK_NAME: &str = "Procora Center";
 
 /// 系统实际采用的当前用户级自启动后端。
@@ -67,6 +66,23 @@ impl DaemonAutostart {
     pub fn enable(&self) -> Result<AutostartBackend, AutostartError> {
         platform::enable(self)
     }
+
+    /// 生成 Windows 登录任务的完整创建参数。
+    pub fn windows_task_create_arguments(&self) -> Vec<OsString> {
+        vec![
+            "/Create".into(),
+            "/TN".into(),
+            WINDOWS_TASK_NAME.into(),
+            "/SC".into(),
+            "ONLOGON".into(),
+            "/TR".into(),
+            self.windows_task_action().into(),
+            "/RL".into(),
+            "LIMITED".into(),
+            "/IT".into(),
+            "/F".into(),
+        ]
+    }
 }
 
 /// 移除并停止当前平台的用户级中心服务。
@@ -117,19 +133,36 @@ fn run_command(program: &str, arguments: &[OsString]) -> Result<(), AutostartErr
     if output.status.success() {
         return Ok(());
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let details = command_failure_details(&output);
     Err(AutostartError::CommandFailed {
         program: program.to_owned(),
-        details: if stderr.is_empty() {
-            output.status.to_string()
-        } else {
-            stderr
-        },
+        details,
     })
 }
 
+/// 生成不受 Windows 本地代码页影响的命令失败摘要。
+fn command_failure_details(output: &std::process::Output) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        output.status.to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if !stderr.is_empty() {
+            return stderr;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if stdout.is_empty() {
+            output.status.to_string()
+        } else {
+            stdout
+        }
+    }
+}
+
 /// 执行允许失败的清理命令。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn run_cleanup_command(program: &str, arguments: &[OsString]) {
     let _ = Command::new(program).args(arguments).output();
 }
@@ -141,7 +174,8 @@ mod platform {
     use std::path::PathBuf;
 
     use super::{
-        AutostartBackend, AutostartError, DaemonAutostart, SYSTEMD_UNIT_NAME, run_command,
+        AutostartBackend, AutostartError, DaemonAutostart, SYSTEMD_UNIT_NAME, run_cleanup_command,
+        run_command,
     };
 
     /// 返回 systemd 用户单元的标准路径。
@@ -164,11 +198,16 @@ mod platform {
                 source,
             },
         )?;
-        fs::write(&path, definition.systemd_unit()).map_err(|source| AutostartError::Io {
-            action: "写入 systemd 用户单元",
-            source,
-        })?;
+        write_unit(&path, &definition.systemd_unit())?;
         run_command("systemctl", &["--user".into(), "daemon-reload".into()])?;
+        run_cleanup_command(
+            "systemctl",
+            &[
+                "--user".into(),
+                "reset-failed".into(),
+                SYSTEMD_UNIT_NAME.into(),
+            ],
+        );
         run_command(
             "systemctl",
             &[
@@ -178,28 +217,57 @@ mod platform {
                 SYSTEMD_UNIT_NAME.into(),
             ],
         )?;
+        run_command(
+            "systemctl",
+            &[
+                "--user".into(),
+                "is-active".into(),
+                SYSTEMD_UNIT_NAME.into(),
+            ],
+        )?;
         Ok(AutostartBackend::SystemdUser)
+    }
+
+    /// 通过同目录临时文件原子替换 systemd 用户单元。
+    fn write_unit(path: &std::path::Path, content: &str) -> Result<(), AutostartError> {
+        let temporary = path.with_extension("service.tmp");
+        fs::write(&temporary, content).map_err(|source| AutostartError::Io {
+            action: "写入 systemd 临时单元",
+            source,
+        })?;
+        fs::rename(&temporary, path).map_err(|source| AutostartError::Io {
+            action: "替换 systemd 用户单元",
+            source,
+        })
     }
 
     /// 停止、禁用并删除 systemd 用户服务。
     pub(super) fn disable() -> Result<AutostartBackend, AutostartError> {
         let path = unit_path()?;
+        run_cleanup_command(
+            "systemctl",
+            &[
+                "--user".into(),
+                "disable".into(),
+                "--now".into(),
+                SYSTEMD_UNIT_NAME.into(),
+            ],
+        );
         if path.exists() {
-            run_command(
-                "systemctl",
-                &[
-                    "--user".into(),
-                    "disable".into(),
-                    "--now".into(),
-                    SYSTEMD_UNIT_NAME.into(),
-                ],
-            )?;
             fs::remove_file(path).map_err(|source| AutostartError::Io {
                 action: "删除 systemd 用户单元",
                 source,
             })?;
             run_command("systemctl", &["--user".into(), "daemon-reload".into()])?;
         }
+        run_cleanup_command(
+            "systemctl",
+            &[
+                "--user".into(),
+                "reset-failed".into(),
+                SYSTEMD_UNIT_NAME.into(),
+            ],
+        );
         Ok(AutostartBackend::SystemdUser)
     }
 }
@@ -333,21 +401,7 @@ mod platform {
             "schtasks.exe",
             &["/End".into(), "/TN".into(), WINDOWS_TASK_NAME.into()],
         );
-        run_command(
-            "schtasks.exe",
-            &[
-                "/Create".into(),
-                "/TN".into(),
-                WINDOWS_TASK_NAME.into(),
-                "/SC".into(),
-                "ONLOGON".into(),
-                "/TR".into(),
-                definition.windows_task_action().into(),
-                "/RL".into(),
-                "LIMITED".into(),
-                "/F".into(),
-            ],
-        )?;
+        run_command("schtasks.exe", &definition.windows_task_create_arguments())?;
         run_command(
             "schtasks.exe",
             &["/Run".into(), "/TN".into(), WINDOWS_TASK_NAME.into()],

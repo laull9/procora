@@ -60,7 +60,18 @@ pub(crate) fn restore_service(stored: StoredService) -> ManagedService {
             )),
             desired_running: stored.desired_running,
         },
-        Ok(discovered) => restore_valid(stored, discovered),
+        Ok(mut discovered) => match crate::project::prepare(&mut discovered) {
+            Ok(_) => restore_valid(stored, discovered),
+            Err(error) => ManagedService {
+                name: stored.name,
+                root: stored.root,
+                config_path: stored.config_path,
+                status: ServiceStatusDto::Failed,
+                host: None,
+                message: Some(error.to_string()),
+                desired_running: stored.desired_running,
+            },
+        },
         Err(error) => ManagedService {
             name: stored.name,
             root: stored.root,

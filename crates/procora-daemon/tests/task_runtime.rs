@@ -3,6 +3,7 @@
 use std::{
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -11,14 +12,20 @@ use procora_config::{ConfigFormat, load_str};
 use procora_daemon::ServiceHost;
 use procora_protocol::{SnapshotSourceDto, TaskStatusDto};
 
+/// 同一进程并行测试使用的临时目录序号。
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 /// 创建当前测试独占的服务目录。
 fn temporary_service() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let directory =
-        std::env::temp_dir().join(format!("procora-host-{}-{nonce}", std::process::id()));
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let directory = std::env::temp_dir().join(format!(
+        "procora-host-{}-{nonce}-{sequence}",
+        std::process::id()
+    ));
     fs::create_dir_all(&directory).unwrap();
     directory
 }

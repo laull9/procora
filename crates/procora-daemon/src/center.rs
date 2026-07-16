@@ -10,6 +10,7 @@ use procora_protocol::{
     EventBatchDto, PROTOCOL_VERSION, ServiceActionDto, ServiceSelectorDto, ServiceStatusDto,
     ServiceStatusRecordDto, ServiceViewDto, SnapshotSourceDto,
 };
+use procora_source::SourceError;
 use procora_storage::{SqliteCenterRepository, StorageError};
 use thiserror::Error;
 use uuid::Uuid;
@@ -17,6 +18,7 @@ use uuid::Uuid;
 use crate::{
     ServiceHost,
     managed::ManagedService,
+    project::{EVENT_CAPACITY, MAX_LOG_BATCH_BYTES},
     status::{protocol_status, status_text},
 };
 
@@ -26,6 +28,9 @@ pub enum CenterError {
     /// 服务配置发现或编译失败。
     #[error(transparent)]
     Discovery(#[from] DiscoveryError),
+    /// 项目依赖下载、解包或版本验证失败。
+    #[error(transparent)]
+    Source(#[from] SourceError),
     /// 注册表持久化失败。
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -72,12 +77,6 @@ pub struct Center {
     event_sequence: u64,
     events: VecDeque<CenterEventDto>,
 }
-
-/// 中心内存中保留的最大增量事件数量。
-const EVENT_CAPACITY: usize = 256;
-
-/// 单次 IPC 日志响应允许分配的最大字节数。
-const MAX_LOG_BATCH_BYTES: usize = 1024 * 1024;
 
 impl Center {
     /// 从持久化注册表恢复中心服务器。
@@ -172,7 +171,8 @@ impl Center {
 
     /// 发现、注册并进入运行状态。
     fn open(&mut self, path: &Path) -> Result<ServiceViewDto, CenterError> {
-        let discovered = discover_path(path)?;
+        let mut discovered = discover_path(path)?;
+        crate::project::prepare(&mut discovered)?;
         let name = discovered.compiled.spec.project.clone();
         self.check_registration_conflicts(&name, &discovered.root)?;
         if let Some(host) = self
@@ -255,7 +255,13 @@ impl Center {
                     .expect("名称已经解析")
                     .desired_running = true;
                 match discover_path(&config_path) {
-                    Ok(discovered) => {
+                    Ok(mut discovered) => {
+                        if let Err(error) = crate::project::prepare(&mut discovered) {
+                            let service = self.services.get_mut(&name).expect("名称已经解析");
+                            service.status = ServiceStatusDto::Failed;
+                            service.message = Some(error.to_string());
+                            return Err(error.into());
+                        }
                         let new_name = discovered.compiled.spec.project.clone();
                         if new_name != name {
                             return Err(CenterError::DuplicateRoot {

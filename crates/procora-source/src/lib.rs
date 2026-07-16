@@ -1,9 +1,16 @@
 //! 任务定义来源与本地配置变更监听。
 
+mod archive;
+mod download;
+mod manager;
+mod verify;
+
 use std::path::{Path, PathBuf};
 
 use notify::{EventHandler, RecommendedWatcher, RecursiveMode, Watcher};
 use procora_config::{CompiledProject, ConfigError, load_path};
+
+pub use manager::{DependencyManager, ResolvedDependency, SourceError};
 
 /// 以单个本地配置文件为入口的任务定义源。
 #[derive(Clone, Debug)]

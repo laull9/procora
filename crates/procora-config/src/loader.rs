@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use procora_core::{ProjectSpec, TaskGraph};
 
-use crate::{ConfigDiagnostic, ConfigError, ConfigFormat, raw::RawProject};
+use crate::{ConfigDiagnostic, ConfigError, ConfigFormat, ManagedDependencies, raw::RawProject};
 
 /// 已通过结构、语义和任务图校验的项目配置。
 #[derive(Debug)]
@@ -11,6 +11,8 @@ pub struct CompiledProject {
     pub spec: ProjectSpec,
     /// 完成环检测的任务图。
     pub graph: TaskGraph,
+    /// 已通过字段与来源校验的项目级管理依赖。
+    pub dependencies: ManagedDependencies,
 }
 
 /// 从指定路径读取并编译项目配置。
@@ -48,9 +50,13 @@ fn compile(
     base_directory: Option<&Path>,
 ) -> Result<CompiledProject, ConfigError> {
     let raw = parse_raw(input, format)?;
-    let spec = raw.normalize(base_directory).map_err(validation_error)?;
+    let (spec, dependencies) = raw.normalize(base_directory).map_err(validation_error)?;
     let graph = TaskGraph::compile(&spec)?;
-    Ok(CompiledProject { spec, graph })
+    Ok(CompiledProject {
+        spec,
+        graph,
+        dependencies,
+    })
 }
 
 /// 按输入格式反序列化原始配置并保留字段路径。
