@@ -15,10 +15,31 @@ use std::{
 
 use crate::core::TaskId;
 use crate::protocol::{ProjectSnapshot, ServiceActionDto};
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
+    execute,
+};
 
 pub use app::{ActiveTab, App};
 pub use config_editor::ConfigEditor;
+
+/// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
+struct MouseCaptureGuard;
+
+impl MouseCaptureGuard {
+    /// 启用终端鼠标捕获。
+    fn enable() -> io::Result<Self> {
+        execute!(io::stdout(), EnableMouseCapture)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for MouseCaptureGuard {
+    /// 尽力关闭鼠标捕获，避免退出后终端继续发送鼠标转义序列。
+    fn drop(&mut self) {
+        let _ = execute!(io::stdout(), DisableMouseCapture);
+    }
+}
 
 /// TUI 从实时会话获得的一批 Task 日志更新。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -84,6 +105,7 @@ pub trait LiveSession {
 pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
     let mut app = App::new(snapshot);
     ratatui::run(|terminal| {
+        let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         loop {
             if dirty {
@@ -92,8 +114,10 @@ pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
             }
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    dirty |= app.handle_key_event(key);
+                    let page_lines = log_viewport_lines(terminal.size()?.height);
+                    dirty |= app.handle_key_event_with_log_page(key, page_lines);
                 }
+                Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
                 Event::Resize(_, _) => dirty = true,
                 _ => {}
             }
@@ -121,6 +145,7 @@ pub fn run_live(
     let mut app = App::new(snapshot);
     app.set_control_allowed(control_allowed);
     ratatui::run(|terminal| {
+        let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         let mut next_snapshot = Instant::now();
         let mut next_log = Instant::now();
@@ -139,8 +164,10 @@ pub fn run_live(
             if event::poll(timeout)? {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        dirty |= app.handle_key_event(key);
+                        let page_lines = log_viewport_lines(terminal.size()?.height);
+                        dirty |= app.handle_key_event_with_log_page(key, page_lines);
                     }
+                    Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
                     Event::Resize(_, _) => dirty = true,
                     _ => {}
                 }
@@ -185,6 +212,11 @@ pub fn run_live(
             }
         }
     })
+}
+
+/// 根据完整终端高度计算日志边框内的真实可见行数。
+fn log_viewport_lines(terminal_height: u16) -> usize {
+    terminal_height.saturating_sub(8).max(1) as usize
 }
 
 /// 返回服务生命周期动作完成后的短反馈。

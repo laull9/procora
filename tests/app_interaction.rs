@@ -4,7 +4,7 @@ mod support;
 
 use std::str::FromStr;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use procora::core::TaskId;
 use procora::protocol::ServiceActionDto;
 use procora::tui::{ActiveTab, App};
@@ -71,6 +71,66 @@ fn task日志会保留间隙标记和最新内容() {
 }
 
 #[test]
+fn 日志支持翻页首尾和恢复自动跟随() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    let content = "line\n".repeat(60);
+    app.append_log(task_id.clone(), content.as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+
+    assert_eq!(app.log_scroll_distance(&task_id), 0);
+    app.handle_key(KeyCode::PageUp);
+    assert_eq!(app.log_scroll_distance(&task_id), 20);
+    app.handle_key(KeyCode::PageUp);
+    assert_eq!(app.log_scroll_distance(&task_id), 40);
+    app.handle_key(KeyCode::PageDown);
+    assert_eq!(app.log_scroll_distance(&task_id), 20);
+    app.handle_key(KeyCode::Home);
+    assert_eq!(app.log_scroll_distance(&task_id), 60);
+    app.handle_key(KeyCode::End);
+    assert_eq!(app.log_scroll_distance(&task_id), 0);
+}
+
+#[test]
+fn 上翻后新日志不会抢走当前阅读位置() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    let content = "old\n".repeat(40);
+    app.append_log(task_id.clone(), content.as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+    app.handle_key(KeyCode::PageUp);
+
+    app.append_log(task_id.clone(), b"new-1\nnew-2\n", false);
+
+    assert_eq!(app.log_scroll_distance(&task_id), 22);
+    assert_eq!(app.log_scroll_top(&task_id, 10), 10);
+}
+
+#[test]
+fn 日志页滚轮只滚动日志而不切换task() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id.clone(), "line\n".repeat(40).as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+
+    app.handle_mouse(mouse(MouseEventKind::ScrollUp));
+
+    assert_eq!(app.selected_index(), 0);
+    assert_eq!(app.log_scroll_distance(&task_id), 3);
+    app.handle_mouse(mouse(MouseEventKind::ScrollDown));
+    assert_eq!(app.log_scroll_distance(&task_id), 0);
+}
+
+#[test]
+fn 非日志页滚轮继续切换task() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_mouse(mouse(MouseEventKind::ScrollDown));
+
+    assert_eq!(app.selected_index(), 1);
+}
+
+#[test]
 fn 相同状态和空日志不会触发重复重绘() {
     let snapshot = support::snapshot();
     let mut app = App::new(snapshot.clone());
@@ -81,4 +141,14 @@ fn 相同状态和空日志不会触发重复重绘() {
     assert!(!app.set_feedback("连接异常"));
     assert!(!app.append_log(task_id, &[], false));
     assert!(!app.handle_key(KeyCode::Char('z')));
+}
+
+/// 创建不依赖真实终端坐标的滚轮事件。
+fn mouse(kind: MouseEventKind) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: 0,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    }
 }

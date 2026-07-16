@@ -3,9 +3,11 @@
 mod support;
 
 use crossterm::event::KeyCode;
+use procora::core::TaskId;
 use procora::protocol::SnapshotSourceDto;
 use procora::tui::App;
 use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
+use std::{fmt::Write as _, str::FromStr};
 
 /// 把测试终端缓冲转换成便于断言的文本。
 fn render_text(app: &App, width: u16, height: u16) -> String {
@@ -52,6 +54,47 @@ fn 日志页简洁说明预览模式不提供日志() {
     let text = render_text(&app, 80, 20);
 
     assert!(text.contains("预览模式不提供日志"));
+}
+
+#[test]
+fn 日志页默认显示尾部并可翻到历史内容() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    let mut content = String::new();
+    for line in 1..=40 {
+        writeln!(content, "record-{line:02}").unwrap();
+    }
+    app.append_log(task_id, content.as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+
+    let tail = render_text(&app, 80, 16);
+    assert!(tail.contains("跟随尾部"));
+    assert!(tail.contains("record-40"));
+    assert!(!tail.contains("record-01"));
+
+    app.handle_key(KeyCode::Home);
+    let history = render_text(&app, 80, 16);
+    assert!(history.contains("已上翻40行"));
+    assert!(history.contains("record-01"));
+    assert!(!history.contains("record-40"));
+}
+
+#[test]
+fn mac日志页展示fn键位和宽屏task切换提示() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id, b"log\n", false);
+    app.set_mac_key_hints(true);
+    app.handle_key(KeyCode::Char('3'));
+
+    let wide = render_text(&app, 120, 16);
+    assert!(wide.contains("Fn+↑/↓翻页"));
+    assert!(wide.contains("Fn+←/→首尾"));
+    assert!(wide.contains("滚轮滚动"));
+    assert!(wide.contains("↑/↓切换任务日志"));
+
+    let narrow = render_text(&app, 35, 16);
+    assert!(!narrow.contains("↑/↓切换任务日志"));
 }
 
 #[test]

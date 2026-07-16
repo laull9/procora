@@ -51,30 +51,31 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora up` | 启动全局 Procora 服务器。 |
 | `procora down` | 停止全局 Procora 服务器；保留状态和日志。 |
 | `procora status` | 查看全局服务器状态，不会启动它。 |
-| `procora enable` | 注册并立即启动用户级开机自启动。 |
-| `procora disable` | 停止并移除开机自启动；保留状态和日志。 |
+| `procora enable` | 注册并立即启动用户级开机自启动；Windows 会显式请求 UAC 提权。 |
+| `procora disable` | 停止并移除开机自启动；Windows 会显式请求 UAC 提权，并保留状态和日志。 |
 | `procora completions <shell>` | 输出 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本。 |
 | `procora [path/config]` | 在当前目录、指定服务目录或配置文件打开 TUI。全局服务器未运行时使用与 TUI 同生命周期的临时服务。 |
-| `procora server <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
-| `procora server list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
-| `procora server history <name/path>` | 从 SQLite 查询指定服务的状态变更历史。 |
+| `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
+| `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
+| `procora history <name/path>` | 从 SQLite 查询指定服务的状态变更历史。 |
 | `procora show <name/path>` | 按名称、服务目录或配置文件打开已注册服务的 TUI。 |
-| `procora server start <name/path>` | 重新加载已注册配置并启动服务宿主。 |
-| `procora server restart <name/path>` | 重新加载配置并重启服务宿主。 |
-| `procora server preview <name/path>` | 编译当前文件并输出 SHA-256 修订及新增、删除、重启、原地更新和无影响 Task。 |
-| `procora server apply <name/path> <revision>` | 仅在磁盘内容仍匹配已确认修订时应用候选。 |
-| `procora server stop <name/path>` | 停止服务宿主并保留注册信息。 |
+| `procora start <name/path>` | 重新加载已注册配置并启动服务宿主。 |
+| `procora restart <name/path>` | 重新加载配置并重启服务宿主。 |
+| `procora preview <name/path>` | 编译当前文件并输出 SHA-256 修订及新增、删除、重启、原地更新和无影响 Task。 |
+| `procora apply <name/path> <revision>` | 仅在磁盘内容仍匹配已确认修订时应用候选。 |
+| `procora stop <name/path>` | 停止服务宿主并保留注册信息。 |
+| `procora remove <name/path>` | 停止并删除服务注册，不删除服务目录。 |
 | `procora source git preview <repo>` | 获取 Git 引用、固定完整 commit 并校验候选；`--local` 显式允许本地仓库，不注册或启动服务。 |
 | `procora source git confirm <repo> <revision>` | 重新获取同一来源并拒绝已变化的候选；仍不自动应用。 |
 
 `validate`、`graph` 和 `doctor` 作为低频诊断命令继续保留。
 `config <path>` 会输出应用默认值和路径规范化后的确定性 JSON，不启动任何 Task，适合审查实际运行输入。
 
-命令支持唯一前缀推断，例如 `procora stat` 和 `procora server li`。拼写错误会显示最相近命令，所有运行期错误都会附带 `procora --help` 入口。若路径名与命令相同，使用 `./<path>` 明确按路径打开。
+命令支持唯一前缀推断，例如 `procora stat` 和 `procora li`。拼写错误会显示最相近命令，所有运行期错误都会附带 `procora --help` 入口。若路径名与命令相同，使用 `./<path>` 明确按路径打开。旧版 `procora server ...` 层级暂时保持兼容，但不再显示在帮助中。
 
-全局和临时 TUI 都支持 `s` 启动、`x` 停止、`r` 重启，并实时刷新状态和日志。连接中断时保留当前视图并显示错误。
+全局和临时 TUI 都支持 `s` 启动、`x` 停止、`r` 重启，并实时刷新状态和日志。日志页默认跟随尾部，使用 `PageUp/PageDown` 按页浏览、`Home/End` 跳到首尾，macOS 对应 `Fn+↑/↓` 和 `Fn+←/→`；鼠标滚轮滚动日志，`↑/↓` 或 `j/k` 切换 Task。上翻后新日志不会打断阅读，连接中断时保留当前视图并显示错误。
 
-后台 Center 会对配置文件事件做 250ms 防抖并生成候选，但不会因为一次保存就自动重启服务。无效候选、项目改名、依赖准备失败和过期修订都会保留旧有效宿主；先运行 `server preview` 审查影响，再把输出的完整修订交给 `server apply`。退出码、重启退避和停止宽限等纯运行策略可原地提交；进程身份或依赖图变化只重启受影响的下游闭包，新增和删除按拓扑顺序对账，启动失败时恢复旧有效定义且不重启无影响 Task。
+后台 Center 会对配置文件事件做 250ms 防抖并生成候选，但不会因为一次保存就自动重启服务。无效候选、项目改名、依赖准备失败和过期修订都会保留旧有效宿主；先运行 `procora preview` 审查影响，再把输出的完整修订交给 `procora apply`。退出码、重启退避和停止宽限等纯运行策略可原地提交；进程身份或依赖图变化只重启受影响的下游闭包，新增和删除按拓扑顺序对账，启动失败时恢复旧有效定义且不重启无影响 Task。
 
 TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 500ms 检查一次，日志页每 200ms 续读一次。`PROCORA_TUI_PLAIN=1`、`NO_COLOR` 或 `TERM=dumb` 会启用 ASCII 无彩色模式。
 

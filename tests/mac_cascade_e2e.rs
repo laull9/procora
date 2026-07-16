@@ -344,7 +344,7 @@ fn assert_dependency_downloads(requests: &[String], service: &Path) {
 
 /// 核对首轮任务级联顺序、重试日志和中心可观察状态。
 fn assert_first_cascade(binary: &str, home: &Path, service: &Path) -> PathBuf {
-    let opened = procora(binary, home, &["server", service.to_str().unwrap()]);
+    let opened = procora(binary, home, &["add", service.to_str().unwrap()]);
     assert_success(&opened);
     let events = service.join("output/events.log");
     wait_for_final(&events, 1);
@@ -373,10 +373,10 @@ fn assert_first_cascade(binary: &str, home: &Path, service: &Path) -> PathBuf {
                 .is_file()
         );
     }
-    let listed = procora(binary, home, &["server", "list"]);
+    let listed = procora(binary, home, &["list"]);
     assert_success(&listed);
     assert!(String::from_utf8_lossy(&listed.stdout).contains("mac-cascade-e2e\t运行中"));
-    let history = procora(binary, home, &["server", "history", "mac-cascade-e2e"]);
+    let history = procora(binary, home, &["history", "mac-cascade-e2e"]);
     assert_success(&history);
     assert!(String::from_utf8_lossy(&history.stdout).contains("运行中"));
     let status = procora(binary, home, &["status"]);
@@ -432,10 +432,10 @@ fn mac本机完成下载修复任务级联中心恢复和删除() {
     assert_success(&up);
     wait_for_final(&events, 2);
 
-    let removed = procora(binary, home, &["server", "remove", "mac-cascade-e2e"]);
+    let removed = procora(binary, home, &["remove", "mac-cascade-e2e"]);
     assert_success(&removed);
     assert!(config.is_file());
-    let after_remove = procora(binary, home, &["server", "list"]);
+    let after_remove = procora(binary, home, &["list"]);
     assert_success(&after_remove);
     assert!(!String::from_utf8_lossy(&after_remove.stdout).contains("mac-cascade-e2e"));
     assert_success(&procora(binary, home, &["down"]));

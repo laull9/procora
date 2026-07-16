@@ -1,6 +1,9 @@
 //! Procora 命令行参数与中心服务器客户端入口。
 
+mod autostart_command;
 mod center_runtime;
+#[cfg(target_os = "windows")]
+mod elevation;
 mod project;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
@@ -53,6 +56,18 @@ pub enum Command {
         /// 配置文件或服务目录；省略时使用当前目录。
         path: Option<PathBuf>,
     },
+    /// 注册并启动一个持久托管服务。
+    Add {
+        /// 服务目录或显式配置文件。
+        path: PathBuf,
+    },
+    /// 列出全部持久托管服务。
+    List,
+    /// 打开指定名称或路径服务的 TUI。
+    Show {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
     /// 同步或离线验证项目管理依赖。
     Deps {
         /// 配置文件或服务目录。
@@ -77,15 +92,58 @@ pub enum Command {
     Enable,
     /// 停止并移除当前用户的开机自启动托管。
     Disable,
-    /// 注册、列出或管理本机托管服务。
-    Server(ServerArgs),
-    /// 获取并确认不会自动应用的外部任务定义候选。
-    Source(SourceArgs),
-    /// 打开指定名称或路径服务的 TUI。
-    Show {
+    /// 在 UAC 提权子进程中完成 Windows 自启动操作。
+    #[cfg(target_os = "windows")]
+    #[command(name = "__elevated-autostart", hide = true)]
+    ElevatedAutostart {
+        /// 要执行的自启动操作。
+        action: String,
+        /// 向未提权父进程写回结果的临时文件。
+        #[arg(long)]
+        result: PathBuf,
+    },
+    /// 列出指定服务的持久化状态历史。
+    History {
         /// 配置中的服务名称、服务目录或显式配置文件。
         target: String,
     },
+    /// 启动指定名称或路径的服务。
+    Start {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 重新加载配置并重启指定服务。
+    Restart {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 预览候选修订及 Task 影响，不产生运行副作用。
+    Preview {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 应用经过 preview 确认且内容没有变化的候选修订。
+    Apply {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+        /// `preview` 输出的完整 SHA-256 修订值。
+        revision: String,
+    },
+    /// 停止指定名称或路径的服务。
+    Stop {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 停止并删除服务注册，不删除服务目录。
+    Remove {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 兼容旧版的嵌套服务管理入口。
+    #[command(hide = true)]
+    Server(ServerArgs),
+    /// 获取并确认不会自动应用的外部任务定义候选。
+    Source(SourceArgs),
     /// 解析配置并检查任务依赖图。
     Validate {
         /// 声明式配置、显式 `procora.py` 或可自动发现配置的目录。
@@ -270,6 +328,13 @@ pub fn run_with(cli: Cli) -> anyhow::Result<()> {
         );
     }
     runtime::dispatch(cli.command, cli.target.as_deref())
+}
+
+/// 向 Windows 集成测试暴露稳定的 UAC 脚本契约。
+#[cfg(target_os = "windows")]
+#[doc(hidden)]
+pub const fn elevation_script_for_test() -> &'static str {
+    elevation::elevation_script()
 }
 
 /// 初始化遵循 `RUST_LOG` 的结构化诊断输出。

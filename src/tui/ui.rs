@@ -240,9 +240,17 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
         } else {
             ""
         };
+        let viewport_lines = usize::from(area.height.saturating_sub(2));
+        let scroll_top = app.log_scroll_top(&selected.task_id, viewport_lines);
+        let distance = app.log_scroll_distance(&selected.task_id);
+        let position = if distance == 0 {
+            "跟随尾部".to_owned()
+        } else {
+            format!("已上翻 {distance} 行")
+        };
         let logs = Paragraph::new(format!("{prefix}{content}"))
-            .block(bordered(app).title(format!("日志 · {task}")))
-            .wrap(Wrap { trim: false });
+            .block(bordered(app).title(log_title(area.width, &task, Some(&position), app)))
+            .scroll((u16::try_from(scroll_top).unwrap_or(u16::MAX), 0));
         frame.render_widget(logs, area);
         return;
     }
@@ -253,7 +261,7 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
     };
     let logs = Paragraph::new(message)
         .alignment(Alignment::Center)
-        .block(bordered(app).title(format!("日志 · {task}")))
+        .block(bordered(app).title(log_title(area.width, &task, None, app)))
         .wrap(Wrap { trim: false });
     frame.render_widget(logs, area);
 }
@@ -264,7 +272,9 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
         app.snapshot().source,
         SnapshotSourceDto::EmbeddedLive | SnapshotSourceDto::CenterLive
     );
-    let controls = if area.width < 64 && live && app.control_allowed() {
+    let controls = if app.active_tab() == ActiveTab::Logs {
+        log_controls(app, area.width)
+    } else if area.width < 64 && live && app.control_allowed() {
         "j/k 选择  Tab 切页  s/x/r 控制  q 退出"
     } else if area.width < 64 {
         "j/k 选择  Tab 切页  1/2/3 直达  q 退出"
@@ -280,6 +290,42 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let footer =
         Paragraph::new(lines).style(Style::default().fg(display_color(app, Color::DarkGray)));
     frame.render_widget(footer, area);
+}
+
+/// 构造日志标题，并仅在宽度足够时附加 Task 切换提示。
+fn log_title(area_width: u16, task: &str, position: Option<&str>, app: &App) -> String {
+    let base = position.map_or_else(
+        || format!("日志 · {task}"),
+        |position| format!("日志 · {task} · {position}"),
+    );
+    let switch_hint = if app.plain_mode() {
+        "j/k 切换任务日志"
+    } else {
+        "↑/↓ 切换任务日志"
+    };
+    let expanded = position.map_or_else(
+        || format!("日志 · {task} · {switch_hint}"),
+        |position| format!("日志 · {task} · {switch_hint} · {position}"),
+    );
+    if Line::from(expanded.as_str()).width().saturating_add(4) <= usize::from(area_width) {
+        expanded
+    } else {
+        base
+    }
+}
+
+/// 返回日志页的平台键位与鼠标操作提示。
+fn log_controls(app: &App, width: u16) -> &'static str {
+    match (app.mac_key_hints(), width < 76) {
+        (true, true) => "Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  q 退出",
+        (true, false) => {
+            "↑↓/jk 换任务  Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  Tab/←→ 切页  q/Esc 退出"
+        }
+        (false, true) => "PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  q 退出",
+        (false, false) => {
+            "↑↓/jk 换任务  PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  Tab/←→ 切页  q/Esc 退出"
+        }
+    }
 }
 
 /// 在终端无法容纳稳定布局时显示恢复提示。

@@ -21,11 +21,11 @@
 - [x] 实现目录唯一合法配置发现、多个合法配置冲突和显式文件消歧。
 - [x] 实现中心服务注册表、名称/路径定位、状态持久化与失败隔离恢复。
 - [x] 使用本地 IPC 实现中心服务器单次请求闭环，并由 CLI 按需拉起后台中心进程。
-- [x] 实现默认 `procora`、`server <path>`、`server list`、`show` 和服务启停/重启命令结构。
+- [x] 实现默认 `procora`、`add`、`list`、`show` 和顶层服务启停/重启命令结构。
 - [x] 实现无中心服务器时与 TUI 同生命周期的嵌入式 `ServiceHost`。
 - [x] 使用 SQLite 保存服务注册、当前状态、错误信息、任务数和状态变更历史。
 - [x] 将 Service/Task 日志保存在各自 Service 目录，实现按大小轮转、gzip 压缩和归档数量保留。
-- [x] 实现 `init --config yaml/json/toml`、`up`、`down`、`status` 和 `server history`。
+- [x] 实现 `init --config yaml/json/toml`、`up`、`down`、`status` 和 `history`。
 - [x] 将目录配置发现限制为 `procora.yaml/yml/toml/json`，忽略其他项目配置文件。
 - [x] 实现 `enable/disable`，以 systemd user unit、LaunchAgent 或 Windows 登录任务托管 Center。
 - [x] 修复 `init` 的 Cargo 假设，增加自动打开的 `edit` TUI 配置引导与保存前校验。
@@ -42,7 +42,7 @@
 - [x] 把进程 stdout/stderr 接入有界日志管线和 TailBuffer。
 - [x] 把日志游标和进程树资源指标映射到 TUI 协议页面。
 - [x] 中心恢复时为 Task 创建新 `generation/run_id`，拒绝仅凭 PID 接管。
-- [x] 把 `server start/restart/stop` 接入真实 Task 启停和 Ctrl-C 反向停止。
+- [x] 把顶层 `start/restart/stop` 接入真实 Task 启停和 Ctrl-C 反向停止。
 - [x] 为后台 Center 增加独立运行 tick，无观察客户端时仍推进退出、依赖与重启退避。
 - [x] 修复顶层进程提前退出后的剩余进程树回收，并为输出管道排空设置有界等待。
 - [x] 使用有界队列解耦 Task 管道读取与磁盘日志写入，慢磁盘不再直接反压任务。

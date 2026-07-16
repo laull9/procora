@@ -1,0 +1,92 @@
+//! 顶层服务命令、兼容入口和拼写建议测试。
+
+use std::{path::PathBuf, process::Command as ProcessCommand};
+
+use clap::Parser;
+use procora::cli::{Cli, Command, ServerCommand};
+
+#[test]
+fn 无子命令解析为当前目录tui入口() {
+    let cli = Cli::try_parse_from(["procora"]).unwrap();
+    assert!(cli.command.is_none());
+    assert!(cli.target.is_none());
+}
+
+#[test]
+fn 顶层路径解析为指定服务tui入口() {
+    let cli = Cli::try_parse_from(["procora", "./services/demo"]).unwrap();
+
+    assert!(cli.command.is_none());
+    assert_eq!(cli.target, Some(PathBuf::from("./services/demo")));
+}
+
+#[test]
+fn 唯一命令前缀可以直接推断() {
+    let status = Cli::try_parse_from(["procora", "stat"]).unwrap();
+    let list = Cli::try_parse_from(["procora", "li"]).unwrap();
+
+    assert!(matches!(status.command, Some(Command::Status)));
+    assert!(matches!(list.command, Some(Command::List)));
+}
+
+#[test]
+fn 拼写错误会显示相近顶层命令和帮助入口() {
+    for (typo, expected) in [("stats", "status"), ("lsst", "list")] {
+        let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
+            .arg(typo)
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(&format!("procora {expected}")));
+        assert!(stderr.contains("procora --help"));
+    }
+}
+
+#[test]
+fn 服务管理命令全部位于顶层() {
+    let add = Cli::try_parse_from(["procora", "add", "./demo"]).unwrap();
+    let list = Cli::try_parse_from(["procora", "list"]).unwrap();
+    let history = Cli::try_parse_from(["procora", "history", "demo"]).unwrap();
+    let start = Cli::try_parse_from(["procora", "start", "demo"]).unwrap();
+    let restart = Cli::try_parse_from(["procora", "restart", "demo"]).unwrap();
+    let preview = Cli::try_parse_from(["procora", "preview", "demo"]).unwrap();
+    let apply = Cli::try_parse_from(["procora", "apply", "demo", "abc123"]).unwrap();
+    let stop = Cli::try_parse_from(["procora", "stop", "demo"]).unwrap();
+    let remove = Cli::try_parse_from(["procora", "remove", "demo"]).unwrap();
+
+    assert!(matches!(add.command, Some(Command::Add { .. })));
+    assert!(matches!(list.command, Some(Command::List)));
+    assert!(matches!(history.command, Some(Command::History { .. })));
+    assert!(matches!(start.command, Some(Command::Start { .. })));
+    assert!(matches!(restart.command, Some(Command::Restart { .. })));
+    assert!(matches!(preview.command, Some(Command::Preview { .. })));
+    assert!(matches!(apply.command, Some(Command::Apply { .. })));
+    assert!(matches!(stop.command, Some(Command::Stop { .. })));
+    assert!(matches!(remove.command, Some(Command::Remove { .. })));
+}
+
+#[test]
+fn 旧server层级保持隐藏兼容() {
+    let cli = Cli::try_parse_from(["procora", "server", "remove", "demo"]).unwrap();
+    let Some(Command::Server(arguments)) = cli.command else {
+        panic!("应解析为 server 命令");
+    };
+    assert!(matches!(
+        arguments.command,
+        Some(ServerCommand::Remove { target }) if target == "demo"
+    ));
+}
+
+#[test]
+fn 旧server拼写错误仍会得到兼容建议() {
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
+        .args(["server", "lsst"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("procora server list"));
+}

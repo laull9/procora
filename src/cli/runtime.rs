@@ -1,10 +1,7 @@
-use std::{env, path::Path, thread, time::Duration};
+use std::{env, path::Path};
 
 use crate::daemon::{CenterClient, ServiceHost, run_center_server};
-use crate::platform::{
-    autostart::{self, DaemonAutostart},
-    capabilities,
-};
+use crate::platform::capabilities;
 use crate::protocol::{
     CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ServiceActionDto,
     ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
@@ -15,8 +12,8 @@ use clap::CommandFactory;
 use clap_complete::generate;
 
 use super::{
-    Cli, Command, ServerArgs, ServerCommand, center_runtime, project, session, source, suggestion,
-    template,
+    Cli, Command, ServerArgs, ServerCommand, autostart_command, center_runtime, project, session,
+    source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -38,8 +35,21 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         Some(Command::Up) => up(),
         Some(Command::Down) => down(),
         Some(Command::Status) => status(),
-        Some(Command::Enable) => enable_autostart(),
-        Some(Command::Disable) => disable_autostart(),
+        Some(Command::Enable) => autostart_command::enable(),
+        Some(Command::Disable) => autostart_command::disable(),
+        #[cfg(target_os = "windows")]
+        Some(Command::ElevatedAutostart { action, result }) => {
+            autostart_command::complete_elevated(&action, &result)
+        }
+        Some(Command::Add { path }) => add(path),
+        Some(Command::List) => list(),
+        Some(Command::History { target }) => history(&target),
+        Some(Command::Start { target }) => manage(ServiceActionDto::Start, &target),
+        Some(Command::Restart { target }) => manage(ServiceActionDto::Restart, &target),
+        Some(Command::Preview { target }) => preview_config(&target),
+        Some(Command::Apply { target, revision }) => apply_config(&target, &revision),
+        Some(Command::Stop { target }) => manage(ServiceActionDto::Stop, &target),
+        Some(Command::Remove { target }) => remove(&target),
         Some(Command::Server(arguments)) => server(arguments),
         Some(Command::Source(arguments)) => source::run(arguments.command),
         Some(Command::Show { target }) => show(&target),
@@ -122,21 +132,9 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
                     path.display()
                 );
             }
-            project::warn_python_execution(&path);
-            let client = center_runtime::ensure_center()?;
-            let service = expect_service(client.request(&CenterRequest::Open { path })?)?;
-            print_service(&service);
-            Ok(())
+            add(path)
         }
-        (None, Some(ServerCommand::List)) => {
-            let Some(client) = center_runtime::running_center()? else {
-                print_global_offline();
-                return Ok(());
-            };
-            let services = expect_services(client.request(&CenterRequest::List)?)?;
-            print_services(&services);
-            Ok(())
-        }
+        (None, Some(ServerCommand::List)) => list(),
         (None, Some(ServerCommand::History { target })) => history(&target),
         (None, Some(ServerCommand::Start { target })) => manage(ServiceActionDto::Start, &target),
         (None, Some(ServerCommand::Restart { target })) => {
@@ -153,6 +151,26 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
         }
         (Some(_), Some(_)) => bail!("服务路径和管理子命令不能同时使用"),
     }
+}
+
+/// 注册并启动一个持久托管服务。
+fn add(path: std::path::PathBuf) -> anyhow::Result<()> {
+    project::warn_python_execution(&path);
+    let client = center_runtime::ensure_center()?;
+    let service = expect_service(client.request(&CenterRequest::Open { path })?)?;
+    print_service(&service);
+    Ok(())
+}
+
+/// 列出全部持久托管服务且不隐式启动全局服务器。
+fn list() -> anyhow::Result<()> {
+    let Some(client) = center_runtime::running_center()? else {
+        print_global_offline();
+        return Ok(());
+    };
+    let services = expect_services(client.request(&CenterRequest::List)?)?;
+    print_services(&services);
+    Ok(())
 }
 
 /// 启动全局 Procora 服务器并输出状态。
@@ -173,44 +191,6 @@ fn down() -> anyhow::Result<()> {
     }
     center_runtime::shutdown_center(&client)?;
     println!("全局 Procora：已停止");
-    Ok(())
-}
-
-/// 把中心 daemon 注册到当前平台的用户级自启动托管器。
-fn enable_autostart() -> anyhow::Result<()> {
-    let paths = center_runtime::center_paths()?;
-    let client = CenterClient::new(paths.endpoint.clone());
-    if client.ping() {
-        center_runtime::shutdown_center(&client).context("无法把现有全局服务器移交给系统托管")?;
-    }
-    center_runtime::install_current_executable(&paths.executable)
-        .context("安装中心 Procora 可执行文件失败")?;
-    let definition = DaemonAutostart::new(&paths.executable, &paths.endpoint, &paths.database);
-    let backend = definition.enable().context("注册开机自启动失败")?;
-
-    for _ in 0..250 {
-        if client.ping() {
-            client.hello("procora-cli")?;
-            println!("已启用开机自启动：{}", backend.label());
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    bail!(
-        "{} 已注册，但全局 Procora 服务器未在 5 秒内就绪",
-        backend.label()
-    )
-}
-
-/// 正常停止中心 daemon 并移除用户级自启动注册。
-fn disable_autostart() -> anyhow::Result<()> {
-    let paths = center_runtime::center_paths()?;
-    let client = CenterClient::new(paths.endpoint);
-    if client.ping() {
-        center_runtime::shutdown_center(&client).context("停止自启动全局服务器失败")?;
-    }
-    let backend = autostart::disable().context("移除开机自启动失败")?;
-    println!("已禁用开机自启动：{}", backend.label());
     Ok(())
 }
 

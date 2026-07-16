@@ -35,7 +35,7 @@ fn preview与apply通过完整修订形成显式确认闭环() {
     let binary = env!("CARGO_BIN_EXE_procora");
     let opened = run_background_cli(
         Command::new(binary)
-            .arg("server")
+            .arg("add")
             .arg(&service)
             .env("PROCORA_HOME", &home),
         &home,
@@ -49,7 +49,7 @@ fn preview与apply通过完整修订形成显式确认闭环() {
     )
     .unwrap();
     let preview = Command::new(binary)
-        .args(["server", "preview", "reload-cli"])
+        .args(["preview", "reload-cli"])
         .env("PROCORA_HOME", &home)
         .output()
         .unwrap();
@@ -63,7 +63,7 @@ fn preview与apply通过完整修订形成显式确认闭环() {
     assert_eq!(revision.len(), 64);
 
     let applied = Command::new(binary)
-        .args(["server", "apply", "reload-cli", revision])
+        .args(["apply", "reload-cli", revision])
         .env("PROCORA_HOME", &home)
         .output()
         .unwrap();
