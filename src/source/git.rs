@@ -18,10 +18,10 @@ use crate::{
 
 use super::{LocalFileSource, SourceError, archive};
 use support::{
-    StagingDirectory, checkout_fingerprint, directory_usage, enforce_directory_bytes, git_revision,
-    git_task, null_device, open_lock, path_text, repository_id, require_cache_directory,
-    require_unicode, valid_commit, validate_config_path, validate_limits, validate_reference,
-    validate_remote,
+    StagingDirectory, checkout_fingerprint, directory_usage, enforce_directory_bytes,
+    git_local_repository_text, git_revision, git_task, null_device, open_lock, path_text,
+    repository_id, require_cache_directory, require_unicode, valid_commit, validate_config_path,
+    validate_limits, validate_reference, validate_remote,
 };
 
 /// Git 命令与仓库资源的默认硬边界。
@@ -469,7 +469,7 @@ impl GitSource {
     fn repository_text(&self) -> String {
         match &self.repository {
             Repository::Remote(value) => value.clone(),
-            Repository::Local(path) => path.to_string_lossy().into_owned(),
+            Repository::Local(path) => git_local_repository_text(path),
         }
     }
 }

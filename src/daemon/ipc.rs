@@ -207,7 +207,9 @@ fn handle_connection(
     center: &Mutex<Center>,
     stopping: &AtomicBool,
 ) -> Result<(), IpcError> {
+    #[cfg(unix)]
     authorize_peer(&connection)?;
+    #[cfg(not(windows))]
     configure_server_io(&connection)?;
     let mut connection = connection;
     let request = read_limited_line(&mut connection, MAX_REQUEST_FRAME_BYTES)?;
@@ -238,15 +240,11 @@ fn configure_client_io(connection: &Stream) -> Result<(), IpcError> {
     Ok(())
 }
 
-/// 服务端在 Unix 使用原生超时，Windows 保持阻塞以避免空读取竞态。
+/// 服务端在 Unix 使用本地套接字原生读写超时。
+#[cfg(not(windows))]
 fn configure_server_io(connection: &Stream) -> Result<(), IpcError> {
-    #[cfg(not(windows))]
-    {
-        connection.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
-        connection.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
-    }
-    #[cfg(windows)]
-    let _ = connection;
+    connection.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
+    connection.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
     Ok(())
 }
 
@@ -420,12 +418,6 @@ fn authorize_peer(connection: &Stream) -> Result<(), IpcError> {
     } else {
         Err(IpcError::Unauthorized)
     }
-}
-
-/// Windows 访问控制由命名管道的当前用户安全描述符负责。
-#[cfg(windows)]
-const fn authorize_peer(_connection: &Stream) -> Result<(), IpcError> {
-    Ok(())
 }
 
 /// 为 Windows 命名管道设置仅所有者、系统和管理员可访问的 DACL。

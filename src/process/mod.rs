@@ -63,7 +63,15 @@ impl ManagedChild {
     ///
     /// 当平台进程状态查询失败时返回错误。
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        self.inner.try_wait()
+        #[cfg(windows)]
+        {
+            // Job Object 包装层会消费完成端口事件，可能让后续整树清理永久等待。
+            self.inner.inner_mut().try_wait()
+        }
+        #[cfg(not(windows))]
+        {
+            self.inner.try_wait()
+        }
     }
 
     /// 等待受管进程退出。
@@ -86,7 +94,7 @@ impl ManagedChild {
     pub fn stop(&mut self, timeout: Duration) -> io::Result<StopOutcome> {
         #[cfg(windows)]
         let _ = timeout;
-        if let Some(status) = self.inner.try_wait()? {
+        if let Some(status) = self.try_wait()? {
             return Ok(StopOutcome {
                 status,
                 forced: self.kill_remaining_tree()?,
@@ -97,7 +105,7 @@ impl ManagedChild {
             const SIGTERM: i32 = 15;
             if let Err(error) = self.inner.signal(SIGTERM) {
                 if process_tree_may_have_exited(&error)
-                    && let Some(status) = self.inner.try_wait()?
+                    && let Some(status) = self.try_wait()?
                 {
                     return Ok(StopOutcome {
                         status,
@@ -108,7 +116,7 @@ impl ManagedChild {
             }
             let deadline = Instant::now() + timeout;
             loop {
-                if let Some(status) = self.inner.try_wait()? {
+                if let Some(status) = self.try_wait()? {
                     return Ok(StopOutcome {
                         status,
                         forced: self.kill_remaining_tree()?,

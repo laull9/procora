@@ -32,8 +32,12 @@ pub(crate) fn fetch(source: &str, destination: &Path) -> Result<(), SourceError>
 
 /// 返回尽可能保留归档扩展名的安全下载文件名。
 pub(crate) fn source_filename(source: &str, fallback: &str) -> String {
-    let clean = source.split(['?', '#']).next().unwrap_or(source);
-    let candidate = clean.rsplit(['/', ':']).next().unwrap_or_default();
+    let clean = if source.contains("://") {
+        source.split(['?', '#']).next().unwrap_or(source)
+    } else {
+        source
+    };
+    let candidate = clean.rsplit(['/', '\\', ':']).next().unwrap_or_default();
     let safe = candidate
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || ".-_".contains(*character))

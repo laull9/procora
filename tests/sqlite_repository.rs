@@ -109,7 +109,7 @@ fn unix非utf8路径可以无损恢复() {
     fs::remove_dir_all(directory).unwrap();
 }
 
-/// Windows UTF-16 路径的非 ASCII 字符必须经过 SQLite 往返后保持不变。
+/// Windows UTF-16 路径的非 ASCII 字符必须经过 `SQLite` 往返后保持不变。
 #[cfg(windows)]
 #[test]
 fn windows宽字符路径可以无损恢复() {

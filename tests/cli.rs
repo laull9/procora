@@ -462,7 +462,12 @@ fn deps命令可以同步并离线验证本地文件() {
         .current_dir(&directory)
         .output()
         .unwrap();
-    assert!(sync.status.success());
+    assert!(
+        sync.status.success(),
+        "依赖同步失败\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&sync.stdout),
+        String::from_utf8_lossy(&sync.stderr)
+    );
     assert!(String::from_utf8_lossy(&sync.stdout).contains("已安装 asset v1"));
     let check = ProcessCommand::new(binary)
         .args(["deps", "--check"])

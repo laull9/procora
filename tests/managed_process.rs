@@ -3,14 +3,12 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Read,
+    thread,
     time::{Duration, Instant},
 };
 
 #[cfg(unix)]
-use std::{
-    process::{Command, Stdio},
-    thread,
-};
+use std::process::{Command, Stdio};
 
 use procora::core::{RestartPolicy, TaskSpec};
 use procora::process::spawn_task;
@@ -95,4 +93,24 @@ fn windows可以强制回收受管进程树() {
 
     assert!(outcome.forced);
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+/// Windows 轮询顶层退出后仍必须在期限内完成 Job Object 清理。
+#[cfg(windows)]
+#[test]
+fn windows轮询退出后清理不会等待已消费的job事件() {
+    let mut child = spawn_task(&task("cmd.exe", &["/C", "exit", "0"])).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while child.try_wait().unwrap().is_none() {
+        assert!(Instant::now() < deadline, "顶层进程没有在期限内退出");
+        thread::sleep(Duration::from_millis(1));
+    }
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    thread::spawn(move || sender.send(child.cleanup_after_exit()).unwrap());
+    let result = receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("Job Object 清理不应永久等待完成端口事件");
+
+    result.unwrap();
 }

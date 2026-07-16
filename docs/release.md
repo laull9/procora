@@ -2,7 +2,7 @@
 
 ## 发布目标
 
-Procora 不制作 deb、rpm、pkg、dmg、msi 等平台原生安装包。每个 `v*` 标签触发 `.github/workflows/release.yml`，为下列六个目标构建 `procora`：
+Procora 不制作 deb、rpm、pkg、dmg、msi 等平台原生安装包。每个 `v*` 标签只触发 `.github/workflows/release.yml`；格式、Clippy、测试、文档、MSRV、依赖安全和平台测试全部通过后，流水线才会为下列六个目标构建并发布 `procora`：
 
 | 系统 | x86_64 | ARM64 |
 | --- | --- | --- |
@@ -38,6 +38,6 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 1. 确认版本号、`Cargo.lock` 和文档已经提交。
 2. 本地运行格式、Clippy、测试和文档检查。
-3. 创建并推送 `v*` 标签，或在 Actions 中手动运行 release workflow 并输入标签。
+3. 创建并单独推送 `v*` 标签（普通 `git push` 不会推送标签），或在 Actions 中手动运行 release workflow 并输入已存在的标签。
 4. 确认六组构建产物和校验文件全部进入同一个 GitHub Release。
 5. 至少在每个平台各验证一次脚本安装、`procora --help`、`procora up/status/down`。

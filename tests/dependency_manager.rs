@@ -142,6 +142,39 @@ tasks: {}
 }
 
 #[test]
+fn 本地普通文件按跨平台文件名安装() {
+    let root = temporary_directory("local-file");
+    fs::write(root.join("asset.bin"), "managed asset").unwrap();
+    let config = root.join("procora.yaml");
+    fs::write(
+        &config,
+        r"version: 1
+project: demo
+dependencies:
+  asset:
+    source: asset.bin
+    version: v1
+    unpack: never
+    kind: file
+    path: asset.bin
+tasks: {}
+",
+    )
+    .unwrap();
+    let compiled = load_path(config).unwrap();
+
+    let resolved = DependencyManager::new(&root)
+        .sync(&compiled.dependencies)
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(&resolved[0].path).unwrap(),
+        "managed asset"
+    );
+    assert_eq!(resolved[0].path.file_name().unwrap(), "asset.bin");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn http来源会下载并安装管理文件() {
     let root = temporary_directory("http");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

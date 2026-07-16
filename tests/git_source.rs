@@ -100,6 +100,8 @@ fn 本地仓库固定提交并通过共享include管线生成候选() {
 
     assert_eq!(candidate.commit, commit);
     assert_eq!(candidate.revision.len(), 64);
+    #[cfg(windows)]
+    assert!(!candidate.repository.starts_with(r"\\?\"));
     assert!(!candidate.checkout_root.join(".git").exists());
     assert!(!root.join("must-not-run").exists());
     let compiled = candidate.compiled.unwrap();
