@@ -1,5 +1,6 @@
 //! Procora 命令行参数与中心服务器客户端入口。
 
+mod center_runtime;
 mod project;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
@@ -59,6 +60,11 @@ pub enum Command {
         /// 只验证本地安装，不下载缺失依赖。
         #[arg(long)]
         check: bool,
+    },
+    /// 清空服务目录中的 `.procora` 运行时文件、日志和管理依赖缓存。
+    Clean {
+        /// 服务目录或配置文件；省略时使用当前目录。
+        path: Option<PathBuf>,
     },
     /// 启动当前用户的全局 Procora 服务器。
     Up,
@@ -134,6 +140,11 @@ pub enum ServerCommand {
     },
     /// 停止指定名称或路径的服务。
     Stop {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 停止并从中心服务器注册表删除指定服务，不删除服务目录。
+    Remove {
         /// 配置中的服务名称、服务目录或显式配置文件。
         target: String,
     },

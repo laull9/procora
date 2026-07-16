@@ -58,6 +58,21 @@ fn 只有状态或消息变化才追加历史() {
 }
 
 #[test]
+fn 删除服务会级联删除状态历史() {
+    let directory = temporary_directory();
+    let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
+    repository
+        .save_service(&service(StoredServiceStatus::Running))
+        .unwrap();
+
+    assert!(repository.remove_service("demo").unwrap());
+    assert!(!repository.remove_service("demo").unwrap());
+    assert!(repository.load_services().unwrap().is_empty());
+    assert!(repository.status_history("demo").unwrap().is_empty());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn 拒绝高于当前程序的数据库模式版本() {
     let directory = temporary_directory();
     let path = directory.join("procora.sqlite3");

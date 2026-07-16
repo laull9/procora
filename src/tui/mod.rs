@@ -2,6 +2,9 @@
 
 mod app;
 mod config_editor;
+mod config_form;
+mod config_form_dialog;
+mod config_form_state;
 mod config_ui;
 mod ui;
 

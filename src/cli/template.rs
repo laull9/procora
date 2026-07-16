@@ -59,7 +59,7 @@ fn template(format: TemplateFormat, project: &str) -> (&'static str, String) {
         TemplateFormat::Yaml => (
             "procora.yaml",
             format!(
-                "version: 1\nproject: {project}\n\n# 使用 `procora edit` 打开带字段说明的配置编辑页。\ntasks:\n  example:\n    command: procora\n    args: [\"doctor\"]\n"
+                "version: 1\nproject: {project}\n\n# 使用 `procora edit` 打开表单式配置编辑页。\ntasks:\n  example:\n    command: procora\n    args: [\"doctor\"]\n"
             ),
         ),
         TemplateFormat::Json => (

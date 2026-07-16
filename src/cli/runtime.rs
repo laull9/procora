@@ -1,12 +1,4 @@
-use std::{
-    collections::hash_map::DefaultHasher,
-    env, fs,
-    hash::{Hash, Hasher},
-    path::{Path, PathBuf},
-    process::{Command as ProcessCommand, Stdio},
-    thread,
-    time::Duration,
-};
+use std::{env, path::Path, thread, time::Duration};
 
 use crate::daemon::{CenterClient, ServiceHost, run_center_server};
 use crate::platform::{
@@ -18,16 +10,10 @@ use crate::protocol::{
     ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto, SnapshotSourceDto,
 };
 use anyhow::{Context, bail};
-use directories::ProjectDirs;
 
-use super::{Command, ServerArgs, ServerCommand, project, session, suggestion, template};
-
-/// 当前用户全局 Procora 服务器使用的 IPC 与持久化位置。
-#[derive(Clone, Debug)]
-struct CenterPaths {
-    endpoint: String,
-    database: PathBuf,
-}
+use super::{
+    Command, ServerArgs, ServerCommand, center_runtime, project, session, suggestion, template,
+};
 
 /// 分发默认路径行为和全部顶层命令。
 pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Result<()> {
@@ -44,6 +30,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         }
         Some(Command::Edit { path }) => project::edit(path.as_deref()),
         Some(Command::Deps { path, check }) => project::dependencies(&path, check),
+        Some(Command::Clean { path }) => project::clean(path.as_deref()),
         Some(Command::Up) => up(),
         Some(Command::Down) => down(),
         Some(Command::Status) => status(),
@@ -69,9 +56,7 @@ fn open_tui(target: Option<&Path>) -> anyhow::Result<()> {
         || env::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
-    let paths = center_paths()?;
-    let client = CenterClient::new(paths.endpoint);
-    if client.ping() {
+    if let Some(client) = center_runtime::running_center()? {
         let hello = client.hello("procora-tui")?;
         let mut selector = ServiceSelectorDto::Path(target.clone());
         let snapshot = match client.request(&CenterRequest::Snapshot {
@@ -120,13 +105,13 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
                     path.display()
                 );
             }
-            let client = ensure_center()?;
+            let client = center_runtime::ensure_center()?;
             let service = expect_service(client.request(&CenterRequest::Open { path })?)?;
             print_service(&service);
             Ok(())
         }
         (None, Some(ServerCommand::List)) => {
-            let Some(client) = running_center()? else {
+            let Some(client) = center_runtime::running_center()? else {
                 print_global_offline();
                 return Ok(());
             };
@@ -140,8 +125,9 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
             manage(ServiceActionDto::Restart, &target)
         }
         (None, Some(ServerCommand::Stop { target })) => manage(ServiceActionDto::Stop, &target),
+        (None, Some(ServerCommand::Remove { target })) => remove(&target),
         (None, None) => {
-            bail!("`procora server` 需要 PATH 或 list/history/start/restart/stop 子命令")
+            bail!("`procora server` 需要 PATH 或 list/history/start/restart/stop/remove 子命令")
         }
         (Some(_), Some(_)) => bail!("服务路径和管理子命令不能同时使用"),
     }
@@ -149,7 +135,7 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
 
 /// 启动全局 Procora 服务器并输出状态。
 fn up() -> anyhow::Result<()> {
-    let client = ensure_center()?;
+    let client = center_runtime::ensure_center()?;
     let hello = client.hello("procora-cli")?;
     print_center_status(&hello);
     Ok(())
@@ -157,45 +143,27 @@ fn up() -> anyhow::Result<()> {
 
 /// 请求全局 Procora 服务器正常退出并等待端点关闭。
 fn down() -> anyhow::Result<()> {
-    let paths = center_paths()?;
+    let paths = center_runtime::center_paths()?;
     let client = CenterClient::new(paths.endpoint);
     if !client.ping() {
         print_global_offline();
         return Ok(());
     }
-    shutdown_center(&client)?;
+    center_runtime::shutdown_center(&client)?;
     println!("全局 Procora：已停止");
     Ok(())
 }
 
-/// 请求全局 Procora 服务器正常退出并等待端点关闭。
-fn shutdown_center(client: &CenterClient) -> anyhow::Result<()> {
-    match client.request(&CenterRequest::Shutdown)? {
-        CenterResponse::ShuttingDown => {}
-        CenterResponse::Error { message } => bail!(message),
-        response => return unexpected_response(&response),
-    }
-    for _ in 0..100 {
-        if !client.ping() {
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    bail!("全局 Procora 服务器未在 2 秒内退出")
-}
-
 /// 把中心 daemon 注册到当前平台的用户级自启动托管器。
 fn enable_autostart() -> anyhow::Result<()> {
-    let paths = center_paths()?;
+    let paths = center_runtime::center_paths()?;
     let client = CenterClient::new(paths.endpoint.clone());
     if client.ping() {
-        shutdown_center(&client).context("无法把现有全局服务器移交给系统托管")?;
+        center_runtime::shutdown_center(&client).context("无法把现有全局服务器移交给系统托管")?;
     }
-    if let Some(parent) = paths.database.parent() {
-        fs::create_dir_all(parent).context("无法创建 Procora 状态目录")?;
-    }
-    let executable = env::current_exe().context("无法定位 procora 可执行文件")?;
-    let definition = DaemonAutostart::new(executable, &paths.endpoint, &paths.database);
+    center_runtime::install_current_executable(&paths.executable)
+        .context("安装中心 Procora 可执行文件失败")?;
+    let definition = DaemonAutostart::new(&paths.executable, &paths.endpoint, &paths.database);
     let backend = definition.enable().context("注册开机自启动失败")?;
 
     for _ in 0..250 {
@@ -214,10 +182,10 @@ fn enable_autostart() -> anyhow::Result<()> {
 
 /// 正常停止中心 daemon 并移除用户级自启动注册。
 fn disable_autostart() -> anyhow::Result<()> {
-    let paths = center_paths()?;
+    let paths = center_runtime::center_paths()?;
     let client = CenterClient::new(paths.endpoint);
     if client.ping() {
-        shutdown_center(&client).context("停止自启动全局服务器失败")?;
+        center_runtime::shutdown_center(&client).context("停止自启动全局服务器失败")?;
     }
     let backend = autostart::disable().context("移除开机自启动失败")?;
     println!("已禁用开机自启动：{}", backend.label());
@@ -226,7 +194,7 @@ fn disable_autostart() -> anyhow::Result<()> {
 
 /// 查询全局 Procora 服务器状态但不隐式启动后台进程。
 fn status() -> anyhow::Result<()> {
-    let Some(client) = running_center()? else {
+    let Some(client) = center_runtime::running_center()? else {
         print_global_offline();
         return Ok(());
     };
@@ -236,7 +204,7 @@ fn status() -> anyhow::Result<()> {
 
 /// 查询并输出指定服务的状态历史。
 fn history(target: &str) -> anyhow::Result<()> {
-    let client = running_center()?.context("全局 Procora 服务器未运行")?;
+    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
     let records = expect_history(client.request(&CenterRequest::History {
         selector: selector(target),
     })?)?;
@@ -254,7 +222,7 @@ fn history(target: &str) -> anyhow::Result<()> {
 
 /// 打开指定服务的 TUI。
 fn show(target: &str) -> anyhow::Result<()> {
-    let client = ensure_center()?;
+    let client = center_runtime::ensure_center()?;
     let hello = client.hello("procora-tui")?;
     let selector = selector(target);
     let snapshot = expect_snapshot(client.request(&CenterRequest::Snapshot {
@@ -272,12 +240,26 @@ fn show(target: &str) -> anyhow::Result<()> {
 
 /// 对指定服务执行生命周期动作并输出结果。
 fn manage(action: ServiceActionDto, target: &str) -> anyhow::Result<()> {
-    let client = ensure_center()?;
+    let client = center_runtime::ensure_center()?;
     let service = expect_service(client.request(&CenterRequest::Manage {
         action,
         selector: selector(target),
     })?)?;
     print_service(&service);
+    Ok(())
+}
+
+/// 停止并从中心注册表删除指定服务，但保留用户服务目录。
+fn remove(target: &str) -> anyhow::Result<()> {
+    let client = center_runtime::ensure_center()?;
+    let service = match client.request(&CenterRequest::Remove {
+        selector: selector(target),
+    })? {
+        CenterResponse::Removed(service) => service,
+        CenterResponse::Error { message } => bail!(message),
+        response => return unexpected_response(&response),
+    };
+    println!("已删除服务：{}\t{}", service.name, service.root.display());
     Ok(())
 }
 
@@ -287,89 +269,6 @@ fn doctor() {
     println!("平台: {:?}", capabilities.platform);
     println!("受管进程树: {}", capabilities.managed_process_tree);
     println!("systemd: {}", capabilities.systemd);
-}
-
-/// 只连接正在运行的全局 Procora 服务器。
-fn running_center() -> anyhow::Result<Option<CenterClient>> {
-    let paths = center_paths()?;
-    let client = CenterClient::new(paths.endpoint);
-    Ok(client.ping().then_some(client))
-}
-
-/// 连接全局 Procora 服务器，不存在时启动独立后台进程并等待就绪。
-fn ensure_center() -> anyhow::Result<CenterClient> {
-    let paths = center_paths()?;
-    let client = CenterClient::new(paths.endpoint.clone());
-    if client.ping() {
-        client.hello("procora-cli")?;
-        return Ok(client);
-    }
-    if let Some(parent) = paths.database.parent() {
-        fs::create_dir_all(parent).context("无法创建 Procora 状态目录")?;
-    }
-    let executable = env::current_exe().context("无法定位 procora 可执行文件")?;
-    spawn_center_process(&executable, &paths).context("无法启动全局 Procora 服务器")?;
-
-    for _ in 0..100 {
-        if client.ping() {
-            client.hello("procora-cli")?;
-            return Ok(client);
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    bail!("全局 Procora 服务器未在 2 秒内就绪")
-}
-
-/// 启动与当前终端会话分离的中心服务器子进程。
-fn spawn_center_process(executable: &Path, paths: &CenterPaths) -> std::io::Result<()> {
-    let mut command = ProcessCommand::new(executable);
-    command
-        .arg("__daemon")
-        .arg("--endpoint")
-        .arg(&paths.endpoint)
-        .arg("--database")
-        .arg(&paths.database)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    #[cfg(unix)]
-    {
-        use process_wrap::std::{CommandWrap, ProcessSession};
-
-        let mut command = CommandWrap::from(command);
-        command.wrap(ProcessSession);
-        command.spawn()?;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        command
-            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-            .spawn()?;
-    }
-    Ok(())
-}
-
-/// 计算当前用户独立的端点名称和注册表路径。
-fn center_paths() -> anyhow::Result<CenterPaths> {
-    let home = if let Some(path) = env::var_os("PROCORA_HOME") {
-        PathBuf::from(path)
-    } else {
-        ProjectDirs::from("dev", "procora", "Procora")
-            .context("当前平台没有可用的用户数据目录")?
-            .data_local_dir()
-            .to_path_buf()
-    };
-    let mut hasher = DefaultHasher::new();
-    home.hash(&mut hasher);
-    Ok(CenterPaths {
-        endpoint: format!("procora-center-{:016x}", hasher.finish()),
-        database: home.join("procora.sqlite3"),
-    })
 }
 
 /// 根据用户输入区分稳定名称和文件系统路径。
@@ -461,6 +360,7 @@ fn print_services(services: &[ServiceViewDto]) {
 /// 输出全局 Procora 服务器状态与当前注册数量。
 fn print_center_status(hello: &CenterHello) {
     println!("全局 Procora：运行中");
+    println!("版本：{}", hello.procora_version);
     println!("服务：{}", hello.service_count);
 }
 

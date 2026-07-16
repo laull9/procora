@@ -4,10 +4,23 @@ use crate::config::{ConfigFormat, load_str};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 
-use super::config_ui;
+use super::{
+    config_form::FormConfig,
+    config_form_state::{FormEvent, FormState},
+    config_ui,
+};
+
+/// 配置编辑器的当前输入模式。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditorMode {
+    /// 以表单、选择器和弹窗编辑常用配置。
+    Form,
+    /// 直接编辑完整原始配置文本。
+    Text,
+}
 
 /// 配置编辑页的文本、光标、校验和退出状态。
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ConfigEditor {
     path: PathBuf,
     format: ConfigFormat,
@@ -19,6 +32,8 @@ pub struct ConfigEditor {
     should_quit: bool,
     confirm_discard: bool,
     message: String,
+    mode: EditorMode,
+    form: Option<FormState>,
 }
 
 impl ConfigEditor {
@@ -36,7 +51,9 @@ impl ConfigEditor {
             )
         })?;
         let input = fs::read_to_string(&path)?;
-        Ok(Self::from_text(path, format, &input))
+        let mut editor = Self::from_text(path, format, &input);
+        editor.activate_form();
+        Ok(editor)
     }
 
     /// 从内存文本创建可测试的编辑页状态。
@@ -62,6 +79,8 @@ impl ConfigEditor {
             should_quit: false,
             confirm_discard: false,
             message: "编辑后按 Ctrl-S 校验并保存".to_owned(),
+            mode: EditorMode::Text,
+            form: None,
         }
     }
 
@@ -80,8 +99,37 @@ impl ConfigEditor {
             }
             return;
         }
+        if key.code == KeyCode::F(1) {
+            self.activate_form();
+            return;
+        }
+        if key.code == KeyCode::F(2) {
+            self.mode = EditorMode::Text;
+            self.form = None;
+            "已进入高级文本模式；F1 返回表单".clone_into(&mut self.message);
+            return;
+        }
         if key.code != KeyCode::Esc {
             self.confirm_discard = false;
+        }
+        if self.mode == EditorMode::Form {
+            if key.code == KeyCode::Esc
+                && self
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.dialog().is_none() && !form.has_pending_delete())
+            {
+                self.request_quit();
+                return;
+            }
+            if let Some(form) = &mut self.form {
+                match form.handle_key(key) {
+                    FormEvent::None => {}
+                    FormEvent::Changed => self.synchronize_form(),
+                    FormEvent::Message(message) => self.message = message,
+                }
+            }
+            return;
         }
         match key.code {
             KeyCode::Esc => self.request_quit(),
@@ -155,8 +203,25 @@ impl ConfigEditor {
         self.lines.iter().map(|line| line.iter().collect())
     }
 
+    /// 返回当前是否处于结构化表单模式。
+    pub(crate) fn is_form_mode(&self) -> bool {
+        self.mode == EditorMode::Form
+    }
+
+    /// 返回当前表单状态，文本模式或无效配置时为空。
+    pub(crate) fn form(&self) -> Option<&FormState> {
+        self.form.as_ref()
+    }
+
     /// 校验并原子语义保存当前缓冲区。
     fn save(&mut self) {
+        if self.mode == EditorMode::Form {
+            self.synchronize_form();
+            if self.message.starts_with("配置无效") || self.message.starts_with("表单输出失败")
+            {
+                return;
+            }
+        }
         let text = self.text();
         match load_str(&text, self.format) {
             Ok(compiled) => match fs::write(&self.path, text) {
@@ -270,5 +335,52 @@ impl ConfigEditor {
         self.dirty = true;
         self.confirm_discard = false;
         "未保存；Ctrl-S 校验并保存".clone_into(&mut self.message);
+    }
+
+    /// 将当前有效文本配置转换为结构化表单，失败时继续保留高级文本模式。
+    fn activate_form(&mut self) {
+        match load_str(&self.text(), self.format) {
+            Ok(compiled) => {
+                self.form = Some(FormState::new(FormConfig::from_compiled(compiled)));
+                self.mode = EditorMode::Form;
+                "表单模式：Enter 编辑，n 新建，d 删除，F2 高级文本".clone_into(&mut self.message);
+            }
+            Err(error) => {
+                self.mode = EditorMode::Text;
+                self.form = None;
+                self.message = format!("配置无效，无法打开表单：{error}；请在文本模式修复");
+            }
+        }
+    }
+
+    /// 把表单模型转为目标格式文本，并阻止不符合完整配置规则的改动落盘。
+    fn synchronize_form(&mut self) {
+        let Some(form) = &self.form else {
+            return;
+        };
+        let text = match form.config().text(self.format) {
+            Ok(text) => text,
+            Err(error) => {
+                self.message = format!("表单输出失败：{error}");
+                return;
+            }
+        };
+        match load_str(&text, self.format) {
+            Ok(_) => {
+                self.lines = text
+                    .trim_end_matches('\n')
+                    .split('\n')
+                    .map(|line| line.chars().collect())
+                    .collect();
+                if self.lines.is_empty() {
+                    self.lines.push(Vec::new());
+                }
+                self.row = 0;
+                self.column = 0;
+                self.scroll = 0;
+                self.changed();
+            }
+            Err(error) => self.message = format!("配置无效：{error}"),
+        }
     }
 }

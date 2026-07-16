@@ -193,6 +193,18 @@ impl SqliteCenterRepository {
         Ok(())
     }
 
+    /// 删除服务当前状态，并通过外键级联删除全部状态历史。
+    ///
+    /// # Errors
+    ///
+    /// 当数据库无法打开或删除事务失败时返回错误。
+    pub fn remove_service(&self, service_name: &str) -> Result<bool, StorageError> {
+        let connection = self.open()?;
+        let affected =
+            connection.execute("DELETE FROM services WHERE name = ?1", [service_name])?;
+        Ok(affected != 0)
+    }
+
     /// 查询指定服务按写入顺序排列的状态历史。
     ///
     /// # Errors

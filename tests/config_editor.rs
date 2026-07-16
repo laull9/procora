@@ -75,3 +75,97 @@ fn 宽屏编辑页会显示配置内容与依赖引导() {
     assert!(text.contains("管理依赖"));
     assert!(text.contains("${dependency.<id>}"));
 }
+
+#[test]
+fn 打开有效配置后可通过表单新建并保存_task() {
+    let path = temporary_config();
+    fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    editor.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+    for character in "worker".chars() {
+        editor.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+    }
+    editor.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    for character in "echo".chars() {
+        editor.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+    }
+    for _ in 0..7 {
+        editor.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    }
+    editor.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_str(&saved, ConfigFormat::Yaml).unwrap();
+    assert!(compiled.spec.tasks.contains_key(&"worker".parse().unwrap()));
+    assert!(editor.message().starts_with("已保存"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn 表单界面会显示任务和管理依赖弹窗入口() {
+    let path = temporary_config();
+    fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    editor.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+    let backend = TestBackend::new(110, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+
+    assert!(text.contains("结构化表单"));
+    assert!(text.contains("新建Task"));
+    assert!(text.contains("重启策略"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn 表单保存支持_json_和_toml() {
+    for (extension, content, format) in [
+        (
+            "json",
+            "{\"version\":1,\"project\":\"demo\",\"tasks\":{}}",
+            ConfigFormat::Json,
+        ),
+        (
+            "toml",
+            "version = 1\nproject = \"demo\"\n[tasks]\n",
+            ConfigFormat::Toml,
+        ),
+    ] {
+        let path = temporary_config().with_extension(extension);
+        fs::write(&path, content).unwrap();
+        let mut editor = ConfigEditor::open(&path).unwrap();
+        editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+        assert!(procora::config::load_str(&fs::read_to_string(&path).unwrap(), format).is_ok());
+        fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn 表单删除确认可以用_esc_取消而不退出编辑器() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  worker:\n    command: echo\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    editor.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert!(!editor.should_quit());
+    assert!(editor.message().contains("取消删除"));
+    fs::remove_file(path).unwrap();
+}

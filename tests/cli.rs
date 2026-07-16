@@ -44,6 +44,7 @@ fn 帮助命令可以执行() {
     assert!(stdout.contains("init"));
     assert!(stdout.contains("edit"));
     assert!(stdout.contains("deps"));
+    assert!(stdout.contains("clean"));
     assert!(stdout.contains("up"));
     assert!(stdout.contains("down"));
     assert!(stdout.contains("status"));
@@ -107,6 +108,12 @@ fn up_status_down形成中心进程闭环() {
         .unwrap();
     assert!(up.status.success());
     assert!(String::from_utf8_lossy(&up.stdout).contains("全局 Procora：运行中"));
+    let installed = if cfg!(windows) {
+        home.join("bin/procora.exe")
+    } else {
+        home.join("bin/procora")
+    };
+    assert!(installed.is_file());
 
     let status = ProcessCommand::new(binary)
         .arg("status")
@@ -195,6 +202,7 @@ fn server帮助展示高频生命周期命令() {
     assert!(stdout.contains("start"));
     assert!(stdout.contains("restart"));
     assert!(stdout.contains("stop"));
+    assert!(stdout.contains("remove"));
 }
 
 #[test]
@@ -277,6 +285,62 @@ fn 服务生命周期命令保持稳定层级() {
 }
 
 #[test]
+fn server_remove命令保持稳定层级() {
+    let cli = Cli::try_parse_from(["procora", "server", "remove", "demo"]).unwrap();
+    let Some(Command::Server(arguments)) = cli.command else {
+        panic!("应解析为 server 命令");
+    };
+    assert!(matches!(
+        arguments.command,
+        Some(ServerCommand::Remove { target }) if target == "demo"
+    ));
+}
+
+#[test]
+fn server_remove删除注册但保留服务目录() {
+    let home = temporary_directory("server-remove-home");
+    let service = temporary_directory("server-remove-service");
+    fs::write(
+        service.join("procora.yaml"),
+        "version: 1\nproject: removable\ntasks: {}\n",
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_procora");
+
+    let opened = ProcessCommand::new(binary)
+        .arg("server")
+        .arg(&service)
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(opened.status.success());
+    let removed = ProcessCommand::new(binary)
+        .args(["server", "remove", "removable"])
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(removed.status.success());
+    assert!(String::from_utf8_lossy(&removed.stdout).contains("已删除服务：removable"));
+    assert!(service.join("procora.yaml").is_file());
+
+    let listed = ProcessCommand::new(binary)
+        .args(["server", "list"])
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    assert!(!String::from_utf8_lossy(&listed.stdout).contains("removable"));
+    let down = ProcessCommand::new(binary)
+        .arg("down")
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(down.status.success());
+    fs::remove_dir_all(home).unwrap();
+    fs::remove_dir_all(service).unwrap();
+}
+
+#[test]
 fn 自启动命令保持顶层入口() {
     let enable = Cli::try_parse_from(["procora", "enable"]).unwrap();
     let disable = Cli::try_parse_from(["procora", "disable"]).unwrap();
@@ -298,6 +362,71 @@ fn edit与deps命令参数保持稳定() {
         deps.command,
         Some(Command::Deps { path, check: true }) if path == std::path::Path::new("./service")
     ));
+}
+
+#[test]
+fn clean命令参数保持稳定() {
+    let current = Cli::try_parse_from(["procora", "clean"]).unwrap();
+    let explicit = Cli::try_parse_from(["procora", "clean", "./service/procora.yaml"]).unwrap();
+
+    assert!(matches!(
+        current.command,
+        Some(Command::Clean { path: None })
+    ));
+    assert!(matches!(
+        explicit.command,
+        Some(Command::Clean { path: Some(path) }) if path == std::path::Path::new("./service/procora.yaml")
+    ));
+}
+
+#[test]
+fn clean只删除项目运行时目录且可重复执行() {
+    let directory = temporary_directory("clean");
+    let runtime = directory.join(".procora/logs/tasks");
+    fs::create_dir_all(&runtime).unwrap();
+    fs::write(runtime.join("worker.log"), "runtime log").unwrap();
+    fs::write(
+        directory.join("procora.yaml"),
+        "version: 1\nproject: demo\ntasks: {}\n",
+    )
+    .unwrap();
+    fs::write(directory.join("keep.txt"), "keep").unwrap();
+    let binary = env!("CARGO_BIN_EXE_procora");
+
+    let cleaned = ProcessCommand::new(binary)
+        .arg("clean")
+        .current_dir(&directory)
+        .output()
+        .unwrap();
+    assert!(cleaned.status.success());
+    assert!(!directory.join(".procora").exists());
+    assert!(directory.join("procora.yaml").exists());
+    assert!(directory.join("keep.txt").exists());
+
+    let repeated = ProcessCommand::new(binary)
+        .arg("clean")
+        .current_dir(&directory)
+        .output()
+        .unwrap();
+    assert!(repeated.status.success());
+    assert!(String::from_utf8_lossy(&repeated.stdout).contains("没有需要清理"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn clean拒绝删除同名普通文件() {
+    let directory = temporary_directory("clean-file");
+    let runtime = directory.join(".procora");
+    fs::write(&runtime, "not a directory").unwrap();
+
+    let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
+        .arg("clean")
+        .current_dir(&directory)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(runtime.is_file());
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]

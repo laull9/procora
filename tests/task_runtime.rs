@@ -53,6 +53,12 @@ fn completed依赖会运行真实进程并写入service本地日志() {
         thread::sleep(Duration::from_millis(10));
     };
     assert_eq!(snapshot.tasks.len(), 2);
+    assert!(
+        snapshot
+            .tasks
+            .iter()
+            .all(|task| { task.message.as_deref() == Some("Task 已退出，退出码 0") })
+    );
     for task in ["prepare", "app"] {
         let content = fs::read_to_string(
             service

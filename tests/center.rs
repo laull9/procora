@@ -180,6 +180,34 @@ fn 可以按名称和路径管理同一个服务() {
 }
 
 #[test]
+fn remove停止宿主并彻底删除注册记录() {
+    let directory = temporary_directory();
+    let service_root = directory.join("demo");
+    write_service(&service_root, "demo");
+    let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
+    let mut center = Center::empty(repository.clone());
+    center.handle(CenterRequest::Open {
+        path: service_root.clone(),
+    });
+
+    let removed = center.handle(CenterRequest::Remove {
+        selector: ServiceSelectorDto::Path(service_root.clone()),
+    });
+    assert!(matches!(
+        removed,
+        CenterResponse::Removed(service) if service.name == "demo"
+    ));
+    assert!(matches!(
+        center.handle(CenterRequest::List),
+        CenterResponse::Services(services) if services.is_empty()
+    ));
+    assert!(repository.load_services().unwrap().is_empty());
+    assert!(repository.status_history("demo").unwrap().is_empty());
+    assert!(service_root.join("procora.yaml").is_file());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn 中心服务器重启后恢复注册表和期望状态() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");

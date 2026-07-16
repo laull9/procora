@@ -4,6 +4,7 @@ use std::{ffi::OsString, path::PathBuf, process::Command};
 
 use thiserror::Error;
 
+mod detect;
 mod render;
 
 /// Linux 用户服务的固定单元名。
@@ -92,6 +93,15 @@ impl DaemonAutostart {
 /// 当平台不受支持、托管文件无法移除或系统管理命令失败时返回错误。
 pub fn disable() -> Result<AutostartBackend, AutostartError> {
     platform::disable()
+}
+
+/// 判断当前平台是否已经注册 Procora 用户级中心服务。
+///
+/// # Errors
+///
+/// 当平台不受支持或无法查询原生托管配置时返回错误。
+pub fn is_enabled(definition: &DaemonAutostart) -> Result<bool, AutostartError> {
+    detect::is_enabled(definition)
 }
 
 /// 自启动注册和移除可能产生的错误。

@@ -45,7 +45,8 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | 命令 | 语义 |
 | --- | --- |
 | `procora init --config yaml/json/toml` | 创建不依赖 Cargo 的可运行示例并自动打开配置编辑页；脚本可加 `--no-edit`。 |
-| `procora edit [path/config]` | 打开带字段说明、保存前完整校验和未保存保护的 TUI 配置编辑页。 |
+| `procora edit [path/config]` | 打开以项目、Task、管理依赖表单为主的 TUI 配置编辑页；支持弹窗编辑、保存前完整校验和未保存保护。 |
+| `procora clean [path/config]` | 清空服务目录中的 `.procora` 运行时文件、日志和管理依赖缓存。 |
 | `procora deps [path/config]` | 下载、智能解包、缓存并验证项目声明依赖；`--check` 只做离线验证。 |
 | `procora up` | 启动全局 Procora 服务器。 |
 | `procora down` | 停止全局 Procora 服务器；保留状态和日志。 |

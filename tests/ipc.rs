@@ -112,6 +112,8 @@ fn 同一中心服务器可以连续处理管理请求() {
     assert!(client.ping());
     let hello = client.hello("ipc-test").unwrap();
     assert_eq!(hello.service_count, 0);
+    assert_eq!(hello.procora_version, env!("CARGO_PKG_VERSION"));
+    assert!(hello.uses_current_version());
 
     let duplicate = run_center_server("unused-endpoint", &state);
     assert!(matches!(duplicate, Err(IpcError::AlreadyRunning)));

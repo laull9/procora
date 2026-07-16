@@ -29,7 +29,8 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 ## 3. 项目初始化与中心进程
 
 - `procora init --config yaml|json|toml`：在当前目录写入不依赖 Cargo 的可运行示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。交互式终端会自动进入配置编辑页，脚本使用 `--no-edit` 跳过。
-- `procora edit [path]`：发现唯一配置并打开 TUI 编辑页；右侧显示字段引导，`Ctrl-S` 完整校验后保存，未保存退出需要二次确认。
+- `procora edit [path]`：发现唯一配置并默认打开结构化 TUI 表单。通过 `Tab` 或左右方向键在项目、Task、管理依赖间切换，`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F2` 可进入高级文本模式，`F1` 在配置有效时返回表单；未保存退出需要二次确认。
+- `procora clean [path]`：删除服务目录下的 `.procora` 运行时目录，包括日志和管理依赖缓存；省略路径时使用当前目录。配置文件和其他项目文件不会删除，目录不存在时正常返回。
 - `procora deps [path]`：同步项目声明依赖；`--check` 仅依据版本清单、目标类型和版本命令离线复核。
 - `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
 - `procora down`：发送正常关闭请求并等待端点退出；保留中心 SQLite 状态和每个 Service 自己的日志。

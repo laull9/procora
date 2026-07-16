@@ -30,11 +30,19 @@ pub(crate) fn task_message(state: TaskRuntimeState) -> Option<String> {
     match state.observed {
         ObservedState::Blocked => Some("等待依赖条件满足".to_owned()),
         ObservedState::Backoff => Some(format!("等待第 {} 次自动重启", state.restart_attempt)),
-        ObservedState::Failed => Some(format!("Task 失败，退出码 {:?}", state.exit_code)),
-        ObservedState::Exited => Some(format!("Task 已退出，退出码 {:?}", state.exit_code)),
+        ObservedState::Failed => Some(exit_message("Task 失败", state.exit_code)),
+        ObservedState::Exited => Some(exit_message("Task 已退出", state.exit_code)),
         ObservedState::Orphaned => Some("无法验证遗留进程身份，未执行接管或终止".to_owned()),
         _ => None,
     }
+}
+
+/// 把可选退出码转换为不泄漏 `Option` 调试格式的说明。
+fn exit_message(prefix: &str, exit_code: Option<i32>) -> String {
+    exit_code.map_or_else(
+        || format!("{prefix}，未获得退出码"),
+        |exit_code| format!("{prefix}，退出码 {exit_code}"),
+    )
 }
 
 /// 把监测快照压缩为协议可选资源值。

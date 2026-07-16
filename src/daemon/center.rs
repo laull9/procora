@@ -6,9 +6,9 @@ use std::{
 
 use crate::config::{DiscoveryError, discover_path};
 use crate::protocol::{
-    CenterEventDto, CenterEventKindDto, CenterHello, CenterRequest, CenterResponse, ClientHello,
-    EventBatchDto, PROTOCOL_VERSION, ServiceActionDto, ServiceSelectorDto, ServiceStatusDto,
-    ServiceStatusRecordDto, ServiceViewDto, SnapshotSourceDto,
+    CenterEventDto, CenterEventKindDto, CenterRequest, CenterResponse, EventBatchDto,
+    ServiceActionDto, ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
+    SnapshotSourceDto,
 };
 use crate::source::SourceError;
 use crate::storage::{SqliteCenterRepository, StorageError};
@@ -21,6 +21,8 @@ use super::{
     project::{EVENT_CAPACITY, MAX_LOG_BATCH_BYTES},
     status::{protocol_status, status_text},
 };
+
+mod registry;
 
 /// 中心服务器注册、恢复和服务解析错误。
 #[derive(Debug, Error)]
@@ -139,6 +141,9 @@ impl Center {
             CenterRequest::Manage { action, selector } => {
                 self.manage(action, &selector).map(CenterResponse::Service)
             }
+            CenterRequest::Remove { selector } => {
+                self.remove(&selector).map(CenterResponse::Removed)
+            }
             CenterRequest::Shutdown => {
                 self.stop_all_hosts();
                 self.push_event(CenterEventKindDto::CenterStopping, None);
@@ -147,25 +152,6 @@ impl Center {
         };
         result.unwrap_or_else(|error| CenterResponse::Error {
             message: error.to_string(),
-        })
-    }
-
-    /// 校验协议版本并返回中心实例身份。
-    fn hello(&self, hello: &ClientHello) -> CenterResponse {
-        if hello.protocol_version != PROTOCOL_VERSION {
-            return CenterResponse::Error {
-                message: format!(
-                    "协议版本不兼容：客户端 {}，中心服务器 {}",
-                    hello.protocol_version, PROTOCOL_VERSION
-                ),
-            };
-        }
-        CenterResponse::Hello(CenterHello {
-            protocol_version: PROTOCOL_VERSION,
-            instance_id: self.instance_id,
-            service_count: self.services.len(),
-            event_sequence: self.event_sequence,
-            control_allowed: true,
         })
     }
 

@@ -1,4 +1,4 @@
-use std::{env, io::IsTerminal, path::Path};
+use std::{env, fs, io::IsTerminal, path::Path};
 
 use crate::config::{DiscoveredProject, discover_path};
 use crate::daemon::ServiceHost;
@@ -26,6 +26,41 @@ pub(crate) fn edit_after_init(path: &Path, no_edit: bool) -> anyhow::Result<()> 
         return Ok(());
     }
     crate::tui::edit_config(path).context("配置编辑器退出失败")
+}
+
+/// 清空指定服务目录中的 `.procora` 运行时数据。
+///
+/// # Errors
+///
+/// 当目标路径不可访问、不是文件或目录，或无法删除运行时目录时返回错误。
+pub(crate) fn clean(path: Option<&Path>) -> anyhow::Result<()> {
+    let target = path.map_or_else(
+        || env::current_dir().context("无法读取当前目录"),
+        |path| Ok(path.to_path_buf()),
+    )?;
+    let target = fs::canonicalize(&target)
+        .with_context(|| format!("无法访问要清理的服务路径：{}", target.display()))?;
+    let root = if target.is_file() {
+        target
+            .parent()
+            .context("配置文件路径没有父目录")?
+            .to_path_buf()
+    } else if target.is_dir() {
+        target
+    } else {
+        bail!("服务路径 `{}` 既不是文件也不是目录", target.display());
+    };
+    let runtime = root.join(".procora");
+    if !runtime.exists() {
+        println!("没有需要清理的运行时目录：{}", runtime.display());
+        return Ok(());
+    }
+    if !runtime.is_dir() {
+        bail!("运行时路径 `{}` 不是目录，拒绝删除", runtime.display());
+    }
+    fs::remove_dir_all(&runtime).with_context(|| format!("无法清理 `{}`", runtime.display()))?;
+    println!("已清理运行时目录：{}", runtime.display());
+    Ok(())
 }
 
 /// 完整发现并校验配置，但不下载、注册或启动服务。

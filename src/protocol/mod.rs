@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// 客户端连接中心服务器时发送的握手请求。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -23,6 +23,9 @@ pub struct ClientHello {
 pub struct CenterHello {
     /// 中心服务器采用的协议主版本。
     pub protocol_version: u16,
+    /// 中心服务器使用的 Procora 包版本；旧服务器缺失时为空字符串。
+    #[serde(default)]
+    pub procora_version: String,
     /// 中心服务器实例标识。
     pub instance_id: Uuid,
     /// 当前注册的服务数量。
@@ -33,6 +36,13 @@ pub struct CenterHello {
     pub control_allowed: bool,
 }
 
+impl CenterHello {
+    /// 判断中心服务器是否与当前 CLI 使用同一 Procora 版本。
+    pub fn uses_current_version(&self) -> bool {
+        self.procora_version == env!("CARGO_PKG_VERSION")
+    }
+}
+
 /// 中心服务器增量事件的稳定类型。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,6 +51,8 @@ pub enum CenterEventKindDto {
     Opened,
     /// 服务生命周期状态发生变化。
     StatusChanged,
+    /// 服务已经从中心注册表删除。
+    Removed,
     /// 中心服务器准备正常退出。
     CenterStopping,
 }
@@ -215,6 +227,11 @@ pub enum CenterRequest {
         /// 要管理的服务。
         selector: ServiceSelectorDto,
     },
+    /// 停止并从中心注册表删除服务。
+    Remove {
+        /// 要删除的服务。
+        selector: ServiceSelectorDto,
+    },
     /// 请求中心服务器完成当前响应后正常退出。
     Shutdown,
 }
@@ -237,6 +254,8 @@ pub enum CenterResponse {
     TaskLogs(LogBatchDto),
     /// 返回单个服务摘要。
     Service(ServiceViewDto),
+    /// 返回刚从注册表删除的服务摘要。
+    Removed(ServiceViewDto),
     /// 返回供 TUI 使用的一致性任务快照。
     Snapshot(ProjectSnapshot),
     /// 中心服务器已经接受正常退出请求。
