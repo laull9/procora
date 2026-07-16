@@ -37,7 +37,8 @@ fn temporary_directory() -> PathBuf {
 }
 
 #[test]
-fn 握手增量事件和状态历史形成一致会话() {
+// 握手增量事件和状态历史形成一致会话。
+fn handshake_events_and_history_form_consistent_session() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     write_service(&service_root, "demo");
@@ -74,7 +75,8 @@ fn 握手增量事件和状态历史形成一致会话() {
 }
 
 #[test]
-fn 过期事件游标要求客户端重新获取快照() {
+// 过期事件游标要求客户端重新获取快照。
+fn expired_event_cursor_requires_snapshot_refresh() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     write_service(&service_root, "demo");
@@ -134,7 +136,8 @@ fn long_running_task() -> &'static str {
 }
 
 #[test]
-fn 可以按名称和路径管理同一个服务() {
+// 可以按名称和路径管理同一个服务。
+fn service_can_be_managed_by_name_and_path() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     write_service(&service_root, "demo");
@@ -180,7 +183,8 @@ fn 可以按名称和路径管理同一个服务() {
 }
 
 #[test]
-fn remove停止宿主并彻底删除注册记录() {
+// remove停止宿主并彻底删除注册记录。
+fn remove_stops_host_and_deletes_registry() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     write_service(&service_root, "demo");
@@ -208,7 +212,8 @@ fn remove停止宿主并彻底删除注册记录() {
 }
 
 #[test]
-fn 中心服务器重启后恢复注册表和期望状态() {
+// 中心服务器重启后恢复注册表和期望状态。
+fn center_restart_restores_registry_and_desired_state() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     write_service(&service_root, "demo");
@@ -229,7 +234,8 @@ fn 中心服务器重启后恢复注册表和期望状态() {
 }
 
 #[test]
-fn 同名服务不能指向两个目录() {
+// 同名服务不能指向两个目录。
+fn same_service_name_cannot_point_to_two_directories() {
     let directory = temporary_directory();
     write_service(&directory.join("one"), "demo");
     write_service(&directory.join("two"), "demo");
@@ -248,7 +254,8 @@ fn 同名服务不能指向两个目录() {
 }
 
 #[test]
-fn 恢复时配置改名会进入失败状态() {
+// 恢复时配置改名会进入失败状态。
+fn renamed_config_enters_failed_state_during_restore() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     write_service(&service_root, "before");
@@ -271,7 +278,8 @@ fn 恢复时配置改名会进入失败状态() {
 }
 
 #[test]
-fn task日志通过游标从service目录续读() {
+// task日志通过游标从service目录续读。
+fn task_logs_resume_from_service_directory_cursor() {
     let directory = temporary_directory();
     let service_root = directory.join("demo");
     fs::create_dir_all(&service_root).unwrap();

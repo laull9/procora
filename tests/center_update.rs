@@ -97,7 +97,8 @@ fn join_outdated_center(handle: thread::JoinHandle<()>) {
 }
 
 #[test]
-fn status发现旧版本后自动替换为当前版本() {
+// status发现旧版本后自动替换为当前版本。
+fn status_replaces_legacy_center_with_current_version() {
     let home = temporary_home();
     let endpoint = endpoint_for(&home);
     let outdated = spawn_outdated_center(&endpoint);

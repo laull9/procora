@@ -57,7 +57,8 @@ tasks:
 
 #[test]
 #[cfg(unix)]
-fn 本地二进制会安装验证缓存并替换任务占位符() {
+// 本地二进制会安装验证缓存并替换任务占位符。
+fn local_binary_installs_verifies_cache_and_replaces_placeholder() {
     let root = temporary_directory("binary");
     fs::write(root.join("tool.sh"), "#!/bin/sh\necho tool 1.2.3\n").unwrap();
     let config = write_config(&root);
@@ -97,7 +98,8 @@ fn 本地二进制会安装验证缓存并替换任务占位符() {
 
 #[test]
 #[cfg(unix)]
-fn 损坏的版本输出会触发重新安装() {
+// 损坏的版本输出会触发重新安装。
+fn corrupted_version_output_triggers_reinstall() {
     let root = temporary_directory("repair");
     fs::write(root.join("tool.sh"), "#!/bin/sh\necho tool 1.2.3\n").unwrap();
     let config = write_config(&root);
@@ -114,7 +116,8 @@ fn 损坏的版本输出会触发重新安装() {
 }
 
 #[test]
-fn sha256不匹配会拒绝安装() {
+// sha256不匹配会拒绝安装。
+fn sha256_mismatch_rejects_installation() {
     let root = temporary_directory("checksum");
     fs::write(root.join("tool.sh"), "content").unwrap();
     let config = root.join("procora.yaml");
@@ -142,7 +145,8 @@ tasks: {}
 }
 
 #[test]
-fn 本地普通文件按跨平台文件名安装() {
+// 本地普通文件按跨平台文件名安装。
+fn local_plain_file_uses_cross_platform_filename() {
     let root = temporary_directory("local-file");
     fs::write(root.join("asset.bin"), "managed asset").unwrap();
     let config = root.join("procora.yaml");
@@ -175,7 +179,8 @@ tasks: {}
 }
 
 #[test]
-fn http来源会下载并安装管理文件() {
+// http来源会下载并安装管理文件。
+fn http_source_downloads_and_installs_managed_file() {
     let root = temporary_directory("http");
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
@@ -212,7 +217,8 @@ fn http来源会下载并安装管理文件() {
 
 #[test]
 #[cfg(unix)]
-fn targz会自动解包并选择声明的二进制() {
+// targz会自动解包并选择声明的二进制。
+fn tar_gz_auto_extracts_and_selects_declared_binary() {
     let root = temporary_directory("archive");
     let archive = fs::File::create(root.join("tool.tar.gz")).unwrap();
     let encoder = flate2::write::GzEncoder::new(archive, flate2::Compression::default());
@@ -253,7 +259,8 @@ tasks: {}
 }
 
 #[test]
-fn zip会自动解包并验证归档内目录内容() {
+// zip会自动解包并验证归档内目录内容。
+fn zip_auto_extracts_and_verifies_directory_content() {
     let root = temporary_directory("zip");
     let archive = fs::File::create(root.join("assets.zip")).unwrap();
     let mut writer = zip::ZipWriter::new(archive);

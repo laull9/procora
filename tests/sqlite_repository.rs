@@ -27,7 +27,8 @@ fn service(status: StoredServiceStatus) -> StoredService {
 }
 
 #[test]
-fn 保存后可以恢复完整服务状态() {
+// 保存后可以恢复完整服务状态。
+fn saved_service_state_can_be_restored() {
     let directory = temporary_directory();
     let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
     let expected = service(StoredServiceStatus::Running);
@@ -39,7 +40,8 @@ fn 保存后可以恢复完整服务状态() {
 }
 
 #[test]
-fn 只有状态或消息变化才追加历史() {
+// 只有状态或消息变化才追加历史。
+fn history_is_appended_only_for_state_or_message_changes() {
     let directory = temporary_directory();
     let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
     let running = service(StoredServiceStatus::Running);
@@ -58,7 +60,8 @@ fn 只有状态或消息变化才追加历史() {
 }
 
 #[test]
-fn 删除服务会级联删除状态历史() {
+// 删除服务会级联删除状态历史。
+fn deleting_service_cascades_status_history() {
     let directory = temporary_directory();
     let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
     repository
@@ -73,7 +76,8 @@ fn 删除服务会级联删除状态历史() {
 }
 
 #[test]
-fn 拒绝高于当前程序的数据库模式版本() {
+// 拒绝高于当前程序的数据库模式版本。
+fn newer_database_schema_is_rejected() {
     let directory = temporary_directory();
     let path = directory.join("procora.sqlite3");
     let connection = Connection::open(&path).unwrap();
@@ -91,7 +95,8 @@ fn 拒绝高于当前程序的数据库模式版本() {
 /// Unix 路径的非 UTF-8 字节必须经过 `SQLite` 往返后保持不变。
 #[cfg(unix)]
 #[test]
-fn unix非utf8路径可以无损恢复() {
+// unix非utf8路径可以无损恢复。
+fn unix_non_utf8_path_roundtrips() {
     use std::os::unix::ffi::OsStringExt;
 
     let directory = temporary_directory();
@@ -112,7 +117,8 @@ fn unix非utf8路径可以无损恢复() {
 /// Windows UTF-16 路径的非 ASCII 字符必须经过 `SQLite` 往返后保持不变。
 #[cfg(windows)]
 #[test]
-fn windows宽字符路径可以无损恢复() {
+// windows宽字符路径可以无损恢复。
+fn windows_wide_path_roundtrips() {
     let directory = temporary_directory();
     let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
     let mut expected = service(StoredServiceStatus::Running);

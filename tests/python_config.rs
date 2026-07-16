@@ -61,7 +61,8 @@ fn valid_json(project: &str) -> String {
 }
 
 #[test]
-fn 显式入口通过共享校验并按脚本目录规范化路径() {
+// 显式入口通过共享校验并按脚本目录规范化路径。
+fn explicit_python_entry_uses_shared_validation_and_script_directory() {
     let root = temporary_directory("success");
     let interpreter = fake_interpreter(&root);
     let script = write_script(&root, &format!("printf '%s' '{}'\n", valid_json("demo")));
@@ -77,7 +78,8 @@ fn 显式入口通过共享校验并按脚本目录规范化路径() {
 }
 
 #[test]
-fn 辅助进程不继承宿主环境变量() {
+// 辅助进程不继承宿主环境变量。
+fn python_helper_does_not_inherit_host_environment() {
     let root = temporary_directory("environment");
     let interpreter = fake_interpreter(&root);
     let script = write_script(
@@ -95,7 +97,8 @@ fn 辅助进程不继承宿主环境变量() {
 }
 
 #[test]
-fn 非零退出和严格单文档解析提供可操作诊断() {
+// 非零退出和严格单文档解析提供可操作诊断。
+fn python_failures_and_multi_document_output_are_actionable() {
     let root = temporary_directory("diagnostics");
     let interpreter = fake_interpreter(&root);
     let script = write_script(&root, "printf 'boom' >&2\nexit 7\n");
@@ -116,7 +119,8 @@ fn 非零退出和严格单文档解析提供可操作诊断() {
 }
 
 #[test]
-fn 超时会回收脚本创建的整个进程树() {
+// 超时会回收脚本创建的整个进程树。
+fn python_timeout_reclaims_entire_process_tree() {
     let root = temporary_directory("timeout");
     let interpreter = fake_interpreter(&root);
     let script = write_script(&root, "sleep 30 &\necho $! > child.pid\nsleep 30\n");
@@ -140,7 +144,8 @@ fn 超时会回收脚本创建的整个进程树() {
 }
 
 #[test]
-fn stdout和脚本体积都有硬上限() {
+// stdout和脚本体积都有硬上限。
+fn python_stdout_and_script_size_have_hard_limits() {
     let root = temporary_directory("limits");
     let interpreter = fake_interpreter(&root);
     let script = write_script(&root, "dd if=/dev/zero bs=1048577 count=1 2>/dev/null\n");
@@ -160,7 +165,8 @@ fn stdout和脚本体积都有硬上限() {
 }
 
 #[test]
-fn 生成输出参与修订以拒绝脚本外部输入导致的过期应用() {
+// 生成输出参与修订以拒绝脚本外部输入导致的过期应用。
+fn generated_output_revision_rejects_stale_external_input() {
     let root = temporary_directory("revision");
     let script = write_script(
         &root,

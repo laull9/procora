@@ -31,7 +31,8 @@ fn valid_config(name: &str) -> String {
 }
 
 #[test]
-fn 目录只选择唯一合法配置() {
+// 目录只选择唯一合法配置。
+fn directory_selects_the_only_valid_config() {
     let directory = temporary_directory("unique");
     fs::write(directory.join("procora.yaml"), valid_config("demo")).unwrap();
     fs::write(directory.join("package.json"), "{\"name\":\"other\"}").unwrap();
@@ -47,7 +48,8 @@ fn 目录只选择唯一合法配置() {
 }
 
 #[test]
-fn 多个procora配置要求显式选择() {
+// 多个procora配置要求显式选择。
+fn multiple_procora_configs_require_explicit_selection() {
     let directory = temporary_directory("ambiguous");
     let yaml = directory.join("procora.yaml");
     fs::write(&yaml, valid_config("first")).unwrap();
@@ -66,7 +68,8 @@ fn 多个procora配置要求显式选择() {
 }
 
 #[test]
-fn 没有合法配置时保留候选失败原因() {
+// 没有合法配置时保留候选失败原因。
+fn invalid_candidates_preserve_failure_reasons() {
     let directory = temporary_directory("invalid");
     fs::write(directory.join("procora.toml"), "name = 'not-procora'").unwrap();
 
@@ -77,7 +80,8 @@ fn 没有合法配置时保留候选失败原因() {
 }
 
 #[test]
-fn 目录忽略非procora名称的配置文件() {
+// 目录忽略非procora名称的配置文件。
+fn directory_ignores_non_procora_config_names() {
     let directory = temporary_directory("ignore-other-configs");
     fs::write(directory.join("procora.yaml"), valid_config("demo")).unwrap();
     fs::write(directory.join("other.yaml"), valid_config("other")).unwrap();
@@ -94,7 +98,8 @@ fn 目录忽略非procora名称的配置文件() {
 }
 
 #[test]
-fn 只有其他名称配置时报告未找到() {
+// 只有其他名称配置时报告未找到。
+fn other_config_names_report_not_found() {
     let directory = temporary_directory("only-other-configs");
     fs::write(directory.join("service.yaml"), valid_config("other")).unwrap();
 

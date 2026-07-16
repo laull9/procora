@@ -26,7 +26,8 @@ fn temporary_service(label: &str) -> PathBuf {
 }
 
 #[test]
-fn 扩展驱动器与unc路径转换为常规展示路径() {
+// 扩展驱动器与unc路径转换为常规展示路径。
+fn extended_drive_and_unc_paths_are_simplified() {
     assert_eq!(
         simplify_path(std::path::Path::new(r"\\?\C:\Users\tester\service")),
         PathBuf::from(r"C:\Users\tester\service")
@@ -38,7 +39,8 @@ fn 扩展驱动器与unc路径转换为常规展示路径() {
 }
 
 #[test]
-fn 配置发现不会暴露windows扩展路径前缀() {
+// 配置发现不会暴露windows扩展路径前缀。
+fn config_discovery_hides_windows_verbatim_prefix() {
     let service = temporary_service("path");
     fs::write(
         service.join("procora.yaml"),
@@ -59,7 +61,8 @@ fn 配置发现不会暴露windows扩展路径前缀() {
 }
 
 #[test]
-fn echo内建命令可完成依赖任务图() {
+// echo内建命令可完成依赖任务图。
+fn echo_builtin_completes_dependency_graph() {
     let service = temporary_service("echo");
     let config = service.join("procora.yaml");
     fs::write(

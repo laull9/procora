@@ -3,7 +3,8 @@
 use procora::monitor::SystemMonitor;
 
 #[test]
-fn 当前进程可以作为资源树根节点采样() {
+// 当前进程可以作为资源树根节点采样。
+fn current_process_can_be_sampled_as_resource_root() {
     let mut monitor = SystemMonitor::new();
     let pid = std::process::id();
 
@@ -14,7 +15,8 @@ fn 当前进程可以作为资源树根节点采样() {
 }
 
 #[test]
-fn 不存在的根进程返回不可用() {
+// 不存在的根进程返回不可用。
+fn missing_root_process_returns_unavailable() {
     let mut monitor = SystemMonitor::new();
 
     assert!(monitor.snapshot_tree(u32::MAX).is_none());

@@ -31,7 +31,8 @@ fn temporary_directory(label: &str) -> PathBuf {
 
 #[cfg(feature = "systemd")]
 #[test]
-fn dbus用户与系统范围必须由调用方显式选择() {
+// dbus用户与系统范围必须由调用方显式选择。
+fn dbus_scope_requires_explicit_user_or_system_choice() {
     use procora::platform::systemd::SystemdBus;
 
     assert_eq!(SystemdBus::User.label(), "用户总线");
@@ -41,7 +42,8 @@ fn dbus用户与系统范围必须由调用方显式选择() {
 }
 
 #[test]
-fn systemctl权限失败会返回诊断并回滚新单元文件() {
+// systemctl权限失败会返回诊断并回滚新单元文件。
+fn systemctl_permission_failure_reports_and_rolls_back() {
     let root = temporary_directory("permission");
     let bin = root.join("bin");
     let config = root.join("config");

@@ -25,7 +25,8 @@ fn render_text(app: &App, width: u16, height: u16) -> String {
 }
 
 #[test]
-fn 宽屏任务页显示任务详情和连接状态() {
+// 宽屏任务页显示任务详情和连接状态。
+fn wide_task_view_shows_details_and_connection_state() {
     let mut app = App::new(support::snapshot());
     app.handle_key(KeyCode::Down);
 
@@ -37,7 +38,8 @@ fn 宽屏任务页显示任务详情和连接状态() {
 }
 
 #[test]
-fn 紧凑终端仍显示任务列表和详情() {
+// 紧凑终端仍显示任务列表和详情。
+fn compact_terminal_shows_task_list_and_details() {
     let app = App::new(support::snapshot());
 
     let text = render_text(&app, 40, 12);
@@ -47,7 +49,8 @@ fn 紧凑终端仍显示任务列表和详情() {
 }
 
 #[test]
-fn 日志页简洁说明预览模式不提供日志() {
+// 日志页简洁说明预览模式不提供日志。
+fn log_tab_explains_preview_mode_without_logs() {
     let mut app = App::new(support::snapshot());
     app.handle_key(KeyCode::Char('3'));
 
@@ -57,7 +60,33 @@ fn 日志页简洁说明预览模式不提供日志() {
 }
 
 #[test]
-fn 日志页默认显示尾部并可翻到历史内容() {
+// 小终端摘要保留项目来源task状态和退出提示。
+fn minimal_terminal_preserves_project_source_task_and_exit() {
+    let mut app = App::new(support::snapshot());
+    app.handle_key(KeyCode::Down);
+
+    let text = render_text(&app, 24, 6);
+
+    assert!(text.contains("Procora·demo"));
+    assert!(text.contains("预览"));
+    assert!(text.contains("api·依赖阻断"));
+    assert!(text.contains("q/Esc退出"));
+}
+
+#[test]
+// 极小终端至少保留产品名和恢复原因。
+fn tiny_terminal_preserves_product_and_recovery_reason() {
+    let app = App::new(support::snapshot());
+
+    let text = render_text(&app, 12, 3);
+
+    assert!(text.contains("Procora"));
+    assert!(text.contains("终端过小"));
+}
+
+#[test]
+// 日志页默认显示尾部并可翻到历史内容。
+fn log_tab_follows_tail_and_pages_to_history() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     let mut content = String::new();
@@ -80,7 +109,8 @@ fn 日志页默认显示尾部并可翻到历史内容() {
 }
 
 #[test]
-fn mac日志页展示fn键位和宽屏task切换提示() {
+// mac日志页展示fn键位和宽屏task切换提示。
+fn mac_log_view_shows_fn_keys_and_task_switch_hint() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     app.append_log(task_id, b"log\n", false);
@@ -98,7 +128,8 @@ fn mac日志页展示fn键位和宽屏task切换提示() {
 }
 
 #[test]
-fn 临时服务显示实时控制且不展示开发说明() {
+// 临时服务显示实时控制且不展示开发说明。
+fn embedded_service_shows_live_controls_without_dev_copy() {
     let mut snapshot = support::snapshot();
     snapshot.source = SnapshotSourceDto::EmbeddedLive;
     let mut app = App::new(snapshot);
@@ -112,7 +143,8 @@ fn 临时服务显示实时控制且不展示开发说明() {
 }
 
 #[test]
-fn 纯文本模式使用ascii符号并关闭彩色依赖() {
+// 纯文本模式使用ascii符号并关闭彩色依赖。
+fn plain_mode_uses_ascii_without_colored_dependencies() {
     let mut app = App::new(support::snapshot());
     app.set_plain_mode(true);
 

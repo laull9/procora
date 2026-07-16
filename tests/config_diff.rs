@@ -12,7 +12,8 @@ fn compile(tasks: &str) -> procora::config::CompiledProject {
 }
 
 #[test]
-fn 进程身份变化会传播到全部下游但不波及无关任务() {
+// 进程身份变化会传播到全部下游但不波及无关任务。
+fn process_identity_changes_propagate_only_to_downstream_tasks() {
     let current = compile(
         "  database:\n    command: postgres\n  api:\n    command: api\n    depends_on:\n      database: {}\n  docs:\n    command: docs\n",
     );
@@ -39,7 +40,8 @@ fn 进程身份变化会传播到全部下游但不波及无关任务() {
 }
 
 #[test]
-fn 纯运行策略变化被分类为原地更新() {
+// 纯运行策略变化被分类为原地更新。
+fn runtime_policy_changes_are_in_place_updates() {
     let current = compile("  worker:\n    command: worker\n");
     let candidate = compile(
         "  worker:\n    command: worker\n    restart: always\n    restart_delay_ms: 1200\n",
@@ -53,7 +55,8 @@ fn 纯运行策略变化被分类为原地更新() {
 }
 
 #[test]
-fn 新增删除和无变化集合保持稳定排序() {
+// 新增删除和无变化集合保持稳定排序。
+fn diff_task_sets_keep_stable_ordering() {
     let current = compile("  alpha:\n    command: a\n  old:\n    command: old\n");
     let candidate = compile("  alpha:\n    command: a\n  new:\n    command: new\n");
 

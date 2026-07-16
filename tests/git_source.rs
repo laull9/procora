@@ -84,7 +84,8 @@ fn write_valid_definition(repository: &Path, command: &str) {
 }
 
 #[test]
-fn 本地仓库固定提交并通过共享include管线生成候选() {
+// 本地仓库固定提交并通过共享include管线生成候选。
+fn local_repository_pins_commit_and_uses_include_pipeline() {
     let root = temporary_directory("candidate");
     let repository = root.join("repository");
     let cache = root.join("cache");
@@ -121,7 +122,8 @@ fn 本地仓库固定提交并通过共享include管线生成候选() {
 }
 
 #[test]
-fn 可变引用每次解析为不可变提交并改变确认修订() {
+// 可变引用每次解析为不可变提交并改变确认修订。
+fn mutable_ref_resolves_to_commit_and_changes_revision() {
     let root = temporary_directory("moving-ref");
     let repository = root.join("repository");
     let cache = root.join("cache");
@@ -150,7 +152,8 @@ fn 可变引用每次解析为不可变提交并改变确认修订() {
 }
 
 #[test]
-fn 配置无效仍返回带提交身份的不可应用候选() {
+// 配置无效仍返回带提交身份的不可应用候选。
+fn invalid_config_returns_non_applicable_candidate_with_commit() {
     let root = temporary_directory("invalid-config");
     let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
@@ -170,7 +173,8 @@ fn 配置无效仍返回带提交身份的不可应用候选() {
 }
 
 #[test]
-fn 相同提交的本地checkout被修改后拒绝复用() {
+// 相同提交的本地checkout被修改后拒绝复用。
+fn modified_checkout_for_same_commit_is_not_reused() {
     let root = temporary_directory("integrity");
     let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
@@ -199,7 +203,8 @@ fn 相同提交的本地checkout被修改后拒绝复用() {
 }
 
 #[test]
-fn 归档输出上限在物化前终止获取() {
+// 归档输出上限在物化前终止获取。
+fn archive_output_limit_stops_fetch_before_materialization() {
     let root = temporary_directory("archive-limit");
     let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
@@ -226,7 +231,8 @@ fn 归档输出上限在物化前终止获取() {
 }
 
 #[test]
-fn 对象库增长在fetch执行期间触发整树终止() {
+// 对象库增长在fetch执行期间触发整树终止。
+fn object_store_growth_terminates_fetch_process_tree() {
     let root = temporary_directory("repository-limit");
     let repository = root.join("repository");
     fs::create_dir(&repository).unwrap();
@@ -254,7 +260,8 @@ fn 对象库增长在fetch执行期间触发整树终止() {
 
 #[cfg(unix)]
 #[test]
-fn checkout中后来插入的符号链接被当作篡改拒绝() {
+// checkout中后来插入的符号链接被当作篡改拒绝。
+fn checkout_rejects_later_symlink_as_tampering() {
     use std::os::unix::fs::symlink;
 
     let root = temporary_directory("checkout-symlink");
@@ -281,7 +288,8 @@ fn checkout中后来插入的符号链接被当作篡改拒绝() {
 }
 
 #[test]
-fn 远端协议引用和配置路径先于git执行被拒绝() {
+// 远端协议引用和配置路径先于git执行被拒绝。
+fn unsafe_remote_inputs_are_rejected_before_git_runs() {
     let cache = temporary_directory("validation");
     assert!(GitSource::remote("file:///tmp/repo", "main", "procora.yaml", &cache).is_err());
     assert!(GitSource::remote("ext::command", "main", "procora.yaml", &cache).is_err());

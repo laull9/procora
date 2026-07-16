@@ -30,7 +30,8 @@ fn task(command: &str, args: &[&str]) -> TaskSpec {
 }
 
 #[test]
-fn 真实子进程输出可以排空并等待退出() {
+// 真实子进程输出可以排空并等待退出。
+fn real_child_output_drains_before_exit() {
     let mut child = spawn_task(&task("rustc", &["--version"])).unwrap();
     let mut stdout = child.take_stdout().unwrap();
     let mut content = String::new();
@@ -43,7 +44,8 @@ fn 真实子进程输出可以排空并等待退出() {
 
 #[cfg(unix)]
 #[test]
-fn unix可以在宽限期内回收整个进程组() {
+// unix可以在宽限期内回收整个进程组。
+fn unix_reclaims_process_group_within_grace_period() {
     let mut child = spawn_task(&task("sh", &["-c", "trap '' TERM; sleep 30 & wait"])).unwrap();
     let started = Instant::now();
 
@@ -55,7 +57,8 @@ fn unix可以在宽限期内回收整个进程组() {
 
 #[cfg(unix)]
 #[test]
-fn unix顶层进程提前退出后仍回收后台后代() {
+// unix顶层进程提前退出后仍回收后台后代。
+fn unix_reclaims_descendants_after_root_exits() {
     let mut child = spawn_task(&task(
         "sh",
         &["-c", "sleep 30 </dev/null >/dev/null 2>&1 & echo $!"],
@@ -85,7 +88,8 @@ fn unix顶层进程提前退出后仍回收后台后代() {
 /// Windows Job Object 必须能回收一个仍在执行的控制台命令。
 #[cfg(windows)]
 #[test]
-fn windows可以强制回收受管进程树() {
+// windows可以强制回收受管进程树。
+fn windows_force_reclaims_managed_process_tree() {
     let mut child = spawn_task(&task("cmd.exe", &["/C", "ping -n 30 127.0.0.1 > NUL"])).unwrap();
     let started = Instant::now();
 
@@ -98,7 +102,8 @@ fn windows可以强制回收受管进程树() {
 /// Windows 轮询顶层退出后仍必须在期限内完成 Job Object 清理。
 #[cfg(windows)]
 #[test]
-fn windows轮询退出后清理不会等待已消费的job事件() {
+// windows轮询退出后清理不会等待已消费的job事件。
+fn windows_cleanup_does_not_wait_for_consumed_job_event() {
     let mut child = spawn_task(&task("cmd.exe", &["/C", "exit", "0"])).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     while child.try_wait().unwrap().is_none() {

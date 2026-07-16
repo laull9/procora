@@ -44,7 +44,7 @@ fn runtime_configuration(directory: &Path) -> String {
         "tasks": {
             "server": {
                 "command": executable,
-                "args": ["--exact", "长期任务辅助进程", "--nocapture"],
+                "args": ["--exact", "long_running_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_READY_FILE": ready,
@@ -52,7 +52,7 @@ fn runtime_configuration(directory: &Path) -> String {
                 "shutdown_timeout_ms": 500,
                 "healthcheck": {
                     "command": executable,
-                    "args": ["--exact", "健康检查辅助进程", "--nocapture"],
+                    "args": ["--exact", "health_check_helper", "--nocapture"],
                     "period_ms": 20,
                     "timeout_ms": 500,
                     "success_threshold": 2,
@@ -61,7 +61,7 @@ fn runtime_configuration(directory: &Path) -> String {
             },
             "dependent": {
                 "command": executable,
-                "args": ["--exact", "依赖任务辅助进程", "--nocapture"],
+                "args": ["--exact", "dependent_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_DEPENDENT_FILE": dependent,
@@ -76,7 +76,8 @@ fn runtime_configuration(directory: &Path) -> String {
 }
 
 #[test]
-fn 健康检查配置应用默认值并保留参数数组() {
+// 健康检查配置应用默认值并保留参数数组。
+fn health_check_defaults_preserve_argument_array() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      command: checker\n      args: ['--ready']\n",
         ConfigFormat::Yaml,
@@ -101,7 +102,8 @@ fn 健康检查配置应用默认值并保留参数数组() {
 }
 
 #[test]
-fn 健康检查拒绝无界时间和阈值() {
+// 健康检查拒绝无界时间和阈值。
+fn health_checks_reject_unbounded_limits() {
     let error = load_str(
         "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      command: checker\n      period_ms: 0\n      timeout_ms: 300001\n      success_threshold: 0\n      failure_threshold: 101\n",
         ConfigFormat::Yaml,
@@ -120,7 +122,8 @@ fn 健康检查拒绝无界时间和阈值() {
 }
 
 #[test]
-fn 连续健康后才启动依赖任务() {
+// 连续健康后才启动依赖任务。
+fn dependent_task_starts_after_consecutive_health_successes() {
     let directory = temporary_directory();
     let compiled =
         load_str(&runtime_configuration(&directory), ConfigFormat::Json).expect("运行配置应有效");
@@ -150,7 +153,8 @@ fn 连续健康后才启动依赖任务() {
 
 /// 被真实 Task 子进程调用：延迟创建就绪文件并保持运行。
 #[test]
-fn 长期任务辅助进程() {
+// 长期任务辅助进程。
+fn long_running_task_helper() {
     if std::env::var_os("PROCORA_HEALTH_TEST").is_none() {
         return;
     }
@@ -165,7 +169,8 @@ fn 长期任务辅助进程() {
 
 /// 被健康检查子进程调用：以文件是否出现决定退出状态。
 #[test]
-fn 健康检查辅助进程() {
+// 健康检查辅助进程。
+fn health_check_helper() {
     if std::env::var_os("PROCORA_HEALTH_TEST").is_none() {
         return;
     }
@@ -175,7 +180,8 @@ fn 健康检查辅助进程() {
 
 /// 被下游 Task 子进程调用：记录依赖已经放行。
 #[test]
-fn 依赖任务辅助进程() {
+// 依赖任务辅助进程。
+fn dependent_task_helper() {
     if std::env::var_os("PROCORA_HEALTH_TEST").is_none() {
         return;
     }

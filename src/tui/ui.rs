@@ -28,8 +28,12 @@ const ASCII_BORDER: border::Set<'static> = border::Set {
 /// 绘制完整的 TUI 页面。
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
-    if area.width < 30 || area.height < 8 {
+    if area.width < 16 || area.height < 4 {
         render_too_small(frame, area, app);
+        return;
+    }
+    if area.width < 30 || area.height < 10 {
+        render_compact_summary(frame, area, app);
         return;
     }
 
@@ -292,6 +296,36 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     frame.render_widget(footer, area);
 }
 
+/// 在小终端中优先保留项目、来源、Task 状态和退出入口。
+fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
+    let (source, source_color) = source_label(app.snapshot().source, app.plain_mode());
+    let mut lines = vec![
+        Line::from(Span::styled(
+            format!("Procora · {}", app.snapshot().project),
+            Style::default()
+                .fg(display_color(app, ACCENT))
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(source, Style::default().fg(source_color))),
+    ];
+    if let Some(task) = app.selected_task() {
+        lines.push(Line::from(format!(
+            "{} · {}",
+            task.task_id,
+            status_label(task.status)
+        )));
+        if area.height >= 6
+            && let Some(message) = app.feedback().or(task.message.as_deref())
+        {
+            lines.push(Line::from(message.to_owned()));
+        }
+    } else {
+        lines.push(Line::from("无 Task"));
+    }
+    lines.push(Line::from("q/Esc 退出 · 放大终端查看详情"));
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
 /// 构造日志标题，并仅在宽度足够时附加 Task 切换提示。
 fn log_title(area_width: u16, task: &str, position: Option<&str>, app: &App) -> String {
     let base = position.map_or_else(
@@ -330,10 +364,9 @@ fn log_controls(app: &App, width: u16) -> &'static str {
 
 /// 在终端无法容纳稳定布局时显示恢复提示。
 fn render_too_small(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let size = if app.plain_mode() { "30x8" } else { "30×8" };
-    let message = Paragraph::new(format!("终端尺寸过小\n请扩大到至少 {size}"))
+    let message = Paragraph::new("Procora\n终端过小")
         .alignment(Alignment::Center)
-        .block(bordered(app).title("Procora"));
+        .style(Style::default().fg(display_color(app, ACCENT)));
     frame.render_widget(message, area);
 }
 

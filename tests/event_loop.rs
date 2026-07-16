@@ -15,7 +15,8 @@ fn spawn(effect: &EngineEffect) -> (&procora::core::TaskId, procora::engine::Tas
 }
 
 #[test]
-fn started依赖在上游创建后立即调度() {
+// started依赖在上游创建后立即调度。
+fn started_dependency_schedules_after_upstream_spawn() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  first:\n    command: echo\n  second:\n    command: echo\n    depends_on:\n      first:\n        condition: started\n",
         ConfigFormat::Yaml,
@@ -35,7 +36,8 @@ fn started依赖在上游创建后立即调度() {
 }
 
 #[test]
-fn completed依赖等待上游成功退出() {
+// completed依赖等待上游成功退出。
+fn completed_dependency_waits_for_successful_exit() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  prepare:\n    command: echo\n  app:\n    command: echo\n    depends_on:\n      prepare:\n        condition: completed_successfully\n",
         ConfigFormat::Yaml,
@@ -62,7 +64,8 @@ fn completed依赖等待上游成功退出() {
 }
 
 #[test]
-fn healthy依赖等待匹配run的健康事件() {
+// healthy依赖等待匹配run的健康事件。
+fn healthy_dependency_waits_for_matching_run() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  first:\n    command: echo\n  second:\n    command: echo\n    depends_on:\n      first:\n        condition: healthy\n",
         ConfigFormat::Yaml,
@@ -98,7 +101,8 @@ fn healthy依赖等待匹配run的健康事件() {
 }
 
 #[test]
-fn 迟到事件不能覆盖新generation() {
+// 迟到事件不能覆盖新generation。
+fn late_events_cannot_override_new_generation() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  app:\n    command: echo\n",
         ConfigFormat::Yaml,
@@ -127,7 +131,8 @@ fn 迟到事件不能覆盖新generation() {
 }
 
 #[test]
-fn on_failure使用有界退避重新调度() {
+// on_failure使用有界退避重新调度。
+fn on_failure_uses_bounded_retry_backoff() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  app:\n    command: missing\n    restart: on-failure\n    restart_delay_ms: 25\n",
         ConfigFormat::Yaml,

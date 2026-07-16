@@ -10,7 +10,8 @@ use procora::protocol::ServiceActionDto;
 use procora::tui::{ActiveTab, App};
 
 #[test]
-fn 可以循环选择任务并切换页面() {
+// 可以循环选择任务并切换页面。
+fn task_selection_and_tabs_wrap_around() {
     let mut app = App::new(support::snapshot());
 
     app.handle_key(KeyCode::Down);
@@ -25,7 +26,8 @@ fn 可以循环选择任务并切换页面() {
 }
 
 #[test]
-fn 服务控制键会形成一次可消费动作() {
+// 服务控制键会形成一次可消费动作。
+fn service_control_key_creates_single_consumable_action() {
     let mut app = App::new(support::snapshot());
     app.set_control_allowed(true);
     app.handle_key(KeyCode::Char('r'));
@@ -34,14 +36,16 @@ fn 服务控制键会形成一次可消费动作() {
 }
 
 #[test]
-fn 无控制权限时忽略服务动作键() {
+// 无控制权限时忽略服务动作键。
+fn service_action_keys_are_ignored_without_permission() {
     let mut app = App::new(support::snapshot());
     app.handle_key(KeyCode::Char('x'));
     assert_eq!(app.take_pending_action(), None);
 }
 
 #[test]
-fn 退出键只改变本地退出状态() {
+// 退出键只改变本地退出状态。
+fn quit_key_only_changes_local_exit_state() {
     let mut app = App::new(support::snapshot());
 
     app.handle_key(KeyCode::Char('q'));
@@ -50,7 +54,8 @@ fn 退出键只改变本地退出状态() {
 }
 
 #[test]
-fn ctrl_c会请求正常退出() {
+// ctrl_c会请求正常退出。
+fn ctrl_c_requests_clean_exit() {
     let mut app = App::new(support::snapshot());
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -59,7 +64,8 @@ fn ctrl_c会请求正常退出() {
 }
 
 #[test]
-fn task日志会保留间隙标记和最新内容() {
+// task日志会保留间隙标记和最新内容。
+fn task_logs_keep_gap_marker_and_latest_content() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("api").unwrap();
 
@@ -71,7 +77,8 @@ fn task日志会保留间隙标记和最新内容() {
 }
 
 #[test]
-fn 日志支持翻页首尾和恢复自动跟随() {
+// 日志支持翻页首尾和恢复自动跟随。
+fn logs_support_paging_boundaries_and_follow_mode() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     let content = "line\n".repeat(60);
@@ -92,7 +99,8 @@ fn 日志支持翻页首尾和恢复自动跟随() {
 }
 
 #[test]
-fn 上翻后新日志不会抢走当前阅读位置() {
+// 上翻后新日志不会抢走当前阅读位置。
+fn new_logs_preserve_scrolled_reading_position() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     let content = "old\n".repeat(40);
@@ -107,7 +115,8 @@ fn 上翻后新日志不会抢走当前阅读位置() {
 }
 
 #[test]
-fn 日志页滚轮只滚动日志而不切换task() {
+// 日志页滚轮只滚动日志而不切换task。
+fn log_wheel_scrolls_content_without_switching_task() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     app.append_log(task_id.clone(), "line\n".repeat(40).as_bytes(), false);
@@ -122,7 +131,8 @@ fn 日志页滚轮只滚动日志而不切换task() {
 }
 
 #[test]
-fn 非日志页滚轮继续切换task() {
+// 非日志页滚轮继续切换task。
+fn wheel_switches_tasks_outside_log_tab() {
     let mut app = App::new(support::snapshot());
 
     app.handle_mouse(mouse(MouseEventKind::ScrollDown));
@@ -131,7 +141,8 @@ fn 非日志页滚轮继续切换task() {
 }
 
 #[test]
-fn 相同状态和空日志不会触发重复重绘() {
+// 相同状态和空日志不会触发重复重绘。
+fn unchanged_state_and_empty_logs_do_not_redraw() {
     let snapshot = support::snapshot();
     let mut app = App::new(snapshot.clone());
     let task_id = TaskId::from_str("api").unwrap();

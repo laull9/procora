@@ -84,7 +84,8 @@ fn output_field(output: &Output, field: &str) -> String {
 }
 
 #[test]
-fn source帮助暴露git预览和确认层级() {
+// source帮助暴露git预览和确认层级。
+fn source_help_exposes_git_preview_and_confirm() {
     let output = procora(Path::new("."), &["source", "git", "--help"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -93,7 +94,8 @@ fn source帮助暴露git预览和确认层级() {
 }
 
 #[test]
-fn git预览和确认不启动task且拒绝前移引用的旧修订() {
+// git预览和确认不启动task且拒绝前移引用的旧修订。
+fn git_preview_and_confirm_do_not_start_tasks_or_accept_stale_refs() {
     let root = temporary_directory("workflow");
     let repository = root.join("repository");
     let home = root.join("home");

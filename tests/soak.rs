@@ -36,7 +36,8 @@ fn temporary_directory() -> PathBuf {
 
 #[test]
 #[ignore = "由 weekly soak workflow 以 release 模式运行"]
-fn 高频真实task启停保持状态闭环且不持续泄漏句柄() {
+// 高频真实task启停保持状态闭环且不持续泄漏句柄。
+fn repeated_task_cycles_preserve_state_without_handle_leaks() {
     let root = temporary_directory();
     let config = root.join("procora.yaml");
     fs::write(&config, long_running_config()).unwrap();

@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 #[cfg(target_os = "windows")]
 #[test]
-fn 自启动提权脚本显式唤起uac并等待结果() {
+// 自启动提权脚本显式唤起uac并等待结果。
+fn elevation_script_invokes_uac_and_waits() {
     let script = procora::cli::elevation_script_for_test();
 
     assert!(script.contains("-Verb RunAs"));
@@ -20,7 +21,8 @@ fn 自启动提权脚本显式唤起uac并等待结果() {
 
 #[cfg(target_os = "windows")]
 #[test]
-fn 提权子进程会把完整错误写回父进程() {
+// 提权子进程会把完整错误写回父进程。
+fn elevated_child_reports_full_error_to_parent() {
     let result = std::env::temp_dir().join(format!("procora-uac-test-{}.result", Uuid::new_v4()));
     let output = Command::new(env!("CARGO_BIN_EXE_procora"))
         .args([

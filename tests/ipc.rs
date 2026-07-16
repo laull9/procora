@@ -64,7 +64,8 @@ fn long_running_task() -> &'static str {
 
 /// 每个平台的本地 IPC 都必须拒绝不兼容的协议主版本。
 #[test]
-fn 本地ipc拒绝不兼容协议版本() {
+// 本地ipc拒绝不兼容协议版本。
+fn local_ipc_rejects_incompatible_protocol() {
     let (endpoint, directory) = isolated_runtime();
     let state = directory.join("procora.sqlite3");
     let server_endpoint = endpoint.clone();
@@ -97,7 +98,8 @@ fn 本地ipc拒绝不兼容协议版本() {
 
 /// 无响应的本地中心不能永久阻塞客户端命令。
 #[test]
-fn 无响应中心请求会在期限内返回() {
+// 无响应中心请求会在期限内返回。
+fn unresponsive_center_request_respects_deadline() {
     let (endpoint, directory) = isolated_runtime();
     let name = endpoint.clone().to_ns_name::<GenericNamespaced>().unwrap();
     let listener = ListenerOptions::new()
@@ -128,7 +130,8 @@ fn 无响应中心请求会在期限内返回() {
 /// Windows 管道没有空闲实例时，连接必须在期限内失败而不能无限等待。
 #[cfg(windows)]
 #[test]
-fn windows繁忙中心连接会在期限内返回() {
+// windows繁忙中心连接会在期限内返回。
+fn windows_busy_center_connection_respects_deadline() {
     let (endpoint, directory) = isolated_runtime();
     let name = endpoint.clone().to_ns_name::<GenericNamespaced>().unwrap();
     let listener = ListenerOptions::new()
@@ -153,7 +156,8 @@ fn windows繁忙中心连接会在期限内返回() {
 }
 
 #[test]
-fn 同一中心服务器可以连续处理管理请求() {
+// 同一中心服务器可以连续处理管理请求。
+fn center_handles_consecutive_management_requests() {
     let (endpoint, directory) = isolated_runtime();
     write_service(&directory);
     let state = directory.join("procora.sqlite3");
@@ -225,7 +229,8 @@ fn 同一中心服务器可以连续处理管理请求() {
 }
 
 #[test]
-fn 后台中心在没有观察客户端时仍推进完成依赖() {
+// 后台中心在没有观察客户端时仍推进完成依赖。
+fn center_advances_completed_dependencies_without_clients() {
     let (endpoint, directory) = isolated_runtime();
     fs::write(
         directory.join("procora.yaml"),

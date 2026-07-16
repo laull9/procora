@@ -27,7 +27,8 @@ fn temporary_directory(label: &str) -> PathBuf {
 }
 
 #[test]
-fn preview与apply通过完整修订形成显式确认闭环() {
+// preview与apply通过完整修订形成显式确认闭环。
+fn preview_and_apply_form_revision_confirmation_flow() {
     let home = temporary_directory("home");
     let service = temporary_directory("service");
     let config = service.join("procora.yaml");

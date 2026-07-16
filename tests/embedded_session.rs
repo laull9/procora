@@ -30,7 +30,8 @@ fn temporary_service() -> PathBuf {
 }
 
 #[test]
-fn 临时会话可以刷新状态控制服务并读取日志() {
+// 临时会话可以刷新状态控制服务并读取日志。
+fn embedded_session_refreshes_controls_and_reads_logs() {
     let service = temporary_service();
     let compiled = load_str(
         "version: 1\nproject: embedded\ntasks:\n  app:\n    command: rustc\n    args: ['--version']\n",

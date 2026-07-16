@@ -3,7 +3,8 @@
 use procora::config::{ConfigError, ConfigFormat, DependencyKind, UnpackMode, load_str};
 
 #[test]
-fn 网络与ssh依赖会规范化为统一模型() {
+// 网络与ssh依赖会规范化为统一模型。
+fn network_and_ssh_dependencies_normalize_to_one_model() {
     let input = r#"
 version: 1
 project: demo
@@ -37,7 +38,8 @@ tasks:
 }
 
 #[test]
-fn 依赖字段错误会一次返回() {
+// 依赖字段错误会一次返回。
+fn dependency_field_errors_are_reported_together() {
     let input = r#"
 version: 1
 project: demo

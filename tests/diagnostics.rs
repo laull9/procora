@@ -9,7 +9,8 @@ use std::{
 use procora::config::{ConfigError, ConfigFormat, load_path, load_str};
 
 #[test]
-fn 独立语义错误会一次返回() {
+// 独立语义错误会一次返回。
+fn independent_semantic_errors_are_reported_together() {
     let error = load_str(
         "version: 2\nproject: bad/name\ntasks:\n  one:\n    command: ''\n    shutdown_timeout_ms: 0\n  two:\n    command: ''\n    depends_on:\n      missing: {}\n",
         ConfigFormat::Yaml,
@@ -28,7 +29,8 @@ fn 独立语义错误会一次返回() {
 }
 
 #[test]
-fn 三种格式的类型错误都包含精确字段路径() {
+// 三种格式的类型错误都包含精确字段路径。
+fn type_errors_include_exact_paths_in_all_formats() {
     let cases = [
         (
             ConfigFormat::Yaml,
@@ -54,7 +56,8 @@ fn 三种格式的类型错误都包含精确字段路径() {
 }
 
 #[test]
-fn 相对工作目录以配置文件目录为基准规范化() {
+// 相对工作目录以配置文件目录为基准规范化。
+fn relative_working_directory_uses_config_directory() {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -82,7 +85,8 @@ fn 相对工作目录以配置文件目录为基准规范化() {
 }
 
 #[test]
-fn 生命周期时间拒绝可能冻结中心服务器的极端值() {
+// 生命周期时间拒绝可能冻结中心服务器的极端值。
+fn lifecycle_limits_reject_extreme_values() {
     let error = load_str(
         "version: 1\nproject: demo\ntasks:\n  app:\n    command: echo\n    restart_delay_ms: 30001\n    shutdown_timeout_ms: 300001\n",
         ConfigFormat::Yaml,

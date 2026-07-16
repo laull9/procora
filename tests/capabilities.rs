@@ -5,7 +5,8 @@ use procora::platform::{PlatformKind, capabilities, data_dir};
 /// Linux 构建必须暴露 Linux 平台与对应 systemd feature 状态。
 #[cfg(target_os = "linux")]
 #[test]
-fn linux能力与编译feature保持一致() {
+// linux能力与编译feature保持一致。
+fn linux_capabilities_match_compiled_features() {
     let capabilities = capabilities();
 
     assert_eq!(capabilities.platform, PlatformKind::Linux);
@@ -15,7 +16,8 @@ fn linux能力与编译feature保持一致() {
 /// macOS 构建不能误报 systemd 能力。
 #[cfg(target_os = "macos")]
 #[test]
-fn macos能力不包含systemd() {
+// macos能力不包含systemd。
+fn macos_capabilities_exclude_systemd() {
     let capabilities = capabilities();
 
     assert_eq!(capabilities.platform, PlatformKind::MacOs);
@@ -25,7 +27,8 @@ fn macos能力不包含systemd() {
 /// Windows 构建不能误报 systemd 能力。
 #[cfg(windows)]
 #[test]
-fn windows能力不包含systemd() {
+// windows能力不包含systemd。
+fn windows_capabilities_exclude_systemd() {
     let capabilities = capabilities();
 
     assert_eq!(capabilities.platform, PlatformKind::Windows);
@@ -33,7 +36,8 @@ fn windows能力不包含systemd() {
 }
 
 #[test]
-fn 支持平台声明受管进程树能力() {
+// 支持平台声明受管进程树能力。
+fn supported_platforms_declare_managed_process_tree() {
     let capabilities = capabilities();
 
     assert!(matches!(

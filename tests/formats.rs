@@ -47,7 +47,8 @@ const JSON: &str = r#"
 "#;
 
 #[test]
-fn 三种声明式格式产生相同规范() {
+// 三种声明式格式产生相同规范。
+fn declarative_formats_produce_same_spec() {
     let yaml = load_str(YAML, ConfigFormat::Yaml).unwrap();
     let toml = load_str(TOML, ConfigFormat::Toml).unwrap();
     let json = load_str(JSON, ConfigFormat::Json).unwrap();
@@ -58,7 +59,8 @@ fn 三种声明式格式产生相同规范() {
 }
 
 #[test]
-fn 未知字段会被拒绝() {
+// 未知字段会被拒绝。
+fn unknown_fields_are_rejected() {
     let invalid = "version: 1\nproject: demo\ntasks: {}\nunexpected: true\n";
 
     assert!(load_str(invalid, ConfigFormat::Yaml).is_err());

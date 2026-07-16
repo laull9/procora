@@ -20,7 +20,8 @@ const UPLOAD_NODE24: &str = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c6
 
 /// 校验全部工作流不再使用旧版 checkout。
 #[test]
-fn 全部工作流使用node24版checkout() {
+// 全部工作流使用node24版checkout。
+fn all_workflows_use_node24_checkout() {
     for workflow in [
         RELEASE_WORKFLOW,
         CI_WORKFLOW,
@@ -34,7 +35,8 @@ fn 全部工作流使用node24版checkout() {
 
 /// 校验产物上传仅在首次失败后等待并覆盖重试一次。
 #[test]
-fn 产物上传失败后覆盖重试一次() {
+// 产物上传失败后覆盖重试一次。
+fn artifact_upload_retries_once_with_overwrite() {
     assert_eq!(RELEASE_WORKFLOW.matches(UPLOAD_NODE24).count(), 2);
     assert!(RELEASE_WORKFLOW.contains("id: upload_artifact"));
     assert!(RELEASE_WORKFLOW.contains("if: steps.upload_artifact.outcome == 'failure'"));
@@ -44,7 +46,8 @@ fn 产物上传失败后覆盖重试一次() {
 
 /// 校验发布和安全审计动作都显式固定到 Node 24 实现。
 #[test]
-fn 发布与审计动作固定node24实现() {
+// 发布与审计动作固定node24实现。
+fn release_and_audit_actions_use_node24() {
     let audit = "rustsec/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432";
     assert!(RELEASE_WORKFLOW.contains(audit));
     assert!(CI_WORKFLOW.contains(audit));

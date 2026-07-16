@@ -29,7 +29,8 @@ fn task(dependencies: &[&str]) -> TaskSpec {
 }
 
 #[test]
-fn 按依赖顺序启动并反向停止() {
+// 按依赖顺序启动并反向停止。
+fn tasks_start_in_dependency_order_and_stop_in_reverse() {
     let database = TaskId::from_str("database").unwrap();
     let api = TaskId::from_str("api").unwrap();
     let spec = ProjectSpec {
@@ -51,7 +52,8 @@ fn 按依赖顺序启动并反向停止() {
 }
 
 #[test]
-fn 拒绝循环依赖() {
+// 拒绝循环依赖。
+fn cyclic_dependencies_are_rejected() {
     let spec = ProjectSpec {
         version: 1,
         project: "cycle".to_owned(),

@@ -17,7 +17,8 @@ fn temporary_service(label: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn 多线程高速追加不会丢记录或产生撕裂写入() {
+// 多线程高速追加不会丢记录或产生撕裂写入。
+fn concurrent_appends_do_not_lose_or_tear_records() {
     let service = temporary_service("concurrent");
     let store = Arc::new(
         FileLogStore::new(
@@ -56,7 +57,8 @@ fn 多线程高速追加不会丢记录或产生撕裂写入() {
 }
 
 #[test]
-fn 密集轮转后归档数量有界且不遗留临时文件() {
+// 密集轮转后归档数量有界且不遗留临时文件。
+fn dense_rotation_bounds_archives_and_leaves_no_temporary_files() {
     let service = temporary_service("rotation");
     let store = FileLogStore::new(
         &service,

@@ -12,7 +12,8 @@ fn definition() -> DaemonAutostart {
 }
 
 #[test]
-fn systemd单元以前台daemon作为主进程() {
+// systemd单元以前台daemon作为主进程。
+fn systemd_unit_uses_foreground_daemon() {
     let unit = definition().systemd_unit();
 
     assert!(unit.contains("Type=simple"));
@@ -28,7 +29,8 @@ fn systemd单元以前台daemon作为主进程() {
 }
 
 #[test]
-fn launch_agent逐参数编码并设置登录启动() {
+// launch_agent逐参数编码并设置登录启动。
+fn launch_agent_encodes_arguments_and_runs_at_login() {
     let plist = definition().launch_agent_plist();
 
     assert!(plist.contains("<string>dev.procora.center</string>"));
@@ -39,7 +41,8 @@ fn launch_agent逐参数编码并设置登录启动() {
 }
 
 #[test]
-fn windows任务动作正确引用含空格参数() {
+// windows任务动作正确引用含空格参数。
+fn windows_task_quotes_arguments_with_spaces() {
     let action = definition().windows_task_action();
 
     assert!(action.starts_with("\"/opt/Procora Bin/procora\" __daemon"));
@@ -47,7 +50,8 @@ fn windows任务动作正确引用含空格参数() {
 }
 
 #[test]
-fn windows任务绑定当前交互登录会话() {
+// windows任务绑定当前交互登录会话。
+fn windows_task_targets_interactive_login() {
     let arguments = definition().windows_task_create_arguments();
     let arguments = arguments
         .iter()
@@ -61,7 +65,8 @@ fn windows任务绑定当前交互登录会话() {
 
 /// 三个原生后端都应提供稳定、面向用户的名称。
 #[test]
-fn 原生后端名称保持稳定() {
+// 原生后端名称保持稳定。
+fn native_backend_labels_remain_stable() {
     assert_eq!(AutostartBackend::SystemdUser.label(), "systemd 用户服务");
     assert_eq!(AutostartBackend::LaunchAgent.label(), "macOS LaunchAgent");
     assert_eq!(
@@ -72,7 +77,8 @@ fn 原生后端名称保持稳定() {
 
 /// systemd 语法中的特殊字符必须在参数和百分号说明符中安全转义。
 #[test]
-fn systemd单元转义特殊参数() {
+// systemd单元转义特殊参数。
+fn systemd_unit_escapes_special_arguments() {
     let definition = DaemonAutostart::new(
         "/opt/Procora \"bin\"/procora",
         "endpoint%name\nnext",
@@ -87,7 +93,8 @@ fn systemd单元转义特殊参数() {
 
 /// `LaunchAgent` XML 文本节点必须完整转义五个保留字符。
 #[test]
-fn launch_agent转义xml保留字符() {
+// launch_agent转义xml保留字符。
+fn launch_agent_escapes_xml_reserved_characters() {
     let definition = DaemonAutostart::new(
         "/opt/procora<&>\"'",
         "endpoint<&>\"'",
@@ -101,7 +108,8 @@ fn launch_agent转义xml保留字符() {
 
 /// Windows 参数中的引号和末尾反斜杠必须按 `CommandLineToArgvW` 规则编码。
 #[test]
-fn windows任务动作转义引号和末尾反斜杠() {
+// windows任务动作转义引号和末尾反斜杠。
+fn windows_task_escapes_quotes_and_trailing_backslashes() {
     let definition = DaemonAutostart::new(
         "C:\\Program Files\\Procora\\",
         "endpoint \"quoted\"",

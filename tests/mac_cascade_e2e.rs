@@ -389,7 +389,8 @@ fn assert_first_cascade(binary: &str, home: &Path, service: &Path) -> PathBuf {
 }
 
 #[test]
-fn mac本机完成下载修复任务级联中心恢复和删除() {
+// mac本机完成下载修复任务级联中心恢复和删除。
+fn macos_e2e_covers_download_repair_cascade_restore_and_remove() {
     let sandbox = TestSandbox::new();
     let service = &sandbox.service;
     let home = &sandbox.home;

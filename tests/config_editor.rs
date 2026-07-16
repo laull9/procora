@@ -29,7 +29,8 @@ fn temporary_config() -> PathBuf {
 }
 
 #[test]
-fn 只有有效配置才会保存() {
+// 只有有效配置才会保存。
+fn only_valid_config_is_saved() {
     let path = temporary_config();
     let initial = "version: 1\nproject: demo\ntasks: {}\n";
     fs::write(&path, initial).unwrap();
@@ -42,7 +43,8 @@ fn 只有有效配置才会保存() {
 }
 
 #[test]
-fn 未保存修改需要二次确认退出() {
+// 未保存修改需要二次确认退出。
+fn unsaved_changes_require_exit_confirmation() {
     let mut editor = ConfigEditor::from_text(
         "procora.yaml",
         ConfigFormat::Yaml,
@@ -57,7 +59,8 @@ fn 未保存修改需要二次确认退出() {
 }
 
 #[test]
-fn 宽屏编辑页会显示配置内容与依赖引导() {
+// 宽屏编辑页会显示配置内容与依赖引导。
+fn wide_editor_shows_config_and_dependency_guidance() {
     let editor = ConfigEditor::from_text(
         "procora.yaml",
         ConfigFormat::Yaml,
@@ -82,7 +85,8 @@ fn 宽屏编辑页会显示配置内容与依赖引导() {
 }
 
 #[test]
-fn include入口保持文本模式并按完整闭包校验保存() {
+// include入口保持文本模式并按完整闭包校验保存。
+fn include_entry_stays_text_mode_and_validates_full_closure() {
     let path = temporary_config();
     let fragment = path.with_file_name("procora-editor-fragment.yaml");
     fs::write(&fragment, "tasks:\n  worker:\n    command: worker\n").unwrap();
@@ -105,7 +109,8 @@ fn include入口保持文本模式并按完整闭包校验保存() {
 }
 
 #[test]
-fn 打开有效配置后可通过表单新建并保存_task() {
+// 打开有效配置后可通过表单新建并保存_task。
+fn form_can_create_and_save_task_from_valid_config() {
     let path = temporary_config();
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
@@ -133,7 +138,8 @@ fn 打开有效配置后可通过表单新建并保存_task() {
 }
 
 #[test]
-fn 表单界面会显示任务和管理依赖弹窗入口() {
+// 表单界面会显示任务和管理依赖弹窗入口。
+fn form_shows_task_and_dependency_dialog_entries() {
     let path = temporary_config();
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
@@ -158,7 +164,8 @@ fn 表单界面会显示任务和管理依赖弹窗入口() {
 }
 
 #[test]
-fn 表单保存支持_json_和_toml() {
+// 表单保存支持_json_和_toml。
+fn form_save_supports_json_and_toml() {
     for (extension, content, format) in [
         (
             "json",
@@ -181,7 +188,8 @@ fn 表单保存支持_json_和_toml() {
 }
 
 #[test]
-fn 表单往返不会丢失健康检查() {
+// 表单往返不会丢失健康检查。
+fn form_roundtrip_preserves_health_checks() {
     let path = temporary_config();
     let initial = "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      command: checker\n      args: ['--ready']\n      period_ms: 25\n      timeout_ms: 10\n      success_threshold: 2\n      failure_threshold: 4\n";
     fs::write(&path, initial).unwrap();
@@ -207,7 +215,8 @@ fn 表单往返不会丢失健康检查() {
 }
 
 #[test]
-fn 表单删除确认可以用_esc_取消而不退出编辑器() {
+// 表单删除确认可以用_esc_取消而不退出编辑器。
+fn escape_cancels_form_delete_without_exiting() {
     let path = temporary_config();
     fs::write(
         &path,

@@ -28,7 +28,8 @@ impl Generator {
 }
 
 #[test]
-fn 随机无环图始终按依赖准入并按反向依赖停止() {
+// 随机无环图始终按依赖准入并按反向依赖停止。
+fn random_dag_respects_start_and_stop_order() {
     let mut generator = Generator(0x0070_726f_636f_7261);
     for case in 0..192 {
         let task_count = 1 + generator.index(28);

@@ -6,14 +6,16 @@ use clap::Parser;
 use procora::cli::{Cli, Command, ServerCommand};
 
 #[test]
-fn 无子命令解析为当前目录tui入口() {
+// 无子命令解析为当前目录tui入口。
+fn no_subcommand_defaults_to_current_directory_tui() {
     let cli = Cli::try_parse_from(["procora"]).unwrap();
     assert!(cli.command.is_none());
     assert!(cli.target.is_none());
 }
 
 #[test]
-fn 顶层路径解析为指定服务tui入口() {
+// 顶层路径解析为指定服务tui入口。
+fn top_level_path_opens_service_tui() {
     let cli = Cli::try_parse_from(["procora", "./services/demo"]).unwrap();
 
     assert!(cli.command.is_none());
@@ -21,7 +23,8 @@ fn 顶层路径解析为指定服务tui入口() {
 }
 
 #[test]
-fn 唯一命令前缀可以直接推断() {
+// 唯一命令前缀可以直接推断。
+fn unique_command_prefixes_are_inferred() {
     let status = Cli::try_parse_from(["procora", "stat"]).unwrap();
     let list = Cli::try_parse_from(["procora", "li"]).unwrap();
 
@@ -30,7 +33,8 @@ fn 唯一命令前缀可以直接推断() {
 }
 
 #[test]
-fn 拼写错误会显示相近顶层命令和帮助入口() {
+// 拼写错误会显示相近顶层命令和帮助入口。
+fn typos_suggest_similar_top_level_commands() {
     for (typo, expected) in [("stats", "status"), ("lsst", "list")] {
         let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
             .arg(typo)
@@ -45,7 +49,8 @@ fn 拼写错误会显示相近顶层命令和帮助入口() {
 }
 
 #[test]
-fn 服务管理命令全部位于顶层() {
+// 服务管理命令全部位于顶层。
+fn service_management_commands_are_top_level() {
     let add = Cli::try_parse_from(["procora", "add", "./demo"]).unwrap();
     let list = Cli::try_parse_from(["procora", "list"]).unwrap();
     let history = Cli::try_parse_from(["procora", "history", "demo"]).unwrap();
@@ -68,7 +73,8 @@ fn 服务管理命令全部位于顶层() {
 }
 
 #[test]
-fn 旧server层级保持隐藏兼容() {
+// 旧server层级保持隐藏兼容。
+fn legacy_server_hierarchy_remains_compatible() {
     let cli = Cli::try_parse_from(["procora", "server", "remove", "demo"]).unwrap();
     let Some(Command::Server(arguments)) = cli.command else {
         panic!("应解析为 server 命令");
@@ -80,7 +86,8 @@ fn 旧server层级保持隐藏兼容() {
 }
 
 #[test]
-fn 旧server拼写错误仍会得到兼容建议() {
+// 旧server拼写错误仍会得到兼容建议。
+fn legacy_server_typos_keep_compatibility_suggestions() {
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
         .args(["server", "lsst"])
         .output()

@@ -29,7 +29,8 @@ fn temporary_directory() -> PathBuf {
 }
 
 #[test]
-fn completions可以输出无需运行服务的shell脚本() {
+// completions可以输出无需运行服务的shell脚本。
+fn completions_generate_shell_scripts_without_server() {
     for shell in ["bash", "zsh", "fish", "powershell"] {
         let output = Command::new(env!("CARGO_BIN_EXE_procora"))
             .args(["completions", shell])
@@ -45,7 +46,8 @@ fn completions可以输出无需运行服务的shell脚本() {
 }
 
 #[test]
-fn config输出包含默认值和规范化路径的有效_json() {
+// config输出包含默认值和规范化路径的有效_json。
+fn config_outputs_valid_json_with_defaults_and_paths() {
     let directory = temporary_directory();
     fs::create_dir_all(directory.join("work")).expect("应能创建工作目录");
     fs::write(

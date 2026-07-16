@@ -131,7 +131,8 @@ fn wait_for_lines(path: &Path, expected: usize) {
 }
 
 #[test]
-fn 无效候选与restart失败都保留旧运行宿主() {
+// 无效候选与restart失败都保留旧运行宿主。
+fn invalid_candidate_and_restart_failure_keep_old_host() {
     let directory = temporary_directory("invalid");
     let root = directory.join("service");
     let config = write_service(&root, &["first"]);
@@ -165,7 +166,8 @@ fn 无效候选与restart失败都保留旧运行宿主() {
 }
 
 #[test]
-fn apply拒绝过期修订并只提交重新确认的候选() {
+// apply拒绝过期修订并只提交重新确认的候选。
+fn apply_rejects_stale_revision_and_commits_reconfirmed_candidate() {
     let directory = temporary_directory("revision");
     let root = directory.join("service");
     let config = write_service(&root, &["first"]);
@@ -216,7 +218,8 @@ fn apply拒绝过期修订并只提交重新确认的候选() {
 }
 
 #[test]
-fn 文件事件防抖后只生成候选而不自动替换宿主() {
+// 文件事件防抖后只生成候选而不自动替换宿主。
+fn debounced_file_events_only_create_candidates() {
     let directory = temporary_directory("watch");
     let root = directory.join("service");
     write_service(&root, &["first"]);
@@ -259,7 +262,8 @@ fn 文件事件防抖后只生成候选而不自动替换宿主() {
 }
 
 #[test]
-fn apply只重启语义差异影响的task() {
+// apply只重启语义差异影响的task。
+fn apply_restarts_only_semantically_affected_tasks() {
     let directory = temporary_directory("scoped");
     let root = directory.join("service");
     fs::create_dir_all(&root).unwrap();
@@ -300,7 +304,8 @@ fn apply只重启语义差异影响的task() {
 }
 
 #[test]
-fn 受影响task启动失败会恢复旧有效定义() {
+// 受影响task启动失败会恢复旧有效定义。
+fn affected_task_start_failure_restores_previous_definition() {
     let directory = temporary_directory("rollback");
     let root = directory.join("service");
     fs::create_dir_all(&root).unwrap();
@@ -342,7 +347,8 @@ fn 受影响task启动失败会恢复旧有效定义() {
 }
 
 #[test]
-fn 管理依赖占位符不会让未变化候选产生伪重启() {
+// 管理依赖占位符不会让未变化候选产生伪重启。
+fn dependency_placeholders_do_not_cause_spurious_restarts() {
     let directory = temporary_directory("dependency-semantic");
     let root = directory.join("service");
     fs::create_dir_all(&root).unwrap();
@@ -389,7 +395,8 @@ fn 管理依赖占位符不会让未变化候选产生伪重启() {
 }
 
 #[test]
-fn apply会核对整个include闭包并拒绝成员文件的过期修订() {
+// apply会核对整个include闭包并拒绝成员文件的过期修订。
+fn apply_checks_include_closure_and_rejects_stale_member() {
     let directory = temporary_directory("include-revision");
     let root = directory.join("service");
     fs::create_dir_all(&root).unwrap();

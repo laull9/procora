@@ -33,7 +33,8 @@ fn temporary_directory() -> PathBuf {
 }
 
 #[test]
-fn 自定义成功退出码始终包含零且拒绝负数() {
+// 自定义成功退出码始终包含零且拒绝负数。
+fn custom_success_codes_include_zero_and_reject_negative_values() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  task:\n    command: task\n    success_exit_codes: [130, 130]\n",
         ConfigFormat::Yaml,
@@ -58,7 +59,8 @@ fn 自定义成功退出码始终包含零且拒绝负数() {
 }
 
 #[test]
-fn 自定义成功退出码会放行完成依赖() {
+// 自定义成功退出码会放行完成依赖。
+fn custom_success_codes_release_completed_dependencies() {
     let directory = temporary_directory();
     let executable = std::env::current_exe().expect("应能读取测试二进制路径");
     let marker = directory.join("dependent");
@@ -68,13 +70,13 @@ fn 自定义成功退出码会放行完成依赖() {
         "tasks": {
             "prepare": {
                 "command": executable,
-                "args": ["--exact", "非零退出辅助进程", "--nocapture"],
+                "args": ["--exact", "nonzero_exit_helper", "--nocapture"],
                 "env": { "PROCORA_EXIT_CODE_HELPER": "1" },
                 "success_exit_codes": [42]
             },
             "dependent": {
                 "command": executable,
-                "args": ["--exact", "完成依赖辅助进程", "--nocapture"],
+                "args": ["--exact", "completed_dependency_helper", "--nocapture"],
                 "env": {
                     "PROCORA_DEPENDENT_HELPER": "1",
                     "PROCORA_DEPENDENT_FILE": marker,
@@ -104,7 +106,8 @@ fn 自定义成功退出码会放行完成依赖() {
 
 /// 被 Task 子进程调用：以声明为成功的非零退出码结束。
 #[test]
-fn 非零退出辅助进程() {
+// 非零退出辅助进程。
+fn nonzero_exit_helper() {
     if std::env::var_os("PROCORA_EXIT_CODE_HELPER").is_some() {
         std::process::exit(42);
     }
@@ -112,7 +115,8 @@ fn 非零退出辅助进程() {
 
 /// 被下游 Task 子进程调用：记录完成依赖已经放行。
 #[test]
-fn 完成依赖辅助进程() {
+// 完成依赖辅助进程。
+fn completed_dependency_helper() {
     if std::env::var_os("PROCORA_DEPENDENT_HELPER").is_none() {
         return;
     }

@@ -35,7 +35,8 @@ fn fixture() -> PathBuf {
 }
 
 #[test]
-fn 帮助命令可以执行() {
+// 帮助命令可以执行。
+fn help_command_runs() {
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
         .arg("--help")
         .output()
@@ -74,7 +75,8 @@ fn 帮助命令可以执行() {
 }
 
 #[test]
-fn init可以创建三种可校验模板() {
+// init可以创建三种可校验模板。
+fn init_creates_three_valid_templates() {
     for format in ["yaml", "json", "toml"] {
         let directory = temporary_directory(format);
         let initialized = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
@@ -100,7 +102,8 @@ fn init可以创建三种可校验模板() {
 }
 
 #[test]
-fn init默认不覆盖已有配置() {
+// init默认不覆盖已有配置。
+fn init_does_not_overwrite_existing_config_by_default() {
     let directory = temporary_directory("no-overwrite");
     fs::write(directory.join("procora.yaml"), "用户内容").unwrap();
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
@@ -118,7 +121,8 @@ fn init默认不覆盖已有配置() {
 }
 
 #[test]
-fn up_status_down形成中心进程闭环() {
+// up_status_down形成中心进程闭环。
+fn up_status_down_form_center_lifecycle() {
     let home = temporary_directory("center-lifecycle");
     let binary = env!("CARGO_BIN_EXE_procora");
     let up = run_background_cli(
@@ -156,7 +160,8 @@ fn up_status_down形成中心进程闭环() {
 }
 
 #[test]
-fn 离线服务列表和状态查询都不会启动全局服务() {
+// 离线服务列表和状态查询都不会启动全局服务。
+fn offline_list_and_status_do_not_start_center() {
     let home = temporary_directory("offline-queries");
     let binary = env!("CARGO_BIN_EXE_procora");
     let list = ProcessCommand::new(binary)
@@ -184,7 +189,8 @@ fn 离线服务列表和状态查询都不会启动全局服务() {
 }
 
 #[test]
-fn 可以校验基础配置() {
+// 可以校验基础配置。
+fn validate_accepts_basic_config() {
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
         .arg("validate")
         .arg(fixture())
@@ -196,7 +202,8 @@ fn 可以校验基础配置() {
 }
 
 #[test]
-fn 可以输出确定性任务图() {
+// 可以输出确定性任务图。
+fn graph_output_is_deterministic() {
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
         .arg("graph")
         .arg(fixture())
@@ -211,7 +218,8 @@ fn 可以输出确定性任务图() {
 }
 
 #[test]
-fn 旧server帮助仍展示兼容命令() {
+// 旧server帮助仍展示兼容命令。
+fn legacy_server_help_lists_compatible_commands() {
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
         .args(["server", "--help"])
         .output()
@@ -230,7 +238,8 @@ fn 旧server帮助仍展示兼容命令() {
 }
 
 #[test]
-fn 参数拼写错误会显示相近参数和帮助入口() {
+// 参数拼写错误会显示相近参数和帮助入口。
+fn argument_typos_suggest_similar_options_and_help() {
     let output = ProcessCommand::new(env!("CARGO_BIN_EXE_procora"))
         .args(["init", "--froce"])
         .output()
@@ -243,7 +252,8 @@ fn 参数拼写错误会显示相近参数和帮助入口() {
 }
 
 #[test]
-fn add和remove形成顶层服务管理闭环() {
+// add和remove形成顶层服务管理闭环。
+fn add_and_remove_form_top_level_service_lifecycle() {
     let home = temporary_directory("server-remove-home");
     let service = temporary_directory("server-remove-service");
     fs::write(
@@ -289,7 +299,8 @@ fn add和remove形成顶层服务管理闭环() {
 }
 
 #[test]
-fn 自启动命令保持顶层入口() {
+// 自启动命令保持顶层入口。
+fn autostart_commands_remain_top_level() {
     let enable = Cli::try_parse_from(["procora", "enable"]).unwrap();
     let disable = Cli::try_parse_from(["procora", "disable"]).unwrap();
 
@@ -298,7 +309,8 @@ fn 自启动命令保持顶层入口() {
 }
 
 #[test]
-fn edit与deps命令参数保持稳定() {
+// edit与deps命令参数保持稳定。
+fn edit_and_deps_arguments_remain_stable() {
     let edit = Cli::try_parse_from(["procora", "edit", "./service"]).unwrap();
     let deps = Cli::try_parse_from(["procora", "deps", "./service", "--check"]).unwrap();
 
@@ -313,7 +325,8 @@ fn edit与deps命令参数保持稳定() {
 }
 
 #[test]
-fn clean命令参数保持稳定() {
+// clean命令参数保持稳定。
+fn clean_arguments_remain_stable() {
     let current = Cli::try_parse_from(["procora", "clean"]).unwrap();
     let explicit = Cli::try_parse_from(["procora", "clean", "./service/procora.yaml"]).unwrap();
 
@@ -328,7 +341,8 @@ fn clean命令参数保持稳定() {
 }
 
 #[test]
-fn clean只删除项目运行时目录且可重复执行() {
+// clean只删除项目运行时目录且可重复执行。
+fn clean_only_removes_runtime_directory_and_is_idempotent() {
     let directory = temporary_directory("clean");
     let runtime = directory.join(".procora/logs/tasks");
     fs::create_dir_all(&runtime).unwrap();
@@ -362,7 +376,8 @@ fn clean只删除项目运行时目录且可重复执行() {
 }
 
 #[test]
-fn clean拒绝删除同名普通文件() {
+// clean拒绝删除同名普通文件。
+fn clean_rejects_regular_file_with_runtime_name() {
     let directory = temporary_directory("clean-file");
     let runtime = directory.join(".procora");
     fs::write(&runtime, "not a directory").unwrap();
@@ -378,7 +393,8 @@ fn clean拒绝删除同名普通文件() {
 }
 
 #[test]
-fn deps命令可以同步并离线验证本地文件() {
+// deps命令可以同步并离线验证本地文件。
+fn deps_syncs_and_offline_checks_local_files() {
     let directory = temporary_directory("deps");
     fs::write(directory.join("asset.bin"), "managed asset").unwrap();
     fs::write(

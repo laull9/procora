@@ -32,7 +32,8 @@ fn temporary_directory(label: &str) -> PathBuf {
 }
 
 #[test]
-fn 三种格式片段按声明顺序合并且入口优先() {
+// 三种格式片段按声明顺序合并且入口优先。
+fn format_fragments_merge_in_order_with_entry_priority() {
     let root = temporary_directory("merge");
     let fragments = root.join("fragments");
     fs::create_dir_all(&fragments).unwrap();
@@ -71,7 +72,8 @@ fn 三种格式片段按声明顺序合并且入口优先() {
 }
 
 #[test]
-fn include可以跨文件声明依赖边并拒绝身份冲突() {
+// include可以跨文件声明依赖边并拒绝身份冲突。
+fn include_supports_cross_file_edges_and_rejects_identity_conflicts() {
     let root = temporary_directory("identity");
     fs::write(
         root.join("tasks.yaml"),
@@ -97,7 +99,8 @@ fn include可以跨文件声明依赖边并拒绝身份冲突() {
 }
 
 #[test]
-fn include拒绝父目录循环和过深闭包() {
+// include拒绝父目录循环和过深闭包。
+fn include_rejects_parent_cycles_and_excessive_depth() {
     let root = temporary_directory("limits");
     let outside = root.parent().unwrap().join("outside.yaml");
     fs::write(&outside, "tasks: {}\n").unwrap();
@@ -151,7 +154,8 @@ fn include拒绝父目录循环和过深闭包() {
 
 #[cfg(unix)]
 #[test]
-fn include拒绝通过符号链接逃逸和超大输入() {
+// include拒绝通过符号链接逃逸和超大输入。
+fn include_rejects_symlink_escape_and_oversized_input() {
     use std::os::unix::fs::symlink;
 
     let root = temporary_directory("symlink");
@@ -188,7 +192,8 @@ fn include拒绝通过符号链接逃逸和超大输入() {
 }
 
 #[test]
-fn 入口必须显式声明身份() {
+// 入口必须显式声明身份。
+fn entry_must_declare_identity() {
     let root = temporary_directory("entry-identity");
     fs::write(
         root.join("base.yaml"),
@@ -204,7 +209,8 @@ fn 入口必须显式声明身份() {
 }
 
 #[test]
-fn 无路径内存加载拒绝静默忽略include() {
+// 无路径内存加载拒绝静默忽略include。
+fn in_memory_load_without_path_rejects_includes() {
     let error = procora::config::load_str(
         "include: [base.yaml]\nversion: 1\nproject: demo\ntasks: {}\n",
         procora::config::ConfigFormat::Yaml,
@@ -215,7 +221,8 @@ fn 无路径内存加载拒绝静默忽略include() {
 }
 
 #[test]
-fn 闭包修订随include内容变化且不依赖入口改写() {
+// 闭包修订随include内容变化且不依赖入口改写。
+fn closure_revision_tracks_include_content() {
     let root = temporary_directory("revision");
     let entry = write_entry(&root, "child.yaml");
     fs::write(
@@ -238,7 +245,8 @@ fn 闭包修订随include内容变化且不依赖入口改写() {
 }
 
 #[test]
-fn 缺失include创建后监听器会产生完整候选() {
+// 缺失include创建后监听器会产生完整候选。
+fn creating_missing_include_produces_complete_candidate() {
     let root = temporary_directory("watch-missing");
     let entry = write_entry(&root, "missing.yaml");
     let source = LocalFileSource::new(&entry);

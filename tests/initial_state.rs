@@ -4,7 +4,8 @@ use procora::config::{ConfigFormat, load_str};
 use procora::engine::{DesiredState, Engine, ObservedState};
 
 #[test]
-fn 新引擎为每个任务建立等待运行状态() {
+// 新引擎为每个任务建立等待运行状态。
+fn new_engine_initializes_each_task_as_pending() {
     let compiled = load_str(
         "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
         ConfigFormat::Yaml,

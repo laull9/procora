@@ -31,7 +31,8 @@ fn temporary_service() -> PathBuf {
 }
 
 #[test]
-fn completed依赖会运行真实进程并写入service本地日志() {
+// completed依赖会运行真实进程并写入service本地日志。
+fn completed_dependency_runs_real_process_and_writes_logs() {
     let service = temporary_service();
     let compiled = load_str(
         "version: 1\nproject: runtime\ntasks:\n  prepare:\n    command: rustc\n    args: ['--version']\n  app:\n    command: rustc\n    args: ['--version']\n    depends_on:\n      prepare:\n        condition: completed_successfully\n",
@@ -72,7 +73,8 @@ fn completed依赖会运行真实进程并写入service本地日志() {
 }
 
 #[test]
-fn 可重试的创建失败不会击穿service宿主() {
+// 可重试的创建失败不会击穿service宿主。
+fn retryable_spawn_failure_does_not_break_service_host() {
     let service = temporary_service();
     let compiled = load_str(
         "version: 1\nproject: runtime\ntasks:\n  app:\n    command: procora-command-that-does-not-exist\n    restart: on-failure\n    restart_delay_ms: 10\n",
@@ -89,7 +91,8 @@ fn 可重试的创建失败不会击穿service宿主() {
 
 #[cfg(unix)]
 #[test]
-fn stop会终止长时间任务并排空最后输出() {
+// stop会终止长时间任务并排空最后输出。
+fn stop_terminates_long_task_and_drains_output() {
     let service = temporary_service();
     let compiled = load_str(
         "version: 1\nproject: runtime\ntasks:\n  app:\n    command: sh\n    args: ['-c', 'printf started; sleep 30']\n    shutdown_timeout_ms: 100\n",
@@ -114,7 +117,8 @@ fn stop会终止长时间任务并排空最后输出() {
 
 #[cfg(unix)]
 #[test]
-fn 顶层进程退出时继承管道的后台后代不会阻塞宿主() {
+// 顶层进程退出时继承管道的后台后代不会阻塞宿主。
+fn inherited_pipe_descendant_does_not_block_host_exit() {
     let service = temporary_service();
     let compiled = load_str(
         "version: 1\nproject: runtime\ntasks:\n  app:\n    command: sh\n    args: ['-c', 'sleep 30 &']\n",
@@ -143,7 +147,8 @@ fn 顶层进程退出时继承管道的后台后代不会阻塞宿主() {
 
 #[cfg(unix)]
 #[test]
-fn on_failure会在退避后创建新run() {
+// on_failure会在退避后创建新run。
+fn on_failure_creates_new_run_after_backoff() {
     let service = temporary_service();
     let counter = service.join("runs.txt");
     let configuration = format!(

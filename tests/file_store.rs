@@ -35,7 +35,8 @@ fn read_single_archive(directory: &Path) -> Vec<u8> {
 }
 
 #[test]
-fn 服务日志保存在服务目录并自动压缩() {
+// 服务日志保存在服务目录并自动压缩。
+fn service_logs_stay_in_service_directory_and_rotate() {
     let service = temporary_service();
     let store = FileLogStore::new(
         &service,
@@ -55,7 +56,8 @@ fn 服务日志保存在服务目录并自动压缩() {
 }
 
 #[test]
-fn task日志独立轮转并执行归档保留策略() {
+// task日志独立轮转并执行归档保留策略。
+fn task_logs_rotate_independently_and_enforce_retention() {
     let service = temporary_service();
     let store = FileLogStore::new(
         &service,
@@ -88,7 +90,8 @@ fn task日志独立轮转并执行归档保留策略() {
 }
 
 #[test]
-fn 文件游标可以续读并在轮转后报告gap() {
+// 文件游标可以续读并在轮转后报告gap。
+fn file_cursor_resumes_and_reports_gap_after_rotation() {
     let service = temporary_service();
     let store = FileLogStore::new(
         &service,
@@ -121,7 +124,8 @@ fn 文件游标可以续读并在轮转后报告gap() {
 }
 
 #[test]
-fn gzip归档总字节上限可以独立触发清理() {
+// gzip归档总字节上限可以独立触发清理。
+fn gzip_archive_byte_limit_triggers_cleanup() {
     let service = temporary_service();
     let store = FileLogStore::new(
         &service,

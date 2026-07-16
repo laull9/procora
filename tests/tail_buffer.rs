@@ -18,7 +18,8 @@ fn frame(sequence: u64) -> LogFrame {
 }
 
 #[test]
-fn 缓冲区只保留最新帧() {
+// 缓冲区只保留最新帧。
+fn tail_buffer_keeps_latest_frames() {
     let mut buffer = TailBuffer::new(2);
     buffer.push(frame(1));
     buffer.push(frame(2));
