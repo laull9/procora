@@ -12,7 +12,6 @@ use std::{
 
 use crate::{
     daemon::CenterClient,
-    platform::autostart::{self, DaemonAutostart},
     protocol::{CenterRequest, CenterResponse},
 };
 use anyhow::{Context, bail};
@@ -65,18 +64,10 @@ fn reconcile_running_center(
         return Ok(client);
     }
 
-    let definition = DaemonAutostart::new(&paths.executable, &paths.endpoint, &paths.database);
-    let managed = autostart::is_enabled(&definition).context("检查开机自启动状态失败")?;
     shutdown_center(&client).context("停止旧版本全局 Procora 服务器失败")?;
     install_current_executable(&paths.executable)?;
-    if managed {
-        definition
-            .enable()
-            .context("更新开机自启动中的 Procora 版本失败")?;
-    } else {
-        spawn_center_process(&paths.executable, paths)
-            .context("启动更新后的全局 Procora 服务器失败")?;
-    }
+    spawn_center_process(&paths.executable, paths)
+        .context("启动更新后的全局 Procora 服务器失败")?;
     let updated = CenterClient::new(paths.endpoint.clone());
     wait_until_ready(&updated, Duration::from_secs(5))?;
     let hello = updated.hello("procora-cli")?;

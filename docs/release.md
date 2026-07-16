@@ -28,7 +28,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 两个脚本都支持以下环境变量：
 
-- `PROCORA_VERSION`：默认 `latest`；可设为 `v0.2.0` 等固定标签。
+- `PROCORA_VERSION`：默认 `latest`；可设为 `v0.2.1` 等固定标签。
 - `PROCORA_INSTALL_DIR`：覆盖默认安装目录。
 - `PROCORA_REPO`：覆盖默认 GitHub 仓库 `laull/procora`，用于 fork 或发布演练。
 

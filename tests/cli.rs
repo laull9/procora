@@ -10,6 +10,11 @@ use std::{
 use clap::Parser;
 use procora::cli::{Cli, Command, ServerCommand};
 
+#[path = "support/command.rs"]
+mod command_support;
+
+use command_support::{remove_directory_when_released, run_background_cli};
+
 /// 创建当前测试独占的临时目录。
 fn temporary_directory(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -50,7 +55,12 @@ fn 帮助命令可以执行() {
     assert!(stdout.contains("status"));
     assert!(stdout.contains("enable"));
     assert!(stdout.contains("disable"));
-    assert!(stdout.contains("procora [PATH]"));
+    let usage = if cfg!(windows) {
+        "procora.exe [PATH]"
+    } else {
+        "procora [PATH]"
+    };
+    assert!(stdout.contains(usage));
 }
 
 #[test]
@@ -101,11 +111,13 @@ fn init默认不覆盖已有配置() {
 fn up_status_down形成中心进程闭环() {
     let home = temporary_directory("center-lifecycle");
     let binary = env!("CARGO_BIN_EXE_procora");
-    let up = ProcessCommand::new(binary)
-        .arg("up")
-        .env("PROCORA_HOME", &home)
-        .output()
-        .unwrap();
+    let up = run_background_cli(
+        ProcessCommand::new(binary)
+            .arg("up")
+            .env("PROCORA_HOME", &home),
+        &home,
+        "up",
+    );
     assert!(up.status.success());
     assert!(String::from_utf8_lossy(&up.stdout).contains("全局 Procora：运行中"));
     let installed = if cfg!(windows) {
@@ -130,7 +142,7 @@ fn up_status_down形成中心进程闭环() {
         .unwrap();
     assert!(down.status.success());
     assert!(String::from_utf8_lossy(&down.stdout).contains("全局 Procora：已停止"));
-    fs::remove_dir_all(home).unwrap();
+    remove_directory_when_released(&home);
 }
 
 #[test]
@@ -307,12 +319,14 @@ fn server_remove删除注册但保留服务目录() {
     .unwrap();
     let binary = env!("CARGO_BIN_EXE_procora");
 
-    let opened = ProcessCommand::new(binary)
-        .arg("server")
-        .arg(&service)
-        .env("PROCORA_HOME", &home)
-        .output()
-        .unwrap();
+    let opened = run_background_cli(
+        ProcessCommand::new(binary)
+            .arg("server")
+            .arg(&service)
+            .env("PROCORA_HOME", &home),
+        &home,
+        "server-open",
+    );
     assert!(opened.status.success());
     let removed = ProcessCommand::new(binary)
         .args(["server", "remove", "removable"])
@@ -336,7 +350,7 @@ fn server_remove删除注册但保留服务目录() {
         .output()
         .unwrap();
     assert!(down.status.success());
-    fs::remove_dir_all(home).unwrap();
+    remove_directory_when_released(&home);
     fs::remove_dir_all(service).unwrap();
 }
 

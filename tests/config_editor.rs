@@ -3,6 +3,7 @@
 use std::{
     fs,
     path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -11,14 +12,18 @@ use procora::config::ConfigFormat;
 use procora::tui::ConfigEditor;
 use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
 
+/// 同一进程内并行创建临时配置时使用的去重序号。
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
 /// 创建当前测试独占的配置路径。
 fn temporary_config() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "procora-editor-{}-{nonce}.yaml",
+        "procora-editor-{}-{nonce}-{sequence}.yaml",
         std::process::id()
     ))
 }

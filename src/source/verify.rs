@@ -1,4 +1,7 @@
-use std::{fs, path::Path, process::Command};
+use std::{path::Path, process::Command};
+
+#[cfg(unix)]
+use std::fs;
 
 use crate::config::{DependencyKind, DependencyVerifySpec};
 

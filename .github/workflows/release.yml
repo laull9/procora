@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 要创建或更新的 Release 标签，例如 v0.1.0
+        description: 要创建或更新的 Release 标签，例如 v0.2.1
         required: true
         type: string
 
@@ -43,10 +43,10 @@ jobs:
             features: --all-features
           - name: macOS ARM64
             runner: macos-15
-            features: --all-features
+            features: ""
           - name: Windows x86_64
             runner: windows-2025
-            features: --all-features
+            features: ""
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4

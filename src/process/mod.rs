@@ -3,9 +3,11 @@
 use std::{
     io,
     process::{ChildStderr, ChildStdout, ExitStatus, Stdio},
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
+
+#[cfg(unix)]
+use std::{thread, time::Instant};
 
 use crate::core::TaskSpec;
 #[cfg(windows)]
@@ -78,6 +80,8 @@ impl ManagedChild {
     ///
     /// 当信号发送、状态查询或强制终止失败时返回错误。
     pub fn stop(&mut self, timeout: Duration) -> io::Result<StopOutcome> {
+        #[cfg(windows)]
+        let _ = timeout;
         if let Some(status) = self.inner.try_wait()? {
             return Ok(StopOutcome {
                 status,
@@ -87,7 +91,17 @@ impl ManagedChild {
         #[cfg(unix)]
         {
             const SIGTERM: i32 = 15;
-            self.inner.signal(SIGTERM)?;
+            if let Err(error) = self.inner.signal(SIGTERM) {
+                if process_tree_may_have_exited(&error)
+                    && let Some(status) = self.inner.try_wait()?
+                {
+                    return Ok(StopOutcome {
+                        status,
+                        forced: self.kill_remaining_tree()?,
+                    });
+                }
+                return Err(error);
+            }
             let deadline = Instant::now() + timeout;
             loop {
                 if let Some(status) = self.inner.try_wait()? {
@@ -140,6 +154,15 @@ impl ManagedChild {
                 let _ = self.inner.wait();
                 Ok(false)
             }
+            #[cfg(unix)]
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                if self.inner.try_wait()?.is_some() {
+                    let _ = self.inner.wait();
+                    Ok(false)
+                } else {
+                    Err(error)
+                }
+            }
             Err(error) => Err(error),
         }
     }
@@ -160,6 +183,15 @@ fn process_tree_is_gone(error: &io::Error) -> bool {
     }
     #[cfg(not(unix))]
     false
+}
+
+/// macOS 可能在进程组刚退出的竞态窗口返回权限错误，需结合退出状态复核。
+#[cfg(unix)]
+fn process_tree_may_have_exited(error: &io::Error) -> bool {
+    if process_tree_is_gone(error) {
+        return true;
+    }
+    error.kind() == io::ErrorKind::PermissionDenied
 }
 
 /// 根据任务规范启动隔离的受管子进程。

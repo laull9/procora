@@ -3,9 +3,13 @@
 use std::{
     collections::BTreeMap,
     io::Read,
+    time::{Duration, Instant},
+};
+
+#[cfg(unix)]
+use std::{
     process::{Command, Stdio},
     thread,
-    time::{Duration, Instant},
 };
 
 use procora::core::{RestartPolicy, TaskSpec};

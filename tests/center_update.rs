@@ -6,13 +6,19 @@ use std::{
     hash::{Hash, Hasher},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output},
     thread,
+    time::{Duration, Instant},
 };
 
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, prelude::*};
 use procora::protocol::{CenterHello, CenterRequest, CenterResponse, PROTOCOL_VERSION};
 use uuid::Uuid;
+
+#[path = "support/command.rs"]
+mod command_support;
+
+use command_support::{remove_directory_when_released, run_background_cli};
 
 /// 创建测试独占的中心数据目录。
 fn temporary_home() -> PathBuf {
@@ -41,11 +47,16 @@ fn spawn_outdated_center(endpoint: &str) -> thread::JoinHandle<()> {
         .unwrap();
     thread::spawn(move || {
         for expected in ["ping", "hello", "shutdown"] {
-            let connection = listener.accept().unwrap();
-            let mut connection = BufReader::new(connection);
-            let mut line = String::new();
-            connection.read_line(&mut line).unwrap();
-            let request: CenterRequest = serde_json::from_str(&line).unwrap();
+            let (request, mut connection) = loop {
+                let connection = listener.accept().unwrap();
+                let mut connection = BufReader::new(connection);
+                let mut line = String::new();
+                if connection.read_line(&mut line).unwrap() == 0 {
+                    continue;
+                }
+                let request: CenterRequest = serde_json::from_str(&line).unwrap();
+                break (request, connection);
+            };
             let response = match (expected, request) {
                 ("ping", CenterRequest::Ping) => CenterResponse::Pong,
                 ("hello", CenterRequest::Hello(_)) => CenterResponse::Hello(CenterHello {
@@ -66,17 +77,33 @@ fn spawn_outdated_center(endpoint: &str) -> thread::JoinHandle<()> {
     })
 }
 
+/// 在硬期限内执行 CLI，避免平台集成错误永久挂住测试进程。
+fn run_cli(binary: &str, home: &Path, argument: &str) -> Output {
+    run_background_cli(
+        Command::new(binary).arg(argument).env("PROCORA_HOME", home),
+        home,
+        argument,
+    )
+}
+
+/// 在硬期限内等待旧中心替身结束，并返回其线程结果。
+fn join_outdated_center(handle: thread::JoinHandle<()>) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !handle.is_finished() {
+        assert!(Instant::now() < deadline, "旧中心替身未在 5 秒内退出");
+        thread::sleep(Duration::from_millis(20));
+    }
+    handle.join().unwrap();
+}
+
 #[test]
 fn status发现旧版本后自动替换为当前版本() {
     let home = temporary_home();
-    let outdated = spawn_outdated_center(&endpoint_for(&home));
+    let endpoint = endpoint_for(&home);
+    let outdated = spawn_outdated_center(&endpoint);
     let binary = env!("CARGO_BIN_EXE_procora");
 
-    let status = Command::new(binary)
-        .arg("status")
-        .env("PROCORA_HOME", &home)
-        .output()
-        .unwrap();
+    let status = run_cli(binary, &home, "status");
     assert!(
         status.status.success(),
         "{}",
@@ -85,13 +112,9 @@ fn status发现旧版本后自动替换为当前版本() {
     let stdout = String::from_utf8_lossy(&status.stdout);
     assert!(stdout.contains("全局 Procora：运行中"));
     assert!(stdout.contains(&format!("版本：{}", env!("CARGO_PKG_VERSION"))));
-    outdated.join().unwrap();
+    join_outdated_center(outdated);
 
-    let down = Command::new(binary)
-        .arg("down")
-        .env("PROCORA_HOME", &home)
-        .output()
-        .unwrap();
+    let down = run_cli(binary, &home, "down");
     assert!(down.status.success());
-    fs::remove_dir_all(home).unwrap();
+    remove_directory_when_released(&home);
 }

@@ -2,12 +2,16 @@
 
 use std::{
     fs,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(windows)]
+use interprocess::local_socket::Stream;
+use interprocess::local_socket::{GenericNamespaced, ListenerOptions, prelude::*};
 use procora::daemon::{CenterClient, IpcError, run_center_server};
 use procora::protocol::{
     CenterRequest, CenterResponse, ClientHello, PROTOCOL_VERSION, ServiceActionDto,
@@ -91,6 +95,63 @@ fn 本地ipc拒绝不兼容协议版本() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+/// 无响应的本地中心不能永久阻塞客户端命令。
+#[test]
+fn 无响应中心请求会在期限内返回() {
+    let (endpoint, directory) = isolated_runtime();
+    let name = endpoint.clone().to_ns_name::<GenericNamespaced>().unwrap();
+    let listener = ListenerOptions::new()
+        .name(name)
+        .try_overwrite(true)
+        .create_sync()
+        .unwrap();
+    let server = thread::spawn(move || {
+        let connection = listener.accept().unwrap();
+        let mut connection = BufReader::new(connection);
+        let mut request = String::new();
+        connection.read_line(&mut request).unwrap();
+        thread::sleep(Duration::from_secs(3));
+    });
+
+    let started = std::time::Instant::now();
+    let result = CenterClient::new(endpoint).request(&CenterRequest::Ping);
+    assert!(matches!(
+        result,
+        Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::TimedOut
+    ));
+    assert!(started.elapsed() < Duration::from_secs(3));
+
+    server.join().unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+/// Windows 管道没有空闲实例时，连接必须在期限内失败而不能无限等待。
+#[cfg(windows)]
+#[test]
+fn windows繁忙中心连接会在期限内返回() {
+    let (endpoint, directory) = isolated_runtime();
+    let name = endpoint.clone().to_ns_name::<GenericNamespaced>().unwrap();
+    let listener = ListenerOptions::new()
+        .name(name)
+        .try_overwrite(true)
+        .create_sync()
+        .unwrap();
+    let occupied_name = endpoint.clone().to_ns_name::<GenericNamespaced>().unwrap();
+    let occupied = Stream::connect(occupied_name).unwrap();
+
+    let started = std::time::Instant::now();
+    let result = CenterClient::new(endpoint).request(&CenterRequest::Ping);
+    assert!(matches!(
+        result,
+        Err(IpcError::Io(error)) if error.kind() == std::io::ErrorKind::TimedOut
+    ));
+    assert!(started.elapsed() < Duration::from_secs(3));
+
+    drop(occupied);
+    drop(listener);
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn 同一中心服务器可以连续处理管理请求() {
     let (endpoint, directory) = isolated_runtime();
@@ -116,7 +177,10 @@ fn 同一中心服务器可以连续处理管理请求() {
     assert!(hello.uses_current_version());
 
     let duplicate = run_center_server("unused-endpoint", &state);
-    assert!(matches!(duplicate, Err(IpcError::AlreadyRunning)));
+    assert!(
+        matches!(duplicate, Err(IpcError::AlreadyRunning)),
+        "重复启动返回了意外结果: {duplicate:?}"
+    );
 
     let opened = client
         .request(&CenterRequest::Open {

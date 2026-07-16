@@ -1,6 +1,6 @@
 use std::{
     fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     path::Path,
     sync::{
         Arc, Mutex,
@@ -10,9 +10,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::sync::OnceLock;
+
 use crate::protocol::{CenterHello, CenterRequest, CenterResponse, ClientHello, PROTOCOL_VERSION};
 use crate::storage::SqliteCenterRepository;
-use fs2::FileExt;
+use fs2::{FileExt, lock_contended_error};
 use interprocess::local_socket::{
     GenericNamespaced, ListenerNonblockingMode, ListenerOptions, Stream, prelude::*,
 };
@@ -61,6 +64,10 @@ const CENTER_TICK_INTERVAL: Duration = Duration::from_millis(20);
 /// 同时处理的本地 IPC 连接线程上限。
 const MAX_CONNECTIONS: usize = 64;
 
+/// Windows 客户端共享的异步运行时，避免每次 IPC 请求重复创建线程池。
+#[cfg(windows)]
+static WINDOWS_IPC_RUNTIME: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+
 /// 通过本地套接字发送单次请求的中心服务器客户端。
 #[derive(Clone, Debug)]
 pub struct CenterClient {
@@ -81,17 +88,17 @@ impl CenterClient {
     ///
     /// 当中心服务器不存在、传输失败或响应无法解码时返回错误。
     pub fn request(&self, request: &CenterRequest) -> Result<CenterResponse, IpcError> {
-        let name = self.endpoint.clone().to_ns_name::<GenericNamespaced>()?;
-        let stream = Stream::connect(name)?;
-        stream.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
-        stream.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
-        let mut connection = BufReader::new(stream);
-        serde_json::to_writer(&mut *connection.get_mut(), request)?;
-        connection.get_mut().write_all(b"\n")?;
-        connection.get_mut().flush()?;
-
-        let response = read_limited_line(&mut connection, MAX_RESPONSE_FRAME_BYTES)?;
-        Ok(serde_json::from_str(&response)?)
+        #[cfg(windows)]
+        return request_windows(&self.endpoint, request);
+        #[cfg(not(windows))]
+        {
+            let name = self.endpoint.clone().to_ns_name::<GenericNamespaced>()?;
+            let mut connection = Stream::connect(name)?;
+            configure_client_io(&connection)?;
+            write_json_line(&mut connection, request)?;
+            let response = read_limited_line(&mut connection, MAX_RESPONSE_FRAME_BYTES)?;
+            Ok(serde_json::from_str(&response)?)
+        }
     }
 
     /// 探测端点是否存在可用的 Procora 中心服务器。
@@ -140,7 +147,10 @@ pub fn run_center_server(endpoint: &str, database_path: &Path) -> Result<(), Ipc
         .truncate(false)
         .open(lock_path)?;
     if let Err(error) = lock_file.try_lock_exclusive() {
-        if error.kind() == std::io::ErrorKind::WouldBlock {
+        let contended = lock_contended_error();
+        if error.kind() == std::io::ErrorKind::WouldBlock
+            || error.raw_os_error() == contended.raw_os_error()
+        {
             return Err(IpcError::AlreadyRunning);
         }
         return Err(error.into());
@@ -198,9 +208,8 @@ fn handle_connection(
     stopping: &AtomicBool,
 ) -> Result<(), IpcError> {
     authorize_peer(&connection)?;
-    connection.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
-    connection.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
-    let mut connection = BufReader::new(connection);
+    configure_server_io(&connection)?;
+    let mut connection = connection;
     let request = read_limited_line(&mut connection, MAX_REQUEST_FRAME_BYTES)?;
     let request: CenterRequest = serde_json::from_str(&request)?;
     let should_stop = matches!(request, CenterRequest::Shutdown);
@@ -217,26 +226,176 @@ fn handle_connection(
             center.handle(request)
         }
     };
-    serde_json::to_writer(&mut *connection.get_mut(), &response)?;
-    connection.get_mut().write_all(b"\n")?;
-    connection.get_mut().flush()?;
+    write_json_line(&mut connection, &response)?;
+    Ok(())
+}
+
+/// Unix 客户端使用本地套接字原生读写超时。
+#[cfg(not(windows))]
+fn configure_client_io(connection: &Stream) -> Result<(), IpcError> {
+    connection.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
+    connection.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
+    Ok(())
+}
+
+/// 服务端在 Unix 使用原生超时，Windows 保持阻塞以避免空读取竞态。
+fn configure_server_io(connection: &Stream) -> Result<(), IpcError> {
+    #[cfg(not(windows))]
+    {
+        connection.set_recv_timeout(Some(CONNECTION_TIMEOUT))?;
+        connection.set_send_timeout(Some(CONNECTION_TIMEOUT))?;
+    }
+    #[cfg(windows)]
+    let _ = connection;
+    Ok(())
+}
+
+/// 把一个 JSON 值编码成换行结尾的协议帧并完整写出。
+fn write_json_line<T: serde::Serialize + ?Sized>(
+    connection: &mut Stream,
+    value: &T,
+) -> Result<(), IpcError> {
+    let mut frame = serde_json::to_vec(value)?;
+    frame.push(b'\n');
+    let deadline = Instant::now() + CONNECTION_TIMEOUT;
+    let mut written = 0;
+    while written < frame.len() {
+        match connection.write(&frame[written..]) {
+            Ok(0) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "中心服务器 IPC 未能写入完整协议帧",
+                )
+                .into());
+            }
+            Ok(count) => written += count,
+            Err(error) if retry_io(&error, deadline) => {}
+            Err(error) => return Err(normalize_timeout(error, deadline).into()),
+        }
+    }
+    connection.flush()?;
     Ok(())
 }
 
 /// 读取一条带换行结束符且大小受限的 UTF-8 JSON 帧。
-fn read_limited_line(
-    connection: &mut BufReader<Stream>,
-    max_bytes: usize,
-) -> Result<String, IpcError> {
-    let mut response = String::new();
-    let mut limited = connection
-        .by_ref()
-        .take(u64::try_from(max_bytes + 1).unwrap_or(u64::MAX));
-    limited.read_line(&mut response)?;
-    if response.len() > max_bytes || !response.ends_with('\n') {
+fn read_limited_line(connection: &mut Stream, max_bytes: usize) -> Result<String, IpcError> {
+    let deadline = Instant::now() + CONNECTION_TIMEOUT;
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    while response.len() <= max_bytes {
+        let remaining = max_bytes + 1 - response.len();
+        let capacity = remaining.min(buffer.len());
+        match connection.read(&mut buffer[..capacity]) {
+            Ok(0) => break,
+            Ok(count) => {
+                let bytes = &buffer[..count];
+                if let Some(end) = bytes.iter().position(|byte| *byte == b'\n') {
+                    response.extend_from_slice(&bytes[..=end]);
+                    break;
+                }
+                response.extend_from_slice(bytes);
+            }
+            Err(error) if retry_io(&error, deadline) => {}
+            Err(error) => return Err(normalize_timeout(error, deadline).into()),
+        }
+    }
+    if response.len() > max_bytes || !response.ends_with(b"\n") {
         return Err(IpcError::FrameTooLarge(max_bytes));
     }
-    Ok(response)
+    String::from_utf8(response)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error).into())
+}
+
+/// 对非阻塞或原生超时错误执行短暂退避，并指示调用方是否应重试。
+fn retry_io(error: &std::io::Error, deadline: Instant) -> bool {
+    if is_transient_io(error) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+        true
+    } else {
+        false
+    }
+}
+
+/// 把到达应用层期限的瞬时错误统一转换为明确的超时错误。
+fn normalize_timeout(error: std::io::Error, deadline: Instant) -> std::io::Error {
+    if is_transient_io(&error) && Instant::now() >= deadline {
+        std::io::Error::new(std::io::ErrorKind::TimedOut, "中心服务器 IPC 读写超时")
+    } else {
+        error
+    }
+}
+
+/// 判断错误是否表示当前传输暂时没有可读写数据。
+fn is_transient_io(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
+}
+
+/// Windows 使用异步命名管道执行带整体期限的单次请求。
+#[cfg(windows)]
+fn request_windows(endpoint: &str, request: &CenterRequest) -> Result<CenterResponse, IpcError> {
+    use interprocess::{ConnectWaitMode, local_socket::ConnectOptions};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let runtime = WINDOWS_IPC_RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|message| {
+            IpcError::Io(std::io::Error::other(format!(
+                "无法创建 Windows IPC 运行时: {message}"
+            )))
+        })?;
+    let name = endpoint.to_owned().to_ns_name::<GenericNamespaced>()?;
+    runtime.block_on(async {
+        tokio::time::timeout(CONNECTION_TIMEOUT, async {
+            let options = ConnectOptions::new()
+                .name(name)
+                .wait_mode(ConnectWaitMode::Timeout(CONNECTION_TIMEOUT));
+            let mut connection = options.connect_tokio().await?;
+            let mut frame = serde_json::to_vec(request)?;
+            frame.push(b'\n');
+            connection.write_all(&frame).await?;
+            connection.flush().await?;
+
+            let mut response = Vec::new();
+            let mut buffer = [0_u8; 8192];
+            while response.len() <= MAX_RESPONSE_FRAME_BYTES {
+                let remaining = MAX_RESPONSE_FRAME_BYTES + 1 - response.len();
+                let capacity = remaining.min(buffer.len());
+                let count = connection.read(&mut buffer[..capacity]).await?;
+                if count == 0 {
+                    break;
+                }
+                let bytes = &buffer[..count];
+                if let Some(end) = bytes.iter().position(|byte| *byte == b'\n') {
+                    response.extend_from_slice(&bytes[..=end]);
+                    break;
+                }
+                response.extend_from_slice(bytes);
+            }
+            if response.len() > MAX_RESPONSE_FRAME_BYTES || !response.ends_with(b"\n") {
+                return Err(IpcError::FrameTooLarge(MAX_RESPONSE_FRAME_BYTES));
+            }
+            let response = String::from_utf8(response)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+            Ok(serde_json::from_str(&response)?)
+        })
+        .await
+        .map_err(|_| {
+            IpcError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "中心服务器 IPC 读写超时",
+            ))
+        })?
+    })
 }
 
 /// 回收已经结束的连接线程，避免长期运行时积累句柄。
