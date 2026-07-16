@@ -6,13 +6,17 @@ use crate::platform::{
     capabilities,
 };
 use crate::protocol::{
-    CenterHello, CenterRequest, CenterResponse, ServiceActionDto, ServiceSelectorDto,
-    ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto, SnapshotSourceDto,
+    CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ServiceActionDto,
+    ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
+    SnapshotSourceDto,
 };
 use anyhow::{Context, bail};
+use clap::CommandFactory;
+use clap_complete::generate;
 
 use super::{
-    Command, ServerArgs, ServerCommand, center_runtime, project, session, suggestion, template,
+    Cli, Command, ServerArgs, ServerCommand, center_runtime, project, session, source, suggestion,
+    template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -37,11 +41,17 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         Some(Command::Enable) => enable_autostart(),
         Some(Command::Disable) => disable_autostart(),
         Some(Command::Server(arguments)) => server(arguments),
+        Some(Command::Source(arguments)) => source::run(arguments.command),
         Some(Command::Show { target }) => show(&target),
         Some(Command::Validate { path }) => project::validate(&path),
         Some(Command::Graph { path }) => project::graph(&path),
+        Some(Command::Config { path }) => project::effective_config(&path),
         Some(Command::Doctor) => {
             doctor();
+            Ok(())
+        }
+        Some(Command::Completions { shell }) => {
+            completions(shell);
             Ok(())
         }
         Some(Command::Daemon { endpoint, database }) => {
@@ -50,12 +60,19 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
     }
 }
 
+/// 把目标 shell 的补全脚本写到标准输出。
+fn completions(shell: clap_complete::Shell) {
+    let mut command = Cli::command();
+    generate(shell, &mut command, "procora", &mut std::io::stdout());
+}
+
 /// 在指定路径连接已有服务，或创建与 TUI 同生命周期的临时宿主。
 fn open_tui(target: Option<&Path>) -> anyhow::Result<()> {
     let target = target.map_or_else(
         || env::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
+    project::warn_python_execution(&target);
     if let Some(client) = center_runtime::running_center()? {
         let hello = client.hello("procora-tui")?;
         let mut selector = ServiceSelectorDto::Path(target.clone());
@@ -105,6 +122,7 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
                     path.display()
                 );
             }
+            project::warn_python_execution(&path);
             let client = center_runtime::ensure_center()?;
             let service = expect_service(client.request(&CenterRequest::Open { path })?)?;
             print_service(&service);
@@ -124,10 +142,14 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
         (None, Some(ServerCommand::Restart { target })) => {
             manage(ServiceActionDto::Restart, &target)
         }
+        (None, Some(ServerCommand::Preview { target })) => preview_config(&target),
+        (None, Some(ServerCommand::Apply { target, revision })) => apply_config(&target, &revision),
         (None, Some(ServerCommand::Stop { target })) => manage(ServiceActionDto::Stop, &target),
         (None, Some(ServerCommand::Remove { target })) => remove(&target),
         (None, None) => {
-            bail!("`procora server` 需要 PATH 或 list/history/start/restart/stop/remove 子命令")
+            bail!(
+                "`procora server` 需要 PATH 或 list/history/start/restart/preview/apply/stop/remove 子命令"
+            )
         }
         (Some(_), Some(_)) => bail!("服务路径和管理子命令不能同时使用"),
     }
@@ -249,6 +271,34 @@ fn manage(action: ServiceActionDto, target: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 预览配置候选并输出稳定修订与确定性 Task 影响集合。
+fn preview_config(target: &str) -> anyhow::Result<()> {
+    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
+    let candidate = match client.request(&CenterRequest::PreviewConfig {
+        selector: selector(target),
+    })? {
+        CenterResponse::ConfigCandidate(candidate) => candidate,
+        CenterResponse::Error { message } => bail!(message),
+        response => return unexpected_response(&response),
+    };
+    print_candidate(&candidate);
+    if !candidate.valid {
+        bail!("候选配置无效，当前有效修订保持不变");
+    }
+    Ok(())
+}
+
+/// 应用用户已经预览的精确配置修订。
+fn apply_config(target: &str, revision: &str) -> anyhow::Result<()> {
+    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
+    let service = expect_service(client.request(&CenterRequest::ApplyConfig {
+        selector: selector(target),
+        revision: revision.to_owned(),
+    })?)?;
+    print_service(&service);
+    Ok(())
+}
+
 /// 停止并从中心注册表删除指定服务，但保留用户服务目录。
 fn remove(target: &str) -> anyhow::Result<()> {
     let client = center_runtime::ensure_center()?;
@@ -339,6 +389,38 @@ fn print_service(service: &ServiceViewDto) {
     );
     if let Some(message) = &service.message {
         println!("  {message}");
+    }
+}
+
+/// 输出配置候选及按类别排序的 Task 影响。
+fn print_candidate(candidate: &ConfigCandidateDto) {
+    println!(
+        "修订：{}",
+        candidate.revision.as_deref().unwrap_or("<unreadable>")
+    );
+    println!("有效：{}", if candidate.valid { "是" } else { "否" });
+    if let Some(diff) = &candidate.diff {
+        println!("新增：{}", task_ids(&diff.added));
+        println!("删除：{}", task_ids(&diff.removed));
+        println!("重启：{}", task_ids(&diff.restart));
+        println!("原地更新：{}", task_ids(&diff.update_in_place));
+        println!("无影响：{}", task_ids(&diff.unchanged));
+    }
+    if let Some(message) = &candidate.message {
+        println!("说明：{message}");
+    }
+}
+
+/// 把确定性 Task 标识集合格式化为紧凑终端文本。
+fn task_ids(task_ids: &[crate::core::TaskId]) -> String {
+    if task_ids.is_empty() {
+        "-".to_owned()
+    } else {
+        task_ids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 

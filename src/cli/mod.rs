@@ -5,6 +5,7 @@ mod project;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
 pub mod session;
+mod source;
 mod suggestion;
 mod template;
 
@@ -78,6 +79,8 @@ pub enum Command {
     Disable,
     /// 注册、列出或管理本机托管服务。
     Server(ServerArgs),
+    /// 获取并确认不会自动应用的外部任务定义候选。
+    Source(SourceArgs),
     /// 打开指定名称或路径服务的 TUI。
     Show {
         /// 配置中的服务名称、服务目录或显式配置文件。
@@ -85,16 +88,27 @@ pub enum Command {
     },
     /// 解析配置并检查任务依赖图。
     Validate {
-        /// YAML、TOML、JSON 配置文件或可自动发现配置的目录。
+        /// 声明式配置、显式 `procora.py` 或可自动发现配置的目录。
         path: PathBuf,
     },
     /// 输出任务的启动拓扑顺序。
     Graph {
-        /// YAML、TOML、JSON 配置文件或可自动发现配置的目录。
+        /// 声明式配置、显式 `procora.py` 或可自动发现配置的目录。
+        path: PathBuf,
+    },
+    /// 输出包含默认值与规范化路径的有效配置 JSON。
+    Config {
+        /// 声明式配置、显式 `procora.py` 或可自动发现配置的目录。
         path: PathBuf,
     },
     /// 检查当前平台基础能力。
     Doctor,
+    /// 输出指定 shell 的命令补全脚本。
+    Completions {
+        /// 目标 shell。
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// 运行内部全局服务器进程。
     #[command(name = "__daemon", hide = true)]
     Daemon {
@@ -105,6 +119,63 @@ pub enum Command {
         #[arg(long)]
         database: PathBuf,
     },
+}
+
+/// `procora source` 的任务定义来源命令。
+#[derive(Debug, Args)]
+pub struct SourceArgs {
+    /// 要使用的来源类型。
+    #[command(subcommand)]
+    pub command: SourceCommand,
+}
+
+/// 当前支持的外部任务定义来源。
+#[derive(Debug, Subcommand)]
+pub enum SourceCommand {
+    /// 从 Git 仓库获取固定提交候选。
+    Git {
+        /// Git 候选操作。
+        #[command(subcommand)]
+        command: GitSourceCommand,
+    },
+}
+
+/// Git 来源只读预览与重新确认命令。
+#[derive(Debug, Subcommand)]
+pub enum GitSourceCommand {
+    /// 获取引用并输出不可变提交候选，不注册或启动 Task。
+    Preview(GitDefinitionArgs),
+    /// 重新获取并确认修订仍未变化，不注册或启动 Task。
+    Confirm(GitConfirmArgs),
+}
+
+/// Git 来源仓库、引用、配置入口和缓存参数。
+#[derive(Debug, Args)]
+pub struct GitDefinitionArgs {
+    /// HTTPS/SSH/SCP 仓库，配合 `--local` 时为本地仓库路径。
+    pub repository: String,
+    /// 分支、标签或完整提交引用。
+    #[arg(long, default_value = "HEAD")]
+    pub reference: String,
+    /// 仓库内的相对声明式配置入口。
+    #[arg(long, default_value = "procora.yaml")]
+    pub config: PathBuf,
+    /// 把 repository 显式视为可信本地仓库路径。
+    #[arg(long)]
+    pub local: bool,
+    /// checkout 缓存目录；省略时使用当前用户 Procora 数据目录。
+    #[arg(long)]
+    pub cache: Option<PathBuf>,
+}
+
+/// Git 候选重新确认参数。
+#[derive(Debug, Args)]
+pub struct GitConfirmArgs {
+    /// 与 preview 相同的来源参数。
+    #[command(flatten)]
+    pub definition: GitDefinitionArgs,
+    /// `preview` 输出的完整组合修订。
+    pub revision: String,
 }
 
 /// `procora server` 的路径参数与嵌套管理命令。
@@ -137,6 +208,18 @@ pub enum ServerCommand {
     Restart {
         /// 配置中的服务名称、服务目录或显式配置文件。
         target: String,
+    },
+    /// 预览候选修订及 Task 影响，不产生运行副作用。
+    Preview {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+    },
+    /// 应用经过 preview 确认且内容没有变化的候选修订。
+    Apply {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+        /// `preview` 输出的完整 SHA-256 修订值。
+        revision: String,
     },
     /// 停止指定名称或路径的服务。
     Stop {

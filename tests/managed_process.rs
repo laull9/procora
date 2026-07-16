@@ -1,7 +1,7 @@
 //! 真实子进程输出、退出与整树停止契约测试。
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::Read,
     time::{Duration, Instant},
 };
@@ -22,6 +22,8 @@ fn task(command: &str, args: &[&str]) -> TaskSpec {
         args: args.iter().map(|value| (*value).to_owned()).collect(),
         cwd: None,
         env: BTreeMap::new(),
+        healthcheck: None,
+        success_exit_codes: BTreeSet::from([0]),
         depends_on: BTreeMap::new(),
         restart: RestartPolicy::Never,
         restart_delay_ms: 10,

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 要创建或更新的 Release 标签，例如 v0.2.1
+        description: 要创建或更新的 Release 标签，例如 v0.3.0
         required: true
         type: string
 

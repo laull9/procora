@@ -1,0 +1,48 @@
+# Procora 的依赖图按全部 feature 和三类供应链策略审计。
+[graph]
+all-features = true
+
+# 漏洞由独立 RustSec 工作流阻断；本节保留为本地统一检查入口。
+[advisories]
+ignore = []
+
+# 允许宽松许可证；强 copyleft 只能通过逐 crate 例外评审。
+[licenses]
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+unused-allowed-license = "allow"
+exceptions = [
+    # directories 的平台适配仅通过 option-ext 引入弱 copyleft 代码。
+    { allow = ["MPL-2.0"], crate = "option-ext@0.2.0" },
+    # ureq 的公开 TLS 根证书数据使用该宽松数据许可证。
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+]
+
+# 当前 crate 不发布，依赖许可证仍会继续检查。
+[licenses.private]
+ignore = true
+
+# 重复的传递依赖先告警，直接依赖禁止通配版本。
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+# 仅允许 crates.io；新增 Git 或私有 registry 必须显式评审。
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

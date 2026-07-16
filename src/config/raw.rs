@@ -9,14 +9,19 @@ use crate::core::{
 use serde::Deserialize;
 
 use super::ConfigDiagnostic;
+use super::health::{RawHealthCheck, normalize_healthcheck};
 use super::{
     DependencyKind, DependencyVerifySpec, ManagedDependencies, ManagedDependencySpec, UnpackMode,
 };
+
+mod merge;
 
 /// 配置前端反序列化使用的原始项目 DTO。
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawProject {
+    #[serde(default)]
+    include: Vec<PathBuf>,
     version: Option<u32>,
     project: Option<String>,
     #[serde(default)]
@@ -80,6 +85,9 @@ struct RawTask {
     cwd: Option<PathBuf>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+    healthcheck: Option<RawHealthCheck>,
+    #[serde(default)]
+    success_exit_codes: Vec<i32>,
     #[serde(default)]
     depends_on: BTreeMap<String, RawDependency>,
     #[serde(default)]
@@ -369,11 +377,29 @@ fn normalize_task(
             Err(error) => diagnostics.push(diagnostic(dependency_path, error.to_string())),
         }
     }
+    let mut success_exit_codes = raw
+        .success_exit_codes
+        .into_iter()
+        .filter(|code| {
+            if *code < 0 {
+                diagnostics.push(diagnostic(
+                    format!("{path}.success_exit_codes"),
+                    "退出码不能为负数",
+                ));
+                false
+            } else {
+                true
+            }
+        })
+        .collect::<BTreeSet<_>>();
+    success_exit_codes.insert(0);
     TaskSpec {
         command,
         args: raw.args,
         cwd: raw.cwd.map(|path| normalize_path(&path, base_directory)),
         env: raw.env,
+        healthcheck: normalize_healthcheck(raw.healthcheck, path, base_directory, diagnostics),
+        success_exit_codes,
         depends_on,
         restart: raw.restart.into(),
         restart_delay_ms: raw.restart_delay_ms,

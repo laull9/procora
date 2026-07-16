@@ -1,5 +1,7 @@
 //! 跨平台受管进程的创建、输出管道、等待和整树回收。
 
+mod helper;
+
 use std::{
     io,
     process::{ChildStderr, ChildStdout, ExitStatus, Stdio},
@@ -9,12 +11,14 @@ use std::{
 #[cfg(unix)]
 use std::{thread, time::Instant};
 
-use crate::core::TaskSpec;
+use crate::core::{HealthCheckSpec, TaskSpec};
 #[cfg(windows)]
 use process_wrap::std::JobObject;
 #[cfg(unix)]
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
+
+pub(crate) use helper::{run_bounded_command, run_bounded_command_monitored};
 
 /// 一次停止操作的退出状态与是否强制回收。
 #[derive(Debug)]
@@ -200,7 +204,33 @@ fn process_tree_may_have_exited(error: &io::Error) -> bool {
 ///
 /// 当程序不存在、参数无效或平台进程组初始化失败时返回 I/O 错误。
 pub fn spawn_task(task: &TaskSpec) -> io::Result<ManagedChild> {
+    spawn_task_with_environment(task, false)
+}
+
+/// 启动不继承父进程环境变量的受管子进程。
+///
+/// # Errors
+///
+/// 当程序不存在、参数无效或平台进程组初始化失败时返回 I/O 错误。
+pub fn spawn_isolated_task(task: &TaskSpec) -> io::Result<ManagedChild> {
+    spawn_task_with_environment(task, true)
+}
+
+/// 根据环境继承策略创建受管子进程。
+fn spawn_task_with_environment(
+    task: &TaskSpec,
+    clear_environment: bool,
+) -> io::Result<ManagedChild> {
     let mut command = CommandWrap::with_new(&task.command, |command| {
+        if clear_environment {
+            command.env_clear();
+            #[cfg(windows)]
+            for name in ["SYSTEMROOT", "WINDIR"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
         command
             .args(&task.args)
             .envs(&task.env)
@@ -208,6 +238,33 @@ pub fn spawn_task(task: &TaskSpec) -> io::Result<ManagedChild> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(cwd) = &task.cwd {
+            command.current_dir(cwd);
+        }
+    });
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
+    command.spawn().map(|inner| ManagedChild { inner })
+}
+
+/// 创建不经过 shell、无输出管道且受整树回收保护的健康检查进程。
+///
+/// # Errors
+///
+/// 当检查程序不存在、参数无效或平台进程容器初始化失败时返回 I/O 错误。
+pub fn spawn_health_check(
+    healthcheck: &HealthCheckSpec,
+    task: &TaskSpec,
+) -> io::Result<ManagedChild> {
+    let mut command = CommandWrap::with_new(&healthcheck.command, |command| {
+        command
+            .args(&healthcheck.args)
+            .envs(&task.env)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(cwd) = healthcheck.cwd.as_ref().or(task.cwd.as_ref()) {
             command.current_dir(cwd);
         }
     });

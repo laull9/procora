@@ -157,6 +157,7 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
                     ),
                 ]),
                 detail_line("依赖", &dependencies, app),
+                detail_line("健康", health_label(task.health), app),
                 detail_line("CPU", &cpu, app),
                 detail_line("内存", &memory, app),
             ];
@@ -171,6 +172,17 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
         .block(bordered(app).title("详情"))
         .wrap(Wrap { trim: false });
     frame.render_widget(details, area);
+}
+
+/// 返回 Task 健康状态的中文标签。
+const fn health_label(health: crate::protocol::TaskHealthDto) -> &'static str {
+    match health {
+        crate::protocol::TaskHealthDto::Unknown => "未知",
+        crate::protocol::TaskHealthDto::Starting => "检查中",
+        crate::protocol::TaskHealthDto::Healthy => "健康",
+        crate::protocol::TaskHealthDto::Unhealthy => "不健康",
+        crate::protocol::TaskHealthDto::NotConfigured => "未配置",
+    }
 }
 
 /// 绘制当前任务图的直接依赖边。

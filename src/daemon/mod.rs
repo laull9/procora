@@ -1,6 +1,7 @@
 //! 中心服务器、IPC 与前台/后台共享的服务宿主。
 
 mod center;
+mod health;
 mod host;
 mod host_logs;
 mod host_view;

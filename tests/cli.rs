@@ -55,6 +55,7 @@ fn 帮助命令可以执行() {
     assert!(stdout.contains("status"));
     assert!(stdout.contains("enable"));
     assert!(stdout.contains("disable"));
+    assert!(stdout.contains("completions"));
     let usage = if cfg!(windows) {
         "procora.exe [PATH]"
     } else {
@@ -213,6 +214,8 @@ fn server帮助展示高频生命周期命令() {
     assert!(stdout.contains("history"));
     assert!(stdout.contains("start"));
     assert!(stdout.contains("restart"));
+    assert!(stdout.contains("preview"));
+    assert!(stdout.contains("apply"));
     assert!(stdout.contains("stop"));
     assert!(stdout.contains("remove"));
 }

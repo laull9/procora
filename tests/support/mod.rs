@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
 use procora::core::TaskId;
-use procora::protocol::{ProjectSnapshot, SnapshotSourceDto, TaskStatusDto, TaskView};
+use procora::protocol::{
+    ProjectSnapshot, SnapshotSourceDto, TaskHealthDto, TaskStatusDto, TaskView,
+};
 
 /// 创建包含阻塞任务的 TUI 测试快照。
 pub fn snapshot() -> ProjectSnapshot {
@@ -15,6 +17,7 @@ pub fn snapshot() -> ProjectSnapshot {
                 task_id: database.clone(),
                 command: "postgres".to_owned(),
                 status: TaskStatusDto::Pending,
+                health: TaskHealthDto::NotConfigured,
                 dependencies: Vec::new(),
                 resources: None,
                 message: None,
@@ -23,6 +26,7 @@ pub fn snapshot() -> ProjectSnapshot {
                 task_id: api,
                 command: "cargo run -p api".to_owned(),
                 status: TaskStatusDto::Blocked,
+                health: TaskHealthDto::NotConfigured,
                 dependencies: vec![database],
                 resources: None,
                 message: Some("等待 database 启动".to_owned()),

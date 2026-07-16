@@ -1,7 +1,10 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
+use serde::Serialize;
+
 /// 依赖下载后的内容类型。
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DependencyKind {
     /// 根据解包结果自动判断文件、目录或二进制。
     #[default]
@@ -15,7 +18,8 @@ pub enum DependencyKind {
 }
 
 /// 下载内容的解包策略。
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum UnpackMode {
     /// 根据文件名与文件头识别常见归档。
     #[default]
@@ -25,7 +29,7 @@ pub enum UnpackMode {
 }
 
 /// 管理依赖的版本验证命令。
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct DependencyVerifySpec {
     /// 相对安装根目录的验证程序；省略时使用最终管理路径。
     pub command: Option<PathBuf>,
@@ -36,7 +40,7 @@ pub struct DependencyVerifySpec {
 }
 
 /// 单个可下载、解包和验证的项目依赖。
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ManagedDependencySpec {
     /// HTTP(S)、SSH、SCP 或本地文件来源。
     pub source: String,

@@ -7,9 +7,10 @@ use std::{
 use crate::config::{DiscoveryError, discover_path};
 use crate::protocol::{
     CenterEventDto, CenterEventKindDto, CenterRequest, CenterResponse, EventBatchDto,
-    ServiceActionDto, ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
+    ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
     SnapshotSourceDto,
 };
+use crate::source::LocalFileMonitor;
 use crate::source::SourceError;
 use crate::storage::{SqliteCenterRepository, StorageError};
 use thiserror::Error;
@@ -17,12 +18,13 @@ use uuid::Uuid;
 
 use super::{
     ServiceHost,
-    managed::ManagedService,
+    managed::{ActiveDefinition, ManagedService},
     project::{EVENT_CAPACITY, MAX_LOG_BATCH_BYTES},
     status::{protocol_status, status_text},
 };
 
 mod registry;
+mod reload;
 
 /// 中心服务器注册、恢复和服务解析错误。
 #[derive(Debug, Error)]
@@ -68,6 +70,25 @@ pub enum CenterError {
     /// 目标服务当前没有可用的已编译配置。
     #[error("服务 `{0}` 当前不可用，请修复配置后执行 restart")]
     Unavailable(String),
+    /// 当前配置候选无效或尚未预览。
+    #[error("服务 `{0}` 没有可应用的有效配置候选，请先执行 preview")]
+    CandidateUnavailable(String),
+    /// 候选修订没有通过配置编译。
+    #[error("服务 `{name}` 的候选配置无效：{message}；旧有效修订保持不变")]
+    InvalidCandidate {
+        /// 服务稳定名称。
+        name: String,
+        /// 完整配置诊断。
+        message: String,
+    },
+    /// 应用时磁盘内容已经不是用户确认的修订。
+    #[error("配置修订已变化：请求 {requested}，当前 {actual}")]
+    RevisionMismatch {
+        /// 用户确认并请求应用的修订。
+        requested: String,
+        /// 应用前重新读取到的修订或缺失状态。
+        actual: String,
+    },
 }
 
 /// 管理本机多个服务宿主的中心服务器状态。
@@ -78,6 +99,7 @@ pub struct Center {
     instance_id: Uuid,
     event_sequence: u64,
     events: VecDeque<CenterEventDto>,
+    monitors: BTreeMap<String, LocalFileMonitor>,
 }
 
 impl Center {
@@ -93,13 +115,15 @@ impl Center {
             let service = super::managed::restore_service(stored);
             services.insert(service.name.clone(), service);
         }
-        let center = Self {
+        let mut center = Self {
             services,
             repository,
             instance_id: Uuid::new_v4(),
             event_sequence: 0,
             events: VecDeque::with_capacity(EVENT_CAPACITY),
+            monitors: BTreeMap::new(),
         };
+        center.install_all_monitors();
         center.persist_all()?;
         Ok(center)
     }
@@ -112,6 +136,7 @@ impl Center {
             instance_id: Uuid::new_v4(),
             event_sequence: 0,
             events: VecDeque::with_capacity(EVENT_CAPACITY),
+            monitors: BTreeMap::new(),
         }
     }
 
@@ -138,6 +163,12 @@ impl Center {
                 .task_logs(&selector, &task_id, cursor, max_bytes)
                 .map(CenterResponse::TaskLogs),
             CenterRequest::Snapshot { selector } => self.snapshot(&selector),
+            CenterRequest::PreviewConfig { selector } => self
+                .preview_config(&selector)
+                .map(CenterResponse::ConfigCandidate),
+            CenterRequest::ApplyConfig { selector, revision } => self
+                .apply_config(&selector, &revision)
+                .map(CenterResponse::Service),
             CenterRequest::Manage { action, selector } => {
                 self.manage(action, &selector).map(CenterResponse::Service)
             }
@@ -158,6 +189,7 @@ impl Center {
     /// 发现、注册并进入运行状态。
     fn open(&mut self, path: &Path) -> Result<ServiceViewDto, CenterError> {
         let mut discovered = discover_path(path)?;
+        let active_definition = ActiveDefinition::from_compiled(&discovered.compiled);
         super::project::prepare(&mut discovered)?;
         let name = discovered.compiled.spec.project.clone();
         self.check_registration_conflicts(&name, &discovered.root)?;
@@ -183,9 +215,13 @@ impl Center {
             host: Some(host),
             message: start_error,
             desired_running: true,
+            pending_config: None,
+            candidate_view: None,
+            active_definition: Some(active_definition),
         };
         let view = service.view();
         self.services.insert(name.clone(), service);
+        self.install_monitor(&name);
         self.persist_service(&name)?;
         self.write_status_log(&name);
         self.push_event(CenterEventKindDto::Opened, Some(view.clone()));
@@ -209,90 +245,6 @@ impl Center {
         Ok(CenterResponse::Snapshot(
             host.snapshot(SnapshotSourceDto::CenterLive, running),
         ))
-    }
-
-    /// 启动、重启或停止指定服务。
-    fn manage(
-        &mut self,
-        action: ServiceActionDto,
-        selector: &ServiceSelectorDto,
-    ) -> Result<ServiceViewDto, CenterError> {
-        let name = self.resolve_name(selector)?;
-        match action {
-            ServiceActionDto::Stop => {
-                let service = self.services.get_mut(&name).expect("名称已经解析");
-                let stop_error = service
-                    .host
-                    .as_mut()
-                    .and_then(|host| host.stop().err())
-                    .map(|error| error.to_string());
-                service.status = if stop_error.is_some() {
-                    ServiceStatusDto::Failed
-                } else {
-                    ServiceStatusDto::Stopped
-                };
-                service.message = stop_error;
-                service.desired_running = false;
-            }
-            ServiceActionDto::Start | ServiceActionDto::Restart => {
-                let config_path = self.services[&name].config_path.clone();
-                self.services
-                    .get_mut(&name)
-                    .expect("名称已经解析")
-                    .desired_running = true;
-                match discover_path(&config_path) {
-                    Ok(mut discovered) => {
-                        if let Err(error) = super::project::prepare(&mut discovered) {
-                            let service = self.services.get_mut(&name).expect("名称已经解析");
-                            service.status = ServiceStatusDto::Failed;
-                            service.message = Some(error.to_string());
-                            return Err(error.into());
-                        }
-                        let new_name = discovered.compiled.spec.project.clone();
-                        if new_name != name {
-                            return Err(CenterError::DuplicateRoot {
-                                root: discovered.root,
-                                existing: name,
-                                requested: new_name,
-                            });
-                        }
-                        let root = discovered.root;
-                        if let Some(host) = self
-                            .services
-                            .get_mut(&new_name)
-                            .and_then(|service| service.host.as_mut())
-                        {
-                            let _ = host.stop();
-                        }
-                        let mut host = ServiceHost::from_compiled_at(discovered.compiled, &root);
-                        let start_error = host.start().err().map(|error| error.to_string());
-                        let service = self.services.get_mut(&new_name).expect("名称已经解析");
-                        service.root = root;
-                        service.config_path = discovered.config_path;
-                        service.host = Some(host);
-                        service.status = if start_error.is_some() {
-                            ServiceStatusDto::Failed
-                        } else {
-                            ServiceStatusDto::Running
-                        };
-                        service.message = start_error;
-                    }
-                    Err(error) => {
-                        let service = self.services.get_mut(&name).expect("名称已经解析");
-                        service.status = ServiceStatusDto::Failed;
-                        service.message = Some(error.to_string());
-                        self.persist_service(&name)?;
-                        self.write_status_log(&name);
-                        return Err(error.into());
-                    }
-                }
-            }
-        }
-        self.persist_service(&name)?;
-        self.write_status_log(&name);
-        let view = self.services[&name].view();
-        self.push_event(CenterEventKindDto::StatusChanged, Some(view.clone()));
-        Ok(view)
     }
 
     /// 返回指定服务的持久化状态历史。
@@ -436,6 +388,7 @@ impl Center {
 
     /// 轮询全部宿主，并把 Task 状态变化提升为服务增量事件。
     pub(crate) fn tick(&mut self) {
+        self.poll_config_monitors();
         let changed = self
             .services
             .iter_mut()

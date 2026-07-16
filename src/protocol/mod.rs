@@ -2,12 +2,12 @@
 
 use std::path::PathBuf;
 
-use crate::core::TaskId;
+use crate::{config::ProjectDiff, core::TaskId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 /// 客户端连接中心服务器时发送的握手请求。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -51,6 +51,8 @@ pub enum CenterEventKindDto {
     Opened,
     /// 服务生命周期状态发生变化。
     StatusChanged,
+    /// 文件变化产生了新的有效或无效配置候选。
+    ConfigCandidateChanged,
     /// 服务已经从中心注册表删除。
     Removed,
     /// 中心服务器准备正常退出。
@@ -179,6 +181,19 @@ pub struct ServiceViewDto {
     pub message: Option<String>,
 }
 
+/// 尚未提交的配置候选及其相对当前有效修订的影响。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ConfigCandidateDto {
+    /// 配置文件原始字节的 SHA-256；文件不可读时为空。
+    pub revision: Option<String>,
+    /// 候选是否已经通过完整、无副作用的配置编译。
+    pub valid: bool,
+    /// 有效候选相对当前宿主配置的语义差异。
+    pub diff: Option<ProjectDiff>,
+    /// 无效原因、无变化提示或应用注意事项。
+    pub message: Option<String>,
+}
+
 /// CLI 发给中心服务器的单次请求。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -220,6 +235,18 @@ pub enum CenterRequest {
         /// 要读取的服务。
         selector: ServiceSelectorDto,
     },
+    /// 重新读取配置并暂存候选，不下载依赖或影响当前进程。
+    PreviewConfig {
+        /// 要预览配置变化的服务。
+        selector: ServiceSelectorDto,
+    },
+    /// 以乐观修订校验显式应用已经预览的配置候选。
+    ApplyConfig {
+        /// 要应用配置变化的服务。
+        selector: ServiceSelectorDto,
+        /// 用户确认过的完整 SHA-256 修订值。
+        revision: String,
+    },
     /// 对指定服务执行生命周期动作。
     Manage {
         /// 要执行的动作。
@@ -258,6 +285,8 @@ pub enum CenterResponse {
     Removed(ServiceViewDto),
     /// 返回供 TUI 使用的一致性任务快照。
     Snapshot(ProjectSnapshot),
+    /// 返回配置候选编译与语义差异结果。
+    ConfigCandidate(ConfigCandidateDto),
     /// 中心服务器已经接受正常退出请求。
     ShuttingDown,
     /// 请求未能完成。
@@ -292,6 +321,23 @@ pub struct ResourceUsageDto {
     pub memory_bytes: Option<u64>,
 }
 
+/// 稳定协议中的 Task 健康状态。
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskHealthDto {
+    /// 尚未得到检查结果。
+    Unknown,
+    /// 正在积累连续检查结果。
+    Starting,
+    /// 已达到连续成功阈值。
+    Healthy,
+    /// 已达到连续失败阈值。
+    Unhealthy,
+    /// Task 未配置健康检查。
+    #[default]
+    NotConfigured,
+}
+
 /// 状态快照中的单任务视图。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TaskView {
@@ -301,6 +347,9 @@ pub struct TaskView {
     pub command: String,
     /// 传输层稳定状态。
     pub status: TaskStatusDto,
+    /// 当前进程外健康检查状态。
+    #[serde(default)]
+    pub health: TaskHealthDto,
     /// 该任务直接依赖的任务标识。
     pub dependencies: Vec<TaskId>,
     /// 服务宿主可用时返回的资源快照。

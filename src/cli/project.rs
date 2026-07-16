@@ -1,9 +1,23 @@
 use std::{env, fs, io::IsTerminal, path::Path};
 
-use crate::config::{DiscoveredProject, discover_path};
+use crate::config::{DiscoveredProject, discover_path, is_python_config};
 use crate::daemon::ServiceHost;
 use crate::source::DependencyManager;
 use anyhow::{Context, bail};
+use serde::Serialize;
+
+/// 面向诊断输出的完整有效配置视图。
+#[derive(Serialize)]
+struct EffectiveConfig<'a> {
+    /// 配置模式主版本。
+    version: u32,
+    /// 服务稳定名称。
+    project: &'a str,
+    /// 已规范化的项目管理依赖。
+    dependencies: &'a crate::config::ManagedDependencies,
+    /// 已应用默认值和路径规范化的 Task。
+    tasks: &'a std::collections::BTreeMap<crate::core::TaskId, crate::core::TaskSpec>,
+}
 
 /// 打开指定目录或文件的配置编辑页面。
 pub(crate) fn edit(path: Option<&Path>) -> anyhow::Result<()> {
@@ -14,6 +28,9 @@ pub(crate) fn edit(path: Option<&Path>) -> anyhow::Result<()> {
         || env::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
+    if is_python_config(&target) {
+        bail!("内置配置编辑器不执行或改写 procora.py；请使用可信的外部代码编辑器")
+    }
     let discovered = discover_path(&target)
         .with_context(|| format!("无法定位要编辑的配置：{}", target.display()))?;
     crate::tui::edit_config(&discovered.config_path).context("配置编辑器退出失败")
@@ -65,6 +82,7 @@ pub(crate) fn clean(path: Option<&Path>) -> anyhow::Result<()> {
 
 /// 完整发现并校验配置，但不下载、注册或启动服务。
 pub(crate) fn validate(path: &Path) -> anyhow::Result<()> {
+    warn_python_execution(path);
     let discovered =
         discover_path(path).with_context(|| format!("配置校验失败: {}", path.display()))?;
     println!(
@@ -79,6 +97,7 @@ pub(crate) fn validate(path: &Path) -> anyhow::Result<()> {
 
 /// 输出指定配置中的确定性任务启动顺序。
 pub(crate) fn graph(path: &Path) -> anyhow::Result<()> {
+    warn_python_execution(path);
     let discovered =
         discover_path(path).with_context(|| format!("任务图编译失败: {}", path.display()))?;
     let host = ServiceHost::from_compiled(discovered.compiled);
@@ -88,8 +107,27 @@ pub(crate) fn graph(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 以确定性 JSON 输出默认值与路径规范化后的有效配置。
+pub(crate) fn effective_config(path: &Path) -> anyhow::Result<()> {
+    warn_python_execution(path);
+    let discovered =
+        discover_path(path).with_context(|| format!("有效配置生成失败: {}", path.display()))?;
+    let output = EffectiveConfig {
+        version: discovered.compiled.spec.version,
+        project: &discovered.compiled.spec.project,
+        dependencies: &discovered.compiled.dependencies,
+        tasks: &discovered.compiled.spec.tasks,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).context("有效配置 JSON 序列化失败")?
+    );
+    Ok(())
+}
+
 /// 同步或仅检查项目声明的管理依赖。
 pub(crate) fn dependencies(path: &Path, check: bool) -> anyhow::Result<()> {
+    warn_python_execution(path);
     let discovered =
         discover_path(path).with_context(|| format!("依赖配置校验失败: {}", path.display()))?;
     let manager = DependencyManager::new(&discovered.root);
@@ -124,4 +162,13 @@ pub(crate) fn prepare(discovered: &mut DiscoveredProject) -> anyhow::Result<()> 
         .prepare(&mut discovered.compiled)
         .context("项目依赖准备失败")?;
     Ok(())
+}
+
+/// 对精确 Python 入口给出用户可见的可信代码执行提示。
+pub(crate) fn warn_python_execution(path: &Path) {
+    if is_python_config(path) {
+        eprintln!(
+            "警告：procora.py 将以当前用户权限执行可信代码；受控辅助进程提供资源边界，但不是安全沙箱。"
+        );
+    }
 }

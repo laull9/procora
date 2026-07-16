@@ -1,10 +1,38 @@
 use std::path::PathBuf;
 
-use crate::config::discover_path;
-use crate::protocol::{ServiceStatusDto, ServiceViewDto};
+use crate::protocol::{ConfigCandidateDto, ServiceStatusDto, ServiceViewDto};
 use crate::storage::{StoredService, StoredServiceStatus};
+use crate::{
+    config::{CompiledProject, ManagedDependencies, ProjectDiff, discover_path},
+    core::ProjectSpec,
+};
 
 use super::{ServiceHost, status::stored_status};
+
+/// 已编译但尚未产生依赖下载或进程副作用的配置候选。
+#[derive(Debug)]
+pub(crate) struct PendingConfig {
+    pub(crate) revision: String,
+    pub(crate) compiled: CompiledProject,
+    pub(crate) diff: ProjectDiff,
+}
+
+/// 当前宿主对应、尚未替换管理依赖占位符的有效定义。
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveDefinition {
+    pub(crate) spec: ProjectSpec,
+    pub(crate) dependencies: ManagedDependencies,
+}
+
+impl ActiveDefinition {
+    /// 从准备副作用发生前的已编译配置捕获语义输入。
+    pub(crate) fn from_compiled(compiled: &CompiledProject) -> Self {
+        Self {
+            spec: compiled.spec.clone(),
+            dependencies: compiled.dependencies.clone(),
+        }
+    }
+}
 
 /// 中心服务器内存中的单个托管服务。
 #[derive(Debug)]
@@ -16,6 +44,9 @@ pub(crate) struct ManagedService {
     pub(crate) host: Option<ServiceHost>,
     pub(crate) message: Option<String>,
     pub(crate) desired_running: bool,
+    pub(crate) pending_config: Option<PendingConfig>,
+    pub(crate) candidate_view: Option<ConfigCandidateDto>,
+    pub(crate) active_definition: Option<ActiveDefinition>,
 }
 
 impl ManagedService {
@@ -59,19 +90,28 @@ pub(crate) fn restore_service(stored: StoredService) -> ManagedService {
                 stored.name, discovered.compiled.spec.project
             )),
             desired_running: stored.desired_running,
+            pending_config: None,
+            candidate_view: None,
+            active_definition: None,
         },
-        Ok(mut discovered) => match super::project::prepare(&mut discovered) {
-            Ok(_) => restore_valid(stored, discovered),
-            Err(error) => ManagedService {
-                name: stored.name,
-                root: stored.root,
-                config_path: stored.config_path,
-                status: ServiceStatusDto::Failed,
-                host: None,
-                message: Some(error.to_string()),
-                desired_running: stored.desired_running,
-            },
-        },
+        Ok(mut discovered) => {
+            let definition = ActiveDefinition::from_compiled(&discovered.compiled);
+            match super::project::prepare(&mut discovered) {
+                Ok(_) => restore_valid(stored, discovered, definition),
+                Err(error) => ManagedService {
+                    name: stored.name,
+                    root: stored.root,
+                    config_path: stored.config_path,
+                    status: ServiceStatusDto::Failed,
+                    host: None,
+                    message: Some(error.to_string()),
+                    desired_running: stored.desired_running,
+                    pending_config: None,
+                    candidate_view: None,
+                    active_definition: None,
+                },
+            }
+        }
         Err(error) => ManagedService {
             name: stored.name,
             root: stored.root,
@@ -80,6 +120,9 @@ pub(crate) fn restore_service(stored: StoredService) -> ManagedService {
             host: None,
             message: Some(error.to_string()),
             desired_running: stored.desired_running,
+            pending_config: None,
+            candidate_view: None,
+            active_definition: None,
         },
     }
 }
@@ -88,6 +131,7 @@ pub(crate) fn restore_service(stored: StoredService) -> ManagedService {
 fn restore_valid(
     stored: StoredService,
     discovered: crate::config::DiscoveredProject,
+    active_definition: ActiveDefinition,
 ) -> ManagedService {
     let mut host = ServiceHost::from_compiled_at(discovered.compiled, &discovered.root);
     let start_error = stored
@@ -109,6 +153,9 @@ fn restore_valid(
         host: Some(host),
         message: start_error,
         desired_running: stored.desired_running,
+        pending_config: None,
+        candidate_view: None,
+        active_definition: Some(active_definition),
     }
 }
 

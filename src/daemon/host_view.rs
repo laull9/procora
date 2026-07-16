@@ -1,5 +1,5 @@
-use crate::engine::{DesiredState, ObservedState, TaskRuntimeState};
-use crate::protocol::{ResourceUsageDto, TaskStatusDto};
+use crate::engine::{DesiredState, HealthState, ObservedState, TaskRuntimeState};
+use crate::protocol::{ResourceUsageDto, TaskHealthDto, TaskStatusDto};
 
 /// 返回不经过 shell 的命令展示文本。
 pub(crate) fn command_label(task: &crate::core::TaskSpec) -> String {
@@ -22,6 +22,17 @@ pub(crate) fn task_status(state: TaskRuntimeState, service_running: bool) -> Tas
         ObservedState::Running => TaskStatusDto::Running,
         ObservedState::Stopping | ObservedState::Exited => TaskStatusDto::Stopped,
         ObservedState::Failed | ObservedState::Orphaned => TaskStatusDto::Failed,
+    }
+}
+
+/// 把引擎健康状态映射为稳定协议值。
+pub(crate) const fn task_health(health: HealthState) -> TaskHealthDto {
+    match health {
+        HealthState::Unknown => TaskHealthDto::Unknown,
+        HealthState::Starting => TaskHealthDto::Starting,
+        HealthState::Healthy => TaskHealthDto::Healthy,
+        HealthState::Unhealthy => TaskHealthDto::Unhealthy,
+        HealthState::NotConfigured => TaskHealthDto::NotConfigured,
     }
 }
 

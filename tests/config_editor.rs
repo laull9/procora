@@ -82,6 +82,29 @@ fn 宽屏编辑页会显示配置内容与依赖引导() {
 }
 
 #[test]
+fn include入口保持文本模式并按完整闭包校验保存() {
+    let path = temporary_config();
+    let fragment = path.with_file_name("procora-editor-fragment.yaml");
+    fs::write(&fragment, "tasks:\n  worker:\n    command: worker\n").unwrap();
+    fs::write(
+        &path,
+        "include: [procora-editor-fragment.yaml]\nversion: 1\nproject: demo\ntasks: {}\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    assert!(editor.message().contains("include 配置"));
+    editor.handle_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+    assert!(editor.message().contains("避免表单展开"));
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    assert!(editor.message().starts_with("已保存"));
+    assert!(fs::read_to_string(&path).unwrap().contains("include:"));
+
+    fs::remove_file(path).unwrap();
+    fs::remove_file(fragment).unwrap();
+}
+
+#[test]
 fn 打开有效配置后可通过表单新建并保存_task() {
     let path = temporary_config();
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
@@ -155,6 +178,32 @@ fn 表单保存支持_json_和_toml() {
         assert!(procora::config::load_str(&fs::read_to_string(&path).unwrap(), format).is_ok());
         fs::remove_file(path).unwrap();
     }
+}
+
+#[test]
+fn 表单往返不会丢失健康检查() {
+    let path = temporary_config();
+    let initial = "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      command: checker\n      args: ['--ready']\n      period_ms: 25\n      timeout_ms: 10\n      success_threshold: 2\n      failure_threshold: 4\n";
+    fs::write(&path, initial).unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_str(&saved, ConfigFormat::Yaml).unwrap();
+    let healthcheck = compiled
+        .spec
+        .tasks
+        .values()
+        .next()
+        .unwrap()
+        .healthcheck
+        .as_ref()
+        .unwrap();
+    assert_eq!(healthcheck.args, ["--ready"]);
+    assert_eq!(healthcheck.success_threshold, 2);
+    assert_eq!(healthcheck.failure_threshold, 4);
+    fs::remove_file(path).unwrap();
 }
 
 #[test]

@@ -61,7 +61,7 @@ procora::platform/src/
 | macOS | LaunchAgent | `~/Library/LaunchAgents/dev.procora.center.plist` | 用户登录时 |
 | Windows | 任务计划程序 | `Procora Center` | 当前用户交互登录时 |
 
-原生托管器的主进程始终是 `procora __daemon` 前台进程。Linux 使用 `Restart=on-failure`、启动速率限制、10 秒停止期限和控制组兜底回收；`ExecStop` 先执行 `procora down` 完成正常关闭。systemd 单元通过同目录临时文件原子替换，注册后检查 `is-active`，禁用时即使 unit 文件缺失也会清理 enabled/failed 状态。macOS 的 KeepAlive 只恢复非成功退出；Windows 计划任务使用当前用户的受限权限并绑定交互登录会话。
+原生托管器的主进程始终是 `procora __daemon` 前台进程。Linux 使用 `Restart=on-failure`、启动速率限制、10 秒停止期限和控制组兜底回收；`ExecStop` 先执行 `procora down` 完成正常关闭。systemd 单元通过同目录临时文件原子替换，注册后检查 `is-active`；任一管理命令失败会删除新单元或恢复旧内容，禁用时即使 unit 文件缺失也会清理 enabled/failed 状态。可选 D-Bus API 要求调用方显式选择用户或系统总线，不会静默换总线。macOS 的 KeepAlive 只恢复非成功退出；Windows 计划任务使用当前用户的受限权限并绑定交互登录会话。
 
 `enable` 会先正常关闭已有手动全局服务器，再完成注册并等待新进程就绪；`disable` 会先正常关闭全局服务器，再停止和移除注册。两个命令都保留 SQLite 注册表与各 Service 日志。
 

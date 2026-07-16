@@ -1,6 +1,9 @@
 //! 任务依赖图的公共行为测试。
 
-use std::{collections::BTreeMap, str::FromStr};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    str::FromStr,
+};
 
 use procora::core::{
     DependencySpec, GraphError, ProjectSpec, RestartPolicy, TaskGraph, TaskId, TaskSpec,
@@ -13,6 +16,8 @@ fn task(dependencies: &[&str]) -> TaskSpec {
         args: Vec::new(),
         cwd: None,
         env: BTreeMap::new(),
+        healthcheck: None,
+        success_exit_codes: BTreeSet::from([0]),
         depends_on: dependencies
             .iter()
             .map(|id| (TaskId::from_str(id).unwrap(), DependencySpec::default()))

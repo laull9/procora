@@ -29,7 +29,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 ## 3. 项目初始化与中心进程
 
 - `procora init --config yaml|json|toml`：在当前目录写入不依赖 Cargo 的可运行示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。交互式终端会自动进入配置编辑页，脚本使用 `--no-edit` 跳过。
-- `procora edit [path]`：发现唯一配置并默认打开结构化 TUI 表单。通过 `Tab` 或左右方向键在项目、Task、管理依赖间切换，`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F2` 可进入高级文本模式，`F1` 在配置有效时返回表单；未保存退出需要二次确认。
+- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。通过 `Tab` 或左右方向键在项目、Task、管理依赖间切换，`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F2` 可进入高级文本模式，`F1` 在配置有效时返回表单；未保存退出需要二次确认。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
 - `procora clean [path]`：删除服务目录下的 `.procora` 运行时目录，包括日志和管理依赖缓存；省略路径时使用当前目录。配置文件和其他项目文件不会删除，目录不存在时正常返回。
 - `procora deps [path]`：同步项目声明依赖；`--check` 仅依据版本清单、目标类型和版本命令离线复核。
 - `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
@@ -37,6 +37,10 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 - `procora status`：只探测并显示状态，不隐式启动全局服务器。
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
+- `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。
+- `procora config <path>`：输出应用默认值、目录规范化和稳定字段顺序后的有效配置 JSON；不会下载依赖、注册服务或启动 Task。
+- `procora source git preview <repository> [--reference REF] [--config PATH]`：受限获取 Git 引用，输出完整 commit、组合修订和配置校验结果；`--local` 才允许显式本地仓库。不会启动 Center、注册服务或运行 Task。
+- `procora source git confirm <repository> <revision> [...]`：按相同来源参数重新获取，只有仓库、commit 与配置闭包修订仍匹配时成功；仍不自动应用。默认缓存位于当前用户 Procora 数据目录，也可用 `--cache` 覆盖。
 
 自启动在 Linux 使用 `systemd --user`，在 macOS 使用 LaunchAgent，在 Windows 使用当前用户的登录触发计划任务。三者都直接监管内部前台 daemon，不通过会再次派生进程的 `procora up`。因此原生托管器能正确观察退出和失败，并在崩溃时按平台定义恢复。
 
@@ -44,7 +48,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 
 ## 4. 服务注册与发现
 
-`procora server <path>` 会确保全局服务器运行，然后把路径交给它处理。路径是文件时只编译该显式文件；路径是目录时只扫描第一层的 `procora.yaml`、`procora.yml`、`procora.toml`、`procora.json`，并以完整配置编译结果判断合法性。其他 YAML、TOML、JSON 文件不会进入候选集合。
+`procora server <path>` 会确保全局服务器运行，然后把路径交给它处理。路径是文件时只编译该显式文件；文件名精确为 `procora.py` 时，CLI 会先提示可信代码执行，再由受控 Python 辅助进程生成 JSON。路径是目录时只扫描第一层的 `procora.yaml`、`procora.yml`、`procora.toml`、`procora.json`，绝不会自动执行 Python。其他 YAML、TOML、JSON 文件不会进入候选集合。
 
 发现结果必须满足以下一种情况：
 
@@ -68,6 +72,8 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 
 - `server start`：先停止旧宿主中的真实 Task，重新加载已注册配置，再按依赖条件启动新的运行代次。
 - `server restart`：按反向依赖顺序停止真实 Task，重新加载配置并替换当前 `ServiceHost`，再按拓扑顺序启动。
+- `server preview`：原子重读配置入口，以内容 SHA-256 标识候选，并输出新增、删除、重启、原地更新和无影响 Task；不下载依赖、不停止进程。
+- `server apply <target> <revision>`：应用精确匹配已预览 SHA-256 的有效候选；磁盘内容变化、配置无效、项目改名或依赖准备失败时拒绝应用并保留旧宿主。
 - `server stop`：按反向依赖顺序优雅停止真实 Task；超过各 Task 宽限期后强制回收进程树，同时保留注册信息。
 - `server list`：稳定按服务名称排序，输出状态、Task 数量、目录和配置文件；全局服务器未运行时只报告离线状态。
 - `server history`：按名称或路径查询 SQLite 中的状态变更历史；不读取日志文件，也不隐式启动全局服务器。
@@ -77,6 +83,14 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 SQLite 不保存日志正文。Service 日志固定写入自身目录的 `.procora/logs/service.log`，Task 日志写入 `.procora/logs/tasks/<task>.log`；压缩归档也留在该 Service 目录，不汇总到 Center 数据目录。
 
 Center 使用跨平台独占文件锁保证同一 `PROCORA_HOME` 只有一个实例。本地协议先进行版本握手，服务变化进入容量为 256 的内存事件缓冲；慢客户端游标过期后必须重取快照，不能把不连续事件误当作完整状态。
+
+Git 来源缓存使用独立跨进程锁。远端只接受无内嵌凭据的 HTTPS/SSH/SCP；Git 命令关闭交互、全局配置、hooks 和危险协议，并在 fetch 期间实施对象库上限。CLI 只完成 preview/confirm，不能把远端候选直接交给 `server apply`；Center 持久来源与凭据边界落地前，这个限制是有意的安全准入。
+
+Center 递归监听配置入口所在的服务根目录以兼容编辑器原子替换写入，容量为一的事件通道会合并突发通知，静默 250ms 后才重读完整文件。回调只接受当前闭包成员，监听只产生 `config_candidate_changed` 事件，不会绕过用户确认自动执行文件内容。
+
+配置含 `include` 时，监听范围扩展到服务根目录，但只接受当前闭包成员和暂时缺失目标的事件；其他业务文件与 `.procora` 日志不会触发候选。候选修订覆盖闭包全部相对路径与原始字节，因此成员文件在 preview 与 apply 之间变化也会被拒绝。
+
+Python 来源只监听 `procora.py`；每次 preview/apply 都重新执行脚本，并把脚本和生成 stdout 共同计入修订。脚本自行读取的其他文件不会触发监听事件，但它们导致的输出变化会使 apply 拒绝旧修订。超时、输出越界、非零退出或非法 JSON 只产生无效候选，不替换旧宿主。
 
 ## 7. 当前状态含义
 

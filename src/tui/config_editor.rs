@@ -1,6 +1,6 @@
 use std::{fs, io, path::PathBuf};
 
-use crate::config::{ConfigFormat, load_str};
+use crate::config::{ConfigFormat, load_path_capture, load_path_text, load_str};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 
@@ -19,6 +19,15 @@ enum EditorMode {
     Text,
 }
 
+/// 编辑器当前处理独立文件还是需要保留来源的 include 入口。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditorSource {
+    /// 单个完整配置文件，可以安全转换为结构化表单。
+    Standalone,
+    /// include 入口，只允许文本编辑以免展开后丢失来源。
+    IncludeClosure,
+}
+
 /// 配置编辑页的文本、光标、校验和退出状态。
 #[derive(Clone, Debug)]
 pub struct ConfigEditor {
@@ -34,6 +43,7 @@ pub struct ConfigEditor {
     message: String,
     mode: EditorMode,
     form: Option<FormState>,
+    source: EditorSource,
 }
 
 impl ConfigEditor {
@@ -52,6 +62,9 @@ impl ConfigEditor {
         })?;
         let input = fs::read_to_string(&path)?;
         let mut editor = Self::from_text(path, format, &input);
+        if load_path_capture(&editor.path).watched_paths.len() > 1 {
+            editor.source = EditorSource::IncludeClosure;
+        }
         editor.activate_form();
         Ok(editor)
     }
@@ -81,6 +94,7 @@ impl ConfigEditor {
             message: "编辑后按 Ctrl-S 校验并保存".to_owned(),
             mode: EditorMode::Text,
             form: None,
+            source: EditorSource::Standalone,
         }
     }
 
@@ -223,7 +237,7 @@ impl ConfigEditor {
             }
         }
         let text = self.text();
-        match load_str(&text, self.format) {
+        match load_path_text(&self.path, &text) {
             Ok(compiled) => match fs::write(&self.path, text) {
                 Ok(()) => {
                     self.dirty = false;
@@ -339,6 +353,13 @@ impl ConfigEditor {
 
     /// 将当前有效文本配置转换为结构化表单，失败时继续保留高级文本模式。
     fn activate_form(&mut self) {
+        if self.source == EditorSource::IncludeClosure {
+            self.mode = EditorMode::Text;
+            self.form = None;
+            "include 配置保持高级文本模式，避免表单展开后丢失片段来源"
+                .clone_into(&mut self.message);
+            return;
+        }
         match load_str(&self.text(), self.format) {
             Ok(compiled) => {
                 self.form = Some(FormState::new(FormConfig::from_compiled(compiled)));

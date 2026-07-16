@@ -425,6 +425,15 @@ fn apply_placeholders(compiled: &mut CompiledProject, resolved: &[ResolvedDepend
             if let Some(cwd) = task.cwd.as_mut() {
                 *cwd = PathBuf::from(cwd.to_string_lossy().replace(&marker, &value));
             }
+            if let Some(healthcheck) = task.healthcheck.as_mut() {
+                healthcheck.command = healthcheck.command.replace(&marker, &value);
+                for argument in &mut healthcheck.args {
+                    *argument = argument.replace(&marker, &value);
+                }
+                if let Some(cwd) = healthcheck.cwd.as_mut() {
+                    *cwd = PathBuf::from(cwd.to_string_lossy().replace(&marker, &value));
+                }
+            }
         }
     }
 }

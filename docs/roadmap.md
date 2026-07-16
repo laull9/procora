@@ -146,4 +146,4 @@
 
 ## 10. 当前下一步
 
-`Center → ServiceHost → Task`、高频 CLI、真实进程树监管、依赖调度、重启退避、Service 本地日志、资源快照、TUI 控制与中心恢复已经形成首个运行闭环。下一步进入 P2：优先实现配置监听去抖、候选修订和语义差异，再验证六目标 Release 流水线；独立健康检查器、profile/变量/effective config 仍作为配置与运行时的后续增强项。
+`Center → ServiceHost → Task` 已形成运行闭环；安全 include 闭包、受控 Python 配置、固定提交 Git 候选源、配置监听去抖、SHA-256 候选、语义差异、显式确认、按影响 Task 对账与失败回退，以及供应链、MSRV、性质/日志压力门禁和兼容性 ADR 也已落地。下一步补 Center/CLI 的持久远端注册与凭据边界；工程质量主线继续补长期运行和受控 Git/SSH 故障注入。具体上游对照和取舍见 [`process-compose-study.md`](process-compose-study.md)。

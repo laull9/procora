@@ -208,7 +208,23 @@ mod platform {
                 source,
             },
         )?;
+        let previous = fs::read(&path).ok();
         write_unit(&path, &definition.systemd_unit())?;
+        let result = enable_written_unit();
+        if let Err(error) = result {
+            if let Some(previous) = previous {
+                let _ = fs::write(&path, previous);
+            } else {
+                let _ = fs::remove_file(&path);
+            }
+            run_cleanup_command("systemctl", &["--user".into(), "daemon-reload".into()]);
+            return Err(error);
+        }
+        Ok(AutostartBackend::SystemdUser)
+    }
+
+    /// 加载、启用并复核已经写入的用户单元。
+    fn enable_written_unit() -> Result<(), AutostartError> {
         run_command("systemctl", &["--user".into(), "daemon-reload".into()])?;
         run_cleanup_command(
             "systemctl",
@@ -235,7 +251,7 @@ mod platform {
                 SYSTEMD_UNIT_NAME.into(),
             ],
         )?;
-        Ok(AutostartBackend::SystemdUser)
+        Ok(())
     }
 
     /// 通过同目录临时文件原子替换 systemd 用户单元。

@@ -46,6 +46,11 @@ pub(crate) struct FormTask {
     /// 环境变量。
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) env: BTreeMap<String, String>,
+    /// 可选健康检查；高级文本模式可编辑，表单编辑 Task 时会完整保留。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) healthcheck: Option<FormHealthCheck>,
+    /// 视为成功的退出码。
+    pub(crate) success_exit_codes: Vec<i32>,
     /// 上游 Task 依赖。
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) depends_on: BTreeMap<String, FormTaskDependency>,
@@ -55,6 +60,29 @@ pub(crate) struct FormTask {
     pub(crate) restart_delay_ms: u64,
     /// 优雅停止等待时间。
     pub(crate) shutdown_timeout_ms: u64,
+}
+
+/// 表单序列化时保留的健康检查配置。
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct FormHealthCheck {
+    /// 检查程序。
+    command: String,
+    /// 检查参数。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    args: Vec<String>,
+    /// 可选工作目录。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+    /// 首次检查等待时间。
+    initial_delay_ms: u64,
+    /// 检查周期。
+    period_ms: u64,
+    /// 单次检查超时。
+    timeout_ms: u64,
+    /// 连续成功阈值。
+    success_threshold: u32,
+    /// 连续失败阈值。
+    failure_threshold: u32,
 }
 
 /// 表单中的单条 Task 依赖。
@@ -108,6 +136,17 @@ impl FormConfig {
             .tasks
             .into_iter()
             .map(|(id, task)| {
+                let healthcheck = task.healthcheck.map(|healthcheck| FormHealthCheck {
+                    command: healthcheck.command,
+                    args: healthcheck.args,
+                    cwd: healthcheck.cwd.map(|path| path.display().to_string()),
+                    initial_delay_ms: healthcheck.initial_delay_ms,
+                    period_ms: healthcheck.period_ms,
+                    timeout_ms: healthcheck.timeout_ms,
+                    success_threshold: healthcheck.success_threshold,
+                    failure_threshold: healthcheck.failure_threshold,
+                });
+                let success_exit_codes = task.success_exit_codes.into_iter().collect();
                 let depends_on = task
                     .depends_on
                     .into_iter()
@@ -127,6 +166,8 @@ impl FormConfig {
                         args: task.args,
                         cwd: task.cwd.map(|path| path.display().to_string()),
                         env: task.env,
+                        healthcheck,
+                        success_exit_codes,
                         depends_on,
                         restart: restart_text(task.restart).to_owned(),
                         restart_delay_ms: task.restart_delay_ms,
@@ -232,6 +273,24 @@ impl FormConfig {
                     text.push_str(&format!("      {}: {}\n", quoted(key), quoted(value)));
                 }
             }
+            if let Some(healthcheck) = &task.healthcheck {
+                text.push_str("    healthcheck:\n");
+                text.push_str(&format!(
+                    "      command: {}\n",
+                    quoted(&healthcheck.command)
+                ));
+                yaml_array(&mut text, 6, "args", &healthcheck.args);
+                optional_yaml(&mut text, 6, "cwd", healthcheck.cwd.as_deref());
+                text.push_str(&format!(
+                    "      initial_delay_ms: {}\n      period_ms: {}\n      timeout_ms: {}\n",
+                    healthcheck.initial_delay_ms, healthcheck.period_ms, healthcheck.timeout_ms
+                ));
+                text.push_str(&format!(
+                    "      success_threshold: {}\n      failure_threshold: {}\n",
+                    healthcheck.success_threshold, healthcheck.failure_threshold
+                ));
+            }
+            yaml_i32_array(&mut text, 4, "success_exit_codes", &task.success_exit_codes);
             if !task.depends_on.is_empty() {
                 text.push_str("    depends_on:\n");
                 for (name, dependency) in &task.depends_on {
@@ -283,6 +342,15 @@ fn yaml_array(text: &mut String, indent: usize, key: &str, values: &[String]) {
     text.push_str(&format!("{}{}:\n", " ".repeat(indent), key));
     for value in values {
         text.push_str(&format!("{}- {}\n", " ".repeat(indent + 2), quoted(value)));
+    }
+}
+
+/// 输出 YAML 整数数组。
+#[allow(clippy::format_push_string)]
+fn yaml_i32_array(text: &mut String, indent: usize, key: &str, values: &[i32]) {
+    text.push_str(&format!("{}{}:\n", " ".repeat(indent), key));
+    for value in values {
+        text.push_str(&format!("{}- {value}\n", " ".repeat(indent + 2)));
     }
 }
 

@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::config::CompiledProject;
+use crate::config::{CompiledProject, ManagedDependencies};
 use crate::core::{ProjectSpec, TaskId};
 use crate::engine::{Engine, EngineCommand, EngineEffect, RuntimeEvent, TaskRunIdentity};
 use crate::log::{FileLogStore, LogStream, TailBuffer};
@@ -14,9 +14,12 @@ use crate::protocol::{LogBatchDto, LogCursorDto, ProjectSnapshot, SnapshotSource
 use thiserror::Error;
 
 use super::{
+    health::HealthRuntime,
     host_logs::{LogReaderContext, LogWriter, OutputReader, join_readers, spawn_log_reader},
-    host_view::{command_label, resource_usage, task_message, task_status},
+    host_view::{command_label, resource_usage, task_health, task_message, task_status},
 };
+
+mod reconfigure;
 
 /// 单个 `ServiceHost` 的真实 Task 运行错误。
 #[derive(Debug, Error)]
@@ -36,6 +39,14 @@ pub enum ServiceHostError {
         task_id: TaskId,
         /// 平台进程操作错误。
         source: std::io::Error,
+    },
+    /// 候选应用失败且旧配置恢复也未完成。
+    #[error("候选配置应用失败：{apply}；旧配置恢复失败：{rollback}")]
+    ReconfigureRollback {
+        /// 候选配置的原始失败。
+        apply: String,
+        /// 恢复旧配置时的失败。
+        rollback: String,
     },
 }
 
@@ -60,6 +71,7 @@ struct PendingSpawn {
 #[derive(Debug)]
 pub struct ServiceHost {
     spec: ProjectSpec,
+    dependencies: ManagedDependencies,
     engine: Engine,
     monitor: SystemMonitor,
     logs: Arc<Mutex<TailBuffer>>,
@@ -68,6 +80,7 @@ pub struct ServiceHost {
     dropped_log_chunks: Arc<AtomicU64>,
     instances: BTreeMap<TaskId, TaskInstance>,
     pending_spawns: Vec<PendingSpawn>,
+    health: HealthRuntime,
 }
 
 impl ServiceHost {
@@ -90,6 +103,7 @@ impl ServiceHost {
             .map(|files| LogWriter::new(Arc::clone(files)));
         Self {
             spec: compiled.spec,
+            dependencies: compiled.dependencies,
             engine,
             monitor: SystemMonitor::new(),
             logs: Arc::new(Mutex::new(TailBuffer::new(4096))),
@@ -98,12 +112,23 @@ impl ServiceHost {
             dropped_log_chunks: Arc::new(AtomicU64::new(0)),
             instances: BTreeMap::new(),
             pending_spawns: Vec::new(),
+            health: HealthRuntime::default(),
         }
     }
 
     /// 返回当前项目标识。
     pub fn project(&self) -> &str {
         self.engine.project()
+    }
+
+    /// 返回当前宿主最后一次成功提交的规范化项目配置。
+    pub fn spec(&self) -> &ProjectSpec {
+        &self.spec
+    }
+
+    /// 返回当前有效修订采用的项目级管理依赖声明。
+    pub fn dependencies(&self) -> &ManagedDependencies {
+        &self.dependencies
     }
 
     /// 返回确定性的首轮启动计划。
@@ -168,6 +193,7 @@ impl ServiceHost {
             match result {
                 Ok(Some(status)) => {
                     let mut instance = self.instances.remove(&task_id).expect("实例仍存在");
+                    self.health.stop(&task_id, instance.identity);
                     if let Err(error) = instance.child.cleanup_after_exit() {
                         tracing::warn!(task = %task_id, %error, "顶层进程退出后清理剩余进程树失败");
                     }
@@ -176,7 +202,7 @@ impl ServiceHost {
                         task_id: task_id.clone(),
                         identity: instance.identity,
                         exit_code: status.code(),
-                        success: status.success(),
+                        success: exit_succeeded(&self.spec.tasks[&task_id], status),
                     });
                     if let Err(error) = self.execute_effects(effects) {
                         tracing::warn!(%error, "Task 退出后的调度失败");
@@ -187,6 +213,14 @@ impl ServiceHost {
                 Err(error) => {
                     tracing::warn!(task = %task_id, %error, "Task 退出状态查询失败");
                 }
+            }
+        }
+        let health_events = self.health.refresh();
+        changed |= !health_events.is_empty();
+        for event in health_events {
+            let effects = self.engine.event(event);
+            if let Err(error) = self.execute_effects(effects) {
+                tracing::warn!(%error, "健康状态变化后的调度失败");
             }
         }
         if changed {
@@ -257,6 +291,7 @@ impl ServiceHost {
                     task_id: task_id.clone(),
                     command: command_label(task),
                     status: task_status(*state, running),
+                    health: task_health(state.health),
                     dependencies: task.depends_on.keys().cloned().collect(),
                     resources,
                     message: task_message(*state),
@@ -357,6 +392,8 @@ impl ServiceHost {
                 readers,
             },
         );
+        self.health
+            .start(task_id, identity, &self.spec.tasks[task_id]);
         Ok(())
     }
 
@@ -380,6 +417,7 @@ impl ServiceHost {
             self.instances.insert(task_id.clone(), instance);
             return Ok(Vec::new());
         }
+        self.health.stop(task_id, identity);
         let timeout = Duration::from_millis(self.spec.tasks[task_id].shutdown_timeout_ms);
         let outcome = instance
             .child
@@ -393,7 +431,7 @@ impl ServiceHost {
             task_id: task_id.clone(),
             identity,
             exit_code: outcome.status.code(),
-            success: outcome.status.success(),
+            success: exit_succeeded(&self.spec.tasks[task_id], outcome.status),
         }))
     }
 
@@ -429,6 +467,14 @@ impl ServiceHost {
             writer.flush();
         }
     }
+}
+
+/// 按 Task 声明判断平台退出状态是否属于成功结束。
+fn exit_succeeded(task: &crate::core::TaskSpec, status: std::process::ExitStatus) -> bool {
+    status.success()
+        || status
+            .code()
+            .is_some_and(|code| task.success_exit_codes.contains(&code))
 }
 
 impl Drop for ServiceHost {

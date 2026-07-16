@@ -201,11 +201,21 @@ impl Dialog {
             DialogKind::Task(original) => {
                 let name = self.fields[0].value.trim();
                 require(name, "Task 名称")?;
+                let healthcheck = original
+                    .as_ref()
+                    .and_then(|name| config.tasks.get(name))
+                    .and_then(|task| task.healthcheck.clone());
+                let success_exit_codes = original
+                    .as_ref()
+                    .and_then(|name| config.tasks.get(name))
+                    .map_or_else(|| vec![0], |task| task.success_exit_codes.clone());
                 let task = FormTask {
                     command: required_value(&self.fields[1].value, "命令")?,
                     args: words(&self.fields[2].value),
                     cwd: optional(&self.fields[3].value),
                     env: parse_pairs(&self.fields[4].value, "环境变量")?,
+                    healthcheck,
+                    success_exit_codes,
                     depends_on: parse_dependencies(&self.fields[5].value)?,
                     restart: self.fields[6].value.clone(),
                     restart_delay_ms: parse_u64(&self.fields[7].value, "重启等待毫秒")?,
@@ -254,6 +264,8 @@ impl FormTask {
             args: Vec::new(),
             cwd: None,
             env: BTreeMap::new(),
+            healthcheck: None,
+            success_exit_codes: vec![0],
             depends_on: BTreeMap::new(),
             restart: "never".to_owned(),
             restart_delay_ms: 500,

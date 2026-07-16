@@ -1,8 +1,26 @@
-use std::{fs, path::Path};
+use std::path::{Path, PathBuf};
 
 use crate::core::{ProjectSpec, TaskGraph};
 
 use super::{ConfigDiagnostic, ConfigError, ConfigFormat, ManagedDependencies, raw::RawProject};
+
+mod include;
+
+/// 单次闭包加载捕获的一个配置文件输入。
+#[derive(Debug)]
+pub(crate) struct CapturedConfigInput {
+    pub(crate) path: PathBuf,
+    pub(crate) bytes: Vec<u8>,
+}
+
+/// 无论成功失败都保留已读取输入和需要监听路径的加载结果。
+#[derive(Debug)]
+pub(crate) struct ConfigLoadCapture {
+    pub(crate) result: Result<CompiledProject, ConfigError>,
+    pub(crate) inputs: Vec<CapturedConfigInput>,
+    pub(crate) watched_paths: Vec<PathBuf>,
+    pub(crate) root: PathBuf,
+}
 
 /// 已通过结构、语义和任务图校验的项目配置。
 #[derive(Debug)]
@@ -21,17 +39,21 @@ pub struct CompiledProject {
 ///
 /// 当格式未知、文件无法读取、内容无效或任务图无法编译时返回错误。
 pub fn load_path(path: impl AsRef<Path>) -> Result<CompiledProject, ConfigError> {
-    let path = path.as_ref();
-    let format = ConfigFormat::from_path(path)
-        .ok_or_else(|| ConfigError::UnknownFormat(path.to_path_buf()))?;
-    let input = fs::read_to_string(path).map_err(|source| ConfigError::Read {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let base = path
-        .parent()
-        .map(|parent| fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()));
-    compile(&input, format, base.as_deref())
+    load_path_capture(path.as_ref()).result
+}
+
+/// 加载配置闭包并保留修订计算和动态监听需要的输入元数据。
+pub(crate) fn load_path_capture(path: &Path) -> ConfigLoadCapture {
+    if super::python::is_python_config(path) {
+        super::python::load_capture(path)
+    } else {
+        include::load(path)
+    }
+}
+
+/// 按目标文件路径校验尚未写入的入口文本及其 include 闭包。
+pub(crate) fn load_path_text(path: &Path, input: &str) -> Result<CompiledProject, ConfigError> {
+    include::load_with_entry(path, input.as_bytes()).result
 }
 
 /// 从内存文本解析并编译项目配置。
@@ -50,6 +72,19 @@ fn compile(
     base_directory: Option<&Path>,
 ) -> Result<CompiledProject, ConfigError> {
     let raw = parse_raw(input, format)?;
+    if raw.has_includes() {
+        return Err(ConfigError::Include(
+            "include 必须通过文件路径加载，内存文本没有安全的相对路径基准".to_owned(),
+        ));
+    }
+    compile_raw(raw, base_directory)
+}
+
+/// 规范化已经完成 include 合并的原始 DTO 并编译任务图。
+fn compile_raw(
+    raw: RawProject,
+    base_directory: Option<&Path>,
+) -> Result<CompiledProject, ConfigError> {
     let (spec, dependencies) = raw.normalize(base_directory).map_err(validation_error)?;
     let graph = TaskGraph::compile(&spec)?;
     Ok(CompiledProject {
@@ -57,6 +92,14 @@ fn compile(
         graph,
         dependencies,
     })
+}
+
+/// 按脚本目录解析 Python 生成的严格 JSON 文档。
+pub(super) fn load_generated_json(
+    input: &str,
+    base_directory: &Path,
+) -> Result<CompiledProject, ConfigError> {
+    compile(input, ConfigFormat::Json, Some(base_directory))
 }
 
 /// 按输入格式反序列化原始配置并保留字段路径。

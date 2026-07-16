@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::{DependencyCondition, ProjectSpec, RestartPolicy, TaskGraph, TaskId};
 use uuid::Uuid;
@@ -90,6 +90,7 @@ pub struct Engine {
     graph: TaskGraph,
     states: BTreeMap<TaskId, TaskRuntimeState>,
     restart: BTreeMap<TaskId, (RestartPolicy, u64)>,
+    health_configured: BTreeSet<TaskId>,
     generation: u64,
 }
 
@@ -107,11 +108,18 @@ impl Engine {
             .iter()
             .map(|(task_id, task)| (task_id.clone(), (task.restart, task.restart_delay_ms)))
             .collect();
+        let health_configured = spec
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.healthcheck.is_some())
+            .map(|(task_id, _)| task_id.clone())
+            .collect();
         Self {
             project: spec.project.clone(),
             graph,
             states,
             restart,
+            health_configured,
             generation: 1,
         }
     }
@@ -139,6 +147,104 @@ impl Engine {
         self.graph.start_order()
     }
 
+    /// 返回当前运行图，供宿主在配置提交失败时构造回退点。
+    pub fn graph(&self) -> &TaskGraph {
+        &self.graph
+    }
+
+    /// 原地更新不改变进程身份的退出与重启策略。
+    pub fn update_runtime_policies(&mut self, spec: &ProjectSpec) {
+        self.restart = spec
+            .tasks
+            .iter()
+            .map(|(task_id, task)| (task_id.clone(), (task.restart, task.restart_delay_ms)))
+            .collect();
+    }
+
+    /// 在替换任务图前把受影响 Task 置为停止期望并生成反向停止意图。
+    ///
+    /// # Panics
+    ///
+    /// 仅当已编译任务图与运行状态表内部不一致时 panic。
+    pub fn prepare_reconfigure(&mut self, affected: &BTreeSet<TaskId>) -> Vec<EngineEffect> {
+        let mut effects = Vec::new();
+        for task_id in self.graph.stop_order() {
+            if !affected.contains(task_id) {
+                continue;
+            }
+            let state = self.states.get_mut(task_id).expect("任务图与状态一致");
+            state.desired = DesiredState::Stopped;
+            state.health = HealthState::NotConfigured;
+            if let Some(run_id) = state.run_id {
+                state.observed = ObservedState::Stopping;
+                effects.push(EngineEffect::Stop {
+                    task_id: task_id.clone(),
+                    identity: TaskRunIdentity {
+                        generation: state.generation,
+                        run_id,
+                    },
+                });
+            } else {
+                state.observed = ObservedState::Exited;
+            }
+        }
+        effects
+    }
+
+    /// 提交新任务图，保留无影响 Task 身份并只对账受影响集合。
+    pub fn reconfigure(
+        &mut self,
+        spec: &ProjectSpec,
+        graph: TaskGraph,
+        affected: &BTreeSet<TaskId>,
+        desired_running: bool,
+    ) -> Vec<EngineEffect> {
+        self.generation = self.generation.saturating_add(1);
+        let previous = std::mem::take(&mut self.states);
+        self.states = spec
+            .tasks
+            .keys()
+            .cloned()
+            .map(|task_id| {
+                let state = previous
+                    .get(&task_id)
+                    .filter(|_| !affected.contains(&task_id));
+                let state = state.copied().unwrap_or_else(|| {
+                    let mut state = TaskRuntimeState {
+                        generation: self.generation,
+                        ..TaskRuntimeState::default()
+                    };
+                    if desired_running {
+                        state.health = if spec.tasks[&task_id].healthcheck.is_some() {
+                            HealthState::Starting
+                        } else {
+                            HealthState::NotConfigured
+                        };
+                    } else {
+                        state.desired = DesiredState::Stopped;
+                        state.observed = ObservedState::Exited;
+                    }
+                    state
+                });
+                (task_id, state)
+            })
+            .collect();
+        self.project.clone_from(&spec.project);
+        self.graph = graph;
+        self.restart = spec
+            .tasks
+            .iter()
+            .map(|(task_id, task)| (task_id.clone(), (task.restart, task.restart_delay_ms)))
+            .collect();
+        self.health_configured = spec
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.healthcheck.is_some())
+            .map(|(task_id, _)| task_id.clone())
+            .collect();
+        self.reconcile()
+    }
+
     /// 处理一条用户命令并返回需要执行的副作用。
     ///
     /// # Panics
@@ -148,10 +254,14 @@ impl Engine {
         match command {
             EngineCommand::StartAll => {
                 self.generation = self.generation.saturating_add(1);
-                for state in self.states.values_mut() {
+                for (task_id, state) in &mut self.states {
                     state.desired = DesiredState::Running;
                     state.observed = ObservedState::Pending;
-                    state.health = HealthState::NotConfigured;
+                    state.health = if self.health_configured.contains(task_id) {
+                        HealthState::Starting
+                    } else {
+                        HealthState::NotConfigured
+                    };
                     state.generation = self.generation;
                     state.run_id = None;
                     state.exit_code = None;
@@ -229,6 +339,11 @@ impl Engine {
         let state = self.states.get_mut(task_id).expect("身份已经匹配");
         state.exit_code = exit_code;
         state.run_id = None;
+        state.health = if self.health_configured.contains(task_id) {
+            HealthState::Unknown
+        } else {
+            HealthState::NotConfigured
+        };
         state.observed = if success {
             ObservedState::Exited
         } else {
@@ -273,6 +388,11 @@ impl Engine {
             let state = self.states.get_mut(&task_id).expect("任务存在");
             state.run_id = Some(identity.run_id);
             state.observed = ObservedState::Starting;
+            state.health = if self.health_configured.contains(&task_id) {
+                HealthState::Starting
+            } else {
+                HealthState::NotConfigured
+            };
             effects.push(EngineEffect::Spawn {
                 task_id,
                 identity,
@@ -299,7 +419,7 @@ impl Engine {
                                 && state.observed == ObservedState::Running)
                     }
                     DependencyCondition::CompletedSuccessfully => {
-                        state.observed == ObservedState::Exited && state.exit_code == Some(0)
+                        state.observed == ObservedState::Exited
                     }
                 }
             })

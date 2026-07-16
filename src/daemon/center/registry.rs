@@ -44,6 +44,7 @@ impl Center {
         let view = service.view();
         self.repository.remove_service(&name)?;
         self.services.remove(&name);
+        self.monitors.remove(&name);
         self.push_event(CenterEventKindDto::Removed, Some(view.clone()));
         Ok(view)
     }

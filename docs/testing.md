@@ -26,6 +26,8 @@
 
 优先使用表驱动和性质测试。时间、ID 与随机抖动通过注入的 clock/ID/random 端口控制，禁止依赖真实 sleep。
 
+`tests/properties.rs` 使用固定种子生成 192 个、最多 28 个 Task 的随机 DAG，验证每次创建都已满足直接依赖、停止顺序始终是反向依赖序，并验证配置自差异不产生影响集合。固定种子保证失败可重放，不把随机偶发现象留给 CI。
+
 ### 2.2 配置契约测试
 
 - 同一语义的 YAML、TOML 和 JSON 产生相同 `ProjectSpec`。
@@ -33,7 +35,7 @@
 - 错误包含来源、字段路径和可读建议。
 - 路径按声明文件目录解析。
 - 未知字段、循环依赖和缺失依赖被拒绝。
-- Python 辅助进程测试超时、非零退出、超大输出、错误 JSON 与 stderr 隔离。
+- Python 辅助进程测试隔离环境、超时整树回收、非零退出、脚本/stdout 上限、严格单 JSON 与生成输出修订。
 
 规范配置样例放入 `tests/fixtures/config/`，并明确区分 valid、invalid 与 equivalent。
 
@@ -46,6 +48,10 @@
 - `ResourceMonitor`：单位、树聚合、不可用能力和进程退出竞态。
 - `StateRepository`：SQLite 事务、状态历史去重、模式版本拒绝和损坏数据库处理。
 - `DefinitionSource`：版本稳定、重复事件去抖和内容哈希。
+
+include 契约额外覆盖三格式片段优先级、跨文件依赖、各声明文件的路径基准、循环/深度/数量/总字节限制、符号链接越界、缺失成员创建恢复，以及 preview/apply 对整个闭包的 TOCTOU 校验。
+
+Git 来源契约使用真实本地仓库覆盖浅获取、完整 commit 固定、跨格式 include、可变引用修订变化、重新确认、无效候选保留、缓存篡改、归档上限，以及协议/引用/路径注入拒绝。网络测试不依赖公共服务；远端认证和故障注入需要后续使用本地受控 Git/SSH 服务夹具。
 
 ### 2.4 集成与端到端测试
 
@@ -97,9 +103,11 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo doc --no-deps
+cargo deny check bans licenses sources
+cargo deny check advisories
 ```
 
-本地以这些命令作为质量门禁；六目标 Release workflow 负责补充三平台构建验证。涉及不安全代码时，必须在局部模块说明安全不变量并增加专门测试；默认不允许为了绕过平台库限制扩大 `unsafe` 范围。
+本地以这些命令作为质量门禁；`ci.yml` 固定 Rust 1.95 最低版本，并在 Ubuntu 单独执行 systemd feature、显式总线和权限失败回滚测试；`security.yml` 在依赖变化和每周计划中检查许可证、来源和 RustSec 漏洞，六目标 Release workflow 负责补充三平台构建验证。涉及不安全代码时，必须在局部模块说明安全不变量并增加专门测试；默认不允许为了绕过平台库限制扩大 `unsafe` 范围。
 
 ## 6. 性能与稳定性测试
 
@@ -110,5 +118,9 @@ cargo doc --no-deps
 - 多个观察客户端同时订阅日志与指标时的 daemon 开销。
 - 大任务图的编译、差异计算和 TUI 刷新时间。
 - 24 小时运行中的句柄、文件描述符、任务和内存泄漏。
+
+当前快速压力门禁由 `tests/log_stress.rs` 覆盖：8 个并发写者写入 2000 条唯一记录并检查无丢失/撕裂，同时连续追加 256 KiB 触发密集 gzip 轮转，验证归档上限和临时文件清理。它不替代 24 小时 soak；长期运行仍需在定时 CI 或发布候选环境记录进程资源曲线。
+
+`soak.yml` 每周以 release 模式运行默认测试中忽略的 `tests/soak.rs`，连续完成 2000 次真实 Task 启动、运行状态观察和停止，验证每轮状态闭环，并在 Unix 检查文件描述符没有持续增长。循环数可用 `PROCORA_SOAK_CYCLES` 调整但限制在 1–10000；它用于尽早发现线性泄漏，仍不替代发布候选的 24 小时内存、线程和句柄曲线。
 
 基准结果用于确定默认队列容量、采样间隔和日志批量大小，不把特定开发机数字写成跨平台硬性承诺。

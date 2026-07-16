@@ -28,6 +28,25 @@ pub enum ConfigError {
         /// 底层文件错误。
         source: std::io::Error,
     },
+    /// include 路径违反根目录、相对路径或资源限制。
+    #[error("include 配置无效：{0}")]
+    Include(String),
+    /// include 文件自身无法解析或校验。
+    #[error("include 文件 `{path}` 无效: {source}")]
+    IncludedFile {
+        /// 出错的 include 文件。
+        path: PathBuf,
+        /// 该文件的底层配置错误。
+        source: Box<ConfigError>,
+    },
+    /// 受控 Python 配置辅助进程失败。
+    #[error("Python 配置 `{path}` 失败: {message}")]
+    Python {
+        /// 用户显式指定的 Python 配置入口。
+        path: PathBuf,
+        /// 解释器、超时、输出或 JSON 诊断。
+        message: String,
+    },
     /// 配置文本解析失败。
     #[error("{format} 配置解析失败: {message}")]
     Parse {

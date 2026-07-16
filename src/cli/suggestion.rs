@@ -4,12 +4,28 @@ use std::path::Path;
 
 /// 可在顶层执行的公开命令名称。
 pub(crate) const TOP_LEVEL: &[&str] = &[
-    "init", "edit", "deps", "up", "down", "status", "enable", "disable", "server", "show",
-    "validate", "graph", "doctor",
+    "init",
+    "edit",
+    "deps",
+    "clean",
+    "up",
+    "down",
+    "status",
+    "enable",
+    "disable",
+    "server",
+    "show",
+    "validate",
+    "graph",
+    "config",
+    "doctor",
+    "completions",
 ];
 
 /// `procora server` 支持的子命令名称。
-pub(crate) const SERVER: &[&str] = &["list", "history", "start", "restart", "stop"];
+pub(crate) const SERVER: &[&str] = &[
+    "list", "history", "start", "restart", "preview", "apply", "stop", "remove",
+];
 
 /// 为不存在的单段路径查找足够相似的命令。
 pub(crate) fn for_missing_path<'a>(target: &Path, candidates: &'a [&str]) -> Option<&'a str> {

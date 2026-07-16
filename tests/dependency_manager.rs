@@ -46,6 +46,9 @@ dependencies:
 tasks:
   run:
     command: "${dependency.tool}"
+    healthcheck:
+      command: "${dependency.tool}"
+      args: ["--path=${dependency.tool}"]
 "#,
     )
     .unwrap();
@@ -66,6 +69,20 @@ fn 本地二进制会安装验证缓存并替换任务占位符() {
     assert_eq!(
         first.spec.tasks.values().next().unwrap().command,
         resolved[0].path.to_string_lossy()
+    );
+    let healthcheck = first
+        .spec
+        .tasks
+        .values()
+        .next()
+        .unwrap()
+        .healthcheck
+        .as_ref()
+        .unwrap();
+    assert_eq!(healthcheck.command, resolved[0].path.to_string_lossy());
+    assert_eq!(
+        healthcheck.args,
+        [format!("--path={}", resolved[0].path.display())]
     );
     assert!(
         root.join(".procora/dependencies/tool/1.2.3/manifest.json")

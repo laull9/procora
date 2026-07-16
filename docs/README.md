@@ -15,7 +15,10 @@
 | [外部依赖选型](dependencies.md) | 生态调研、采用原因、替代方案与 feature 边界 | 所有开发者 |
 | [测试策略](testing.md) | 测试目录、契约测试、平台矩阵和质量门禁 | 所有贡献者 |
 | [发布与安装](release.md) | 六目标 Release 流水线、归档命名和一键安装脚本 | 发布维护者与用户 |
+| [安全策略](../SECURITY.md) | 漏洞报告、默认信任边界和供应链门禁 | 用户与维护者 |
 | [实现路线图](roadmap.md) | 分阶段范围、交付物和验收条件 | 维护者与贡献者 |
+| [process-compose 对照研究](process-compose-study.md) | 上游能力差距、故障经验和 Procora 取舍 | 维护者与贡献者 |
+| [ADR 0001：版本兼容策略](adr/0001-versioning-and-compatibility.md) | 配置、IPC 与 SQLite 的升级、拒绝和迁移规则 | 维护者与发布工程师 |
 
 ## 阅读顺序
 
@@ -33,4 +36,4 @@
 - 协议、配置和持久化格式发生不兼容变更时，应补充架构决策记录（ADR）。
 - 每个里程碑完成后同步更新路线图、README 的当前状态和对应模块文档。
 
-后续 ADR 建议存放于 `docs/adr/`，文件名使用 `NNNN-short-title.md`，并记录背景、决策、替代方案和后果。
+ADR 存放于 `docs/adr/`，文件名使用 `NNNN-short-title.md`，并记录背景、决策、替代方案和后果。

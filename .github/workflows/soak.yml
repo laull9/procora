@@ -1,0 +1,28 @@
+name: soak
+
+on:
+  schedule:
+    - cron: "23 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: procora-weekly-soak
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    name: 长周期真实 Task 启停与句柄门禁
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
+      - name: 运行 release 模式生命周期 soak
+        env:
+          PROCORA_SOAK_CYCLES: "2000"
+        run: cargo test --locked --release --test soak -- --ignored --nocapture
