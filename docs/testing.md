@@ -32,7 +32,9 @@
 
 - 同一语义的 YAML、TOML 和 JSON 产生相同 `ProjectSpec`。
 - 默认值、命名模板、profile、include、环境和 CLI 覆盖符合固定优先级。
-- profile 的 Task 白名单持久生效，未准入 Task 仍校验，TUI 跨格式切换不会丢失声明。
+- profile 的单继承链、map/标量/白名单覆盖、未知/自身/循环诊断和 include 路径基准稳定；未准入 Task 仍校验，TUI 跨格式切换与结构化 CRUD 不会丢失声明。
+- 变量链、转义、未知/循环诊断和逐字段引用在三种格式一致，TUI 写回不把表达式展开成常量。
+- `depends_on` 名称数组、条件标量、旧版对象和 process-compose 条件别名得到相同任务图，严格类型/重复诊断与 TUI 紧凑写回在三种格式一致。
 - 错误包含来源、字段路径和可读建议。
 - 路径按声明文件目录解析。
 - 未知字段、循环依赖和缺失依赖被拒绝。
@@ -52,7 +54,7 @@
 
 include 契约额外覆盖三格式片段优先级、跨文件依赖、各声明文件的路径基准、循环/深度/数量/总字节限制、符号链接越界、缺失成员创建恢复，以及 preview/apply 对整个闭包的 TOCTOU 校验。
 
-配置易用性契约覆盖项目级 `env` 的 include/Task/env_file 覆盖顺序、命令文本/argv/旧写法的规范化等价、三种格式的精确类型诊断，以及 TUI 对含空格参数、空参数、Windows 反斜杠路径、逗号环境值和 HTTP 请求头的无损往返。`tests/fixtures/config/equivalent/` 把旧版逐 Task 重复声明与新版 `task_defaults`、命令文本、argv、命名模板的 YAML、TOML、JSON、真实 Python 输出固定为同一领域规范和任务图；invalid 夹具固定无 Task 时的默认层诊断。模板契约覆盖链式继承、map 合并、列表/标量/argv 整体替换、未知/自身/循环诊断、未使用模板独立校验、include 环境文件路径、具体来源名称，以及 TUI 选择模板和三格式无展开往返。`task_defaults` 契约另覆盖跨 include 的 map/标量合并、Task 列表整体替换，以及 TUI 编辑、新建和清除覆盖都不展开继承值。三种声明式格式还分别验证 `env_file` 能进入表单、保留相对声明路径且不把文件值展开写回。
+配置易用性契约覆盖项目级 `env` 的 include/Task/env_file 覆盖顺序、命令文本/argv/旧写法与依赖数组/标量/对象的规范化等价、三种格式的精确类型诊断，以及 TUI 对含空格参数、空参数、Windows 反斜杠路径、逗号环境值、依赖条件和 HTTP 请求头的无损往返。`tests/durations.rs` 另固定 `h`/`m`/`s`/`ms` 组合解析、跨格式与默认/profile/模板层等价、新旧字段冲突、溢出和运行边界，并真实编辑 TUI 字段后验证规范写回。`tests/fixtures/config/equivalent/` 把旧版逐 Task 重复声明与新版 `task_defaults`、命令文本、argv、依赖简写、可读时长、命名模板、profile 继承的 YAML、TOML、JSON、真实 Python 输出固定为同一领域规范和任务图；invalid 夹具固定无 Task 时的默认层诊断。模板契约覆盖链式继承、map 合并、列表/标量/argv 整体替换、未知/自身/循环诊断、未使用模板独立校验、include 环境文件路径、具体来源名称，以及 TUI 选择模板和三格式无展开往返。profile 契约另覆盖继承链、Task 白名单整体替换、include 后解析、直接继承映射，以及 TUI 的新增、重命名、删除和即时预览。`task_defaults` 契约覆盖跨 include 的 map/标量合并、Task 列表整体替换，以及 TUI 编辑、新建和清除覆盖都不展开继承值。三种声明式格式还分别验证 `env_file` 能进入表单、保留相对声明路径且不把文件值展开写回。
 
 Git 来源契约使用真实本地仓库覆盖浅获取、完整 commit 固定、跨格式 include、可变引用修订变化、重新确认、无效候选保留、缓存篡改、归档上限，以及协议/引用/路径注入拒绝。网络测试不依赖公共服务；远端认证和故障注入需要后续使用本地受控 Git/SSH 服务夹具。
 

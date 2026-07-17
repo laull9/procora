@@ -185,10 +185,10 @@ fn task_dialog_can_restore_inherited_defaults() {
     assert_eq!(saved.matches("cwd:").count(), 1);
     assert_eq!(saved.matches("success_exit_codes:").count(), 1);
     assert_eq!(saved.matches("restart:").count(), 1);
-    assert_eq!(saved.matches("restart_delay_ms:").count(), 1);
+    assert_eq!(saved.matches("restart_delay:").count(), 1);
     assert_eq!(saved.matches("max_restarts:").count(), 1);
-    assert_eq!(saved.matches("restart_reset_after_ms:").count(), 1);
-    assert_eq!(saved.matches("shutdown_timeout_ms:").count(), 1);
+    assert_eq!(saved.matches("restart_reset_after:").count(), 1);
+    assert_eq!(saved.matches("shutdown_timeout:").count(), 1);
     assert_eq!(task.restart, RestartPolicy::Always);
     assert_eq!(task.max_restarts, 4);
     assert_eq!(task.cwd.as_ref().unwrap().file_name().unwrap(), "work");

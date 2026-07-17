@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::Path};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{TaskDefaultsSpec, ValueOrigin},
@@ -11,19 +11,19 @@ use super::{
     config_form::{FormConfig, FormTask},
     config_form_defaults::form_path,
     config_form_dialog::{
-        DialogField, choice_field, field, map_text, optional, parse_i32_list, parse_map, parse_u32,
-        parse_u64, required_value,
+        DialogField, choice_field, field, map_text, optional, parse_duration, parse_i32_list,
+        parse_map, parse_u32, required_value,
     },
 };
 
 /// 结构化编辑器中的项目级 Task 默认声明。
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct FormTaskDefaults {
     /// 默认工作目录。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cwd: Option<String>,
     /// 默认 Task 环境。
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) env: BTreeMap<String, String>,
     /// 默认成功退出码。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,17 +31,38 @@ pub(crate) struct FormTaskDefaults {
     /// 默认重启策略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) restart: Option<String>,
-    /// 默认重启等待毫秒。
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// 默认重启等待时间。
+    #[serde(
+        rename = "restart_delay",
+        alias = "restart_delay_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_optional_duration",
+        serialize_with = "crate::config::serialize_optional_duration",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) restart_delay_ms: Option<u64>,
     /// 默认最大连续重启次数。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) max_restarts: Option<u32>,
     /// 默认连续重启计数重置窗口。
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "restart_reset_after",
+        alias = "restart_reset_after_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_optional_duration",
+        serialize_with = "crate::config::serialize_optional_duration",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) restart_reset_after_ms: Option<u64>,
     /// 默认优雅停止等待时间。
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "shutdown_timeout",
+        alias = "shutdown_timeout_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_optional_duration",
+        serialize_with = "crate::config::serialize_optional_duration",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) shutdown_timeout_ms: Option<u64>,
 }
 
@@ -178,10 +199,10 @@ impl FormTaskDefaults {
             }
         }
         optional_scalar(text, "restart", self.restart.as_deref());
-        optional_number(text, "restart_delay_ms", self.restart_delay_ms);
+        optional_duration(text, "restart_delay", self.restart_delay_ms);
         optional_number(text, "max_restarts", self.max_restarts);
-        optional_number(text, "restart_reset_after_ms", self.restart_reset_after_ms);
-        optional_number(text, "shutdown_timeout_ms", self.shutdown_timeout_ms);
+        optional_duration(text, "restart_reset_after", self.restart_reset_after_ms);
+        optional_duration(text, "shutdown_timeout", self.shutdown_timeout_ms);
     }
 }
 
@@ -237,8 +258,8 @@ pub(super) fn project_fields(config: &FormConfig) -> Vec<DialogField> {
             &["default", "never", "on-failure", "always"],
         ),
         field(
-            "Task 默认重启等待毫秒（可空）",
-            &option_text(config.task_defaults.restart_delay_ms),
+            "Task 默认重启等待（如 750ms/5s，可空）",
+            &option_duration(config.task_defaults.restart_delay_ms),
             &[],
         ),
         field(
@@ -247,13 +268,13 @@ pub(super) fn project_fields(config: &FormConfig) -> Vec<DialogField> {
             &[],
         ),
         field(
-            "Task 默认计数重置毫秒（可空）",
-            &option_text(config.task_defaults.restart_reset_after_ms),
+            "Task 默认计数重置（如 1m，可空）",
+            &option_duration(config.task_defaults.restart_reset_after_ms),
             &[],
         ),
         field(
-            "Task 默认停止超时毫秒（可空）",
-            &option_text(config.task_defaults.shutdown_timeout_ms),
+            "Task 默认停止超时（如 5s，可空）",
+            &option_duration(config.task_defaults.shutdown_timeout_ms),
             &[],
         ),
     ];
@@ -263,6 +284,11 @@ pub(super) fn project_fields(config: &FormConfig) -> Vec<DialogField> {
         "活动 profile",
         config.active_profile().unwrap_or("none"),
         profiles,
+    ));
+    fields.push(field(
+        "项目变量（JSON 对象或 KEY=VALUE）",
+        &map_text(&config.vars),
+        &[],
     ));
     fields
 }
@@ -280,6 +306,7 @@ pub(super) fn commit_project(
         return Err(format!("profile `{name}` 不存在"));
     }
     config.active_profile = profile;
+    config.vars = parse_map(&fields[11].value, "项目变量")?;
     config.env = parse_map(&fields[1].value, "默认环境变量")?;
     let defaults = FormTaskDefaults {
         cwd: optional(&fields[2].value),
@@ -288,10 +315,10 @@ pub(super) fn commit_project(
             .map(|value| parse_i32_list(&value, "Task 默认成功退出码"))
             .transpose()?,
         restart: (fields[5].value != "default").then(|| fields[5].value.clone()),
-        restart_delay_ms: parse_optional_u64(&fields[6].value, "Task 默认重启等待毫秒")?,
+        restart_delay_ms: parse_optional_duration(&fields[6].value, "Task 默认重启等待")?,
         max_restarts: parse_optional_u32(&fields[7].value, "Task 默认最大重启次数")?,
-        restart_reset_after_ms: parse_optional_u64(&fields[8].value, "Task 默认计数重置毫秒")?,
-        shutdown_timeout_ms: parse_optional_u64(&fields[9].value, "Task 默认停止超时毫秒")?,
+        restart_reset_after_ms: parse_optional_duration(&fields[8].value, "Task 默认计数重置")?,
+        shutdown_timeout_ms: parse_optional_duration(&fields[9].value, "Task 默认停止超时")?,
     };
     config.replace_task_defaults(defaults);
     Ok(())
@@ -320,10 +347,10 @@ fn inherited<T>(
     task.origins.fields.insert(field.to_owned(), origin);
 }
 
-/// 解析可空的 64 位无符号整数。
-fn parse_optional_u64(value: &str, label: &str) -> Result<Option<u64>, String> {
+/// 解析可空的带单位时长。
+fn parse_optional_duration(value: &str, label: &str) -> Result<Option<u64>, String> {
     optional(value)
-        .map(|value| parse_u64(&value, label))
+        .map(|value| parse_duration(&value, label))
         .transpose()
 }
 
@@ -337,6 +364,11 @@ fn parse_optional_u32(value: &str, label: &str) -> Result<Option<u32>, String> {
 /// 把可选数字转换为弹窗文本。
 fn option_text(value: Option<impl ToString>) -> String {
     value.map_or_else(String::new, |value| value.to_string())
+}
+
+/// 把可选时长转换为弹窗文本。
+fn option_duration(value: Option<u64>) -> String {
+    value.map_or_else(String::new, crate::config::format_duration)
 }
 
 /// 把重启策略转为配置拼写。
@@ -374,5 +406,16 @@ fn optional_scalar(text: &mut String, key: &str, value: Option<&str>) {
 fn optional_number(text: &mut String, key: &str, value: Option<impl std::fmt::Display>) {
     if let Some(value) = value {
         text.push_str(&format!("  {key}: {value}\n"));
+    }
+}
+
+/// 输出可选 YAML 时长。
+#[allow(clippy::format_push_string)]
+fn optional_duration(text: &mut String, key: &str, value: Option<u64>) {
+    if let Some(value) = value {
+        text.push_str(&format!(
+            "  {key}: {}\n",
+            quoted(&crate::config::format_duration(value))
+        ));
     }
 }

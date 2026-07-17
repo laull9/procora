@@ -45,7 +45,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | 命令 | 语义 |
 | --- | --- |
 | `procora init --config yaml/json/toml` | 创建不依赖 Cargo 的可运行示例并自动打开配置编辑页；脚本可加 `--no-edit`。 |
-| `procora edit [path/config]` | 打开 TUI 配置编辑页；可编辑项目环境、项目级 `task_defaults`、Task `env_file`、生命周期/成功退出码，并用 `h` 单独编辑 exec/HTTP 健康检查。 |
+| `procora edit [path/config]` | 打开 TUI 配置编辑页；可维护 profile/继承、项目环境、项目级 `task_defaults`、Task `env_file`、生命周期/成功退出码，并用 `h` 单独编辑 exec/HTTP 健康检查。 |
 | `procora clean [path/config]` | 清空服务目录中的 `.procora` 运行时文件、日志和管理依赖缓存。 |
 | `procora deps [path/config]` | 下载、智能解包、缓存并验证项目声明依赖；`--check` 只做离线验证。 |
 | `procora up` | 启动全局 Procora 服务器。 |
@@ -77,7 +77,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 后台 Center 会对配置文件事件做 250ms 防抖并生成候选，但不会因为一次保存就自动重启服务。无效候选、项目改名、依赖准备失败和过期修订都会保留旧有效宿主；先运行 `procora preview` 审查影响，再把输出的完整修订交给 `procora apply`。退出码、重启退避和停止宽限等纯运行策略可原地提交；进程身份或依赖图变化只重启受影响的下游闭包，新增和删除按拓扑顺序对账，启动失败时恢复旧有效定义且不重启无影响 Task。
 
-自动重启采用 30 秒封顶的指数退避。Task 可用 `max_restarts` 限制连续自动重启次数（0 表示无限），并以 `restart_reset_after_ms` 指定稳定运行多久后清零连续计数（默认 60000，0 表示禁用）；耗尽后停止继续创建进程，原地放宽上限可恢复调度。
+自动重启采用 30 秒封顶的指数退避。Task 可用 `max_restarts` 限制连续自动重启次数（0 表示无限），并以 `restart_reset_after` 指定稳定运行多久后清零连续计数（默认 `1m`，`0ms` 表示禁用）；耗尽后停止继续创建进程，原地放宽上限可恢复调度。
 
 资源指标采用独立的 1 秒慢采样周期，TUI 的 500ms 状态刷新和 200ms 日志续读不会重复扫描系统进程。一个 Service 的全部活动 Task 在同一次系统刷新后批量聚合进程树；Task 启停会立即失效缓存，退出 Task 不触发空扫描。
 
@@ -85,19 +85,25 @@ TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 
 
 配置编辑页支持 YAML、TOML 和 JSON。`Ctrl-S` 会先执行与 `procora validate` 相同的结构、语义和任务图校验，只有配置有效才写入文件；Esc 或 Ctrl-C 退出，存在未保存修改时需要再次确认。
 
+生命周期和健康检查时长可直接写成 `restart_delay: 750ms`、`shutdown_timeout: 5s`、`period: 1m30s`。支持按 `h`、`m`、`s`、`ms` 降序组合；旧 `_ms` 整数字段继续兼容，TUI 则统一显示和保存可读写法。运行期与 `procora config` 的有效值仍使用毫秒整数，兼容现有 API 与差异判断。
+
 配置顶层 `env` 可为全部 Task 提供默认环境，Task 本地 `env` 只声明覆盖值。`command` 可直接写成 `cargo run -- --port 8080` 命令文本，也兼容字符串加独立 `args`，并接受 `[program, arg1, ...]` 精确 argv 简写；三种写法都会规范化为不经过 shell 的程序和参数数组。命令文本支持单双引号、空参数和保留 Windows 反斜杠路径，TUI 命令字段也可直接输入同样写法，保存带参数 Task 时使用紧凑 argv。表单中的参数、环境变量和 HTTP 请求头优先使用 JSON 数组/对象显示，含空格、空字符串、逗号或等号的值不会在编辑往返中被拆分，同时仍接受旧版空格与 `KEY=VALUE` 输入。
+
+`depends_on` 的常用 `started` 依赖可直接写成名称数组，例如 `depends_on: [database, cache]`；混合条件可写成紧凑 map，例如 `{database: started, cache: healthy}`。既有 `{database: {condition: started}}` 完整对象继续兼容，输入也接受 process-compose 的 `process_started`、`process_healthy` 和 `process_completed_successfully` 拼写，并统一规范化为 Procora 条件名。TUI 依赖字段接受相同别名，保存时全默认条件使用数组、混合条件使用标量 map。
+
+顶层 `vars` 可集中声明可复用字符串，显式支持字段用 `${vars.NAME}` 引用；变量可链式引用，`$${vars.NAME}` 输出字面量 `${vars.NAME}`。解析不读取宿主环境、不执行 Go/Python 模板或 shell，普通 `$HOME` 和管理依赖的 `${dependency.tool}` 保持原样。变量可用于项目/profile/默认环境、默认工作目录，以及 Task/模板的命令、argv、工作目录、环境文件、环境和健康检查字符串；argv 数组内插值不会改变参数边界。`procora config` 同时输出声明值、解析值和字段到变量的直接引用，TUI 项目弹窗可编辑变量并立即刷新有效预览，保存仍保留原始表达式。
 
 顶层 `task_defaults` 可集中声明所有 Task 共用的 `cwd`、`env`、成功退出码和生命周期策略。Task 标量或列表一旦显式声明便整体替换默认值，环境 map 则按键覆盖；`procora config` 会把来源报告为 `task_defaults`，TUI 项目弹窗可直接编辑默认层，保存和新建 Task 都不会把继承值复制进每个条目。Task 弹窗中的覆盖字段留空、或把重启策略切到 `inherit`，即可删除本地声明并恢复项目/内建默认。
 
 顶层 `task_templates` 可为命令、参数、工作目录、环境文件、环境、健康检查、依赖和生命周期策略建立命名模板；模板支持单继承链，Task 用 `extends` 显式选择。map 按键合并，标量和列表整体替换，显式命令不会追加基模板 argv。`procora config` 会把来源报告为 `task_template` 并给出获胜模板名；TUI 项目卡片显示模板数量，Task 弹窗可选择模板、查看有效来源并只保存局部覆盖，模板定义本身通过 F2 高级文本编辑。
 
-顶层 `profiles` 可把开发、测试或 CI 场景的项目环境、`task_defaults` 和运行 Task 白名单集中命名，`profile` 持久选择当前场景。省略 profile 的 `tasks` 表示全部 Task，显式数组则只准入列出的 Task；所有未准入 Task 和未使用 profile 仍完整校验，活动 Task 依赖被排除 Task 会直接报错。profile map 按键覆盖基础环境，标量和列表整体替换基础默认层；Task 本地值与模板继续保持更高优先级。TUI 项目弹窗可循环切换 profile 并立即重编译预览，保存时保留未准入 Task 和 profile 原始声明。
+顶层 `profiles` 可把开发、测试或 CI 场景的项目环境、`task_defaults` 和运行 Task 白名单集中命名，`profile` 持久选择当前场景。profile 可用 `extends` 继承另一个 profile：map 按键组合，Task 白名单及默认标量/列表由子层显式值整体替换；未知、自继承和循环链都会精确指向 `.extends`。省略 `tasks` 表示继承基础 profile 的白名单，整条链都未声明时准入全部 Task；显式 `[]` 则明确不准入任何 Task。所有未准入 Task 和未使用 profile 仍完整校验，活动 Task 依赖被排除 Task 会直接报错。TUI 有独立 Profiles 区域，可新增、编辑、重命名和删除 profile；切换或修改后立即重编译预览，保存时保留未准入 Task 和 profile 原始声明。
 
 入口配置可用 `include: [fragments/base.toml, fragments/local.json]` 组合同一服务根目录内的跨格式片段。列表后项覆盖前项、入口最终覆盖；Task、命名模板和管理依赖按完整条目覆盖。循环、父目录/符号链接逃逸、超过 16 层、64 个文档或 4 MiB 的闭包会被拒绝。
 
 Task 可用 `env_file: config/api.env` 显式加载服务根目录内的 UTF-8 环境文件。环境优先级固定为基础项目 `env` < profile 项目 `env` < 基础 `task_defaults.env` < profile `task_defaults.env` < 模板 `env` < 有效 `env_file` < Task 内联 `env`。配置编译结果单独保留声明路径与内联层，因此单文件配置可在 TUI 中编辑 `env_file`，而不会把文件内容复制进配置；真正的 include 多文件入口仍保持文本模式。Procora 不会默认读取 `.env`，也不会在环境文件中执行变量替换；环境文件受大小与变量数限制，其内容参与候选修订并触发受影响 Task 的确认式热更新。
 
-Task 的 `healthcheck` 支持不经过 shell 的 `command + args`，也支持带主机、端口、路径、请求头和精确状态码的 `http_get`。两种探针共享首次延迟、周期、超时和连续成功/失败阈值，并只提供 readiness 语义：达到 unhealthy 不会隐式重启主 Task。
+Task 的 `healthcheck` 支持不经过 shell 的 `command + args`，也支持带主机、端口、路径、请求头和精确状态码的 `http_get`。两种探针共享可读的首次延迟、周期、超时和连续成功/失败阈值，并只提供 readiness 语义：达到 unhealthy 不会隐式重启主 Task。
 
 可信项目也可显式传入 `procora.py`，由受控 Python 3 辅助进程输出单个 JSON 配置。目录扫描不会自动执行它；CLI 会提示当前用户权限代码执行。辅助进程有 5 秒、脚本/stdout/stderr 大小、最小环境和整树回收边界，但不是安全沙箱。生成 JSON 仍经过完整配置校验并参与 preview/apply 修订确认。
 

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::Path};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{CompiledProject, ConfigFormat, DependencyKind, TaskConfigOrigins, UnpackMode},
@@ -10,6 +10,7 @@ use crate::{
 use super::{
     config_form_defaults::{form_path, restart_text},
     config_health_dialog,
+    config_profile::FormProfile,
     config_task_defaults::FormTaskDefaults,
 };
 
@@ -18,6 +19,8 @@ use super::{
 pub(crate) enum FormPane {
     /// 项目基础信息。
     Project,
+    /// 命名 profile 列表。
+    Profiles,
     /// Task 列表。
     Tasks,
     /// 管理依赖列表。
@@ -27,6 +30,10 @@ pub(crate) enum FormPane {
 /// 表单可编辑的完整配置文档。
 #[derive(Clone, Debug)]
 pub(crate) struct FormConfig {
+    /// 用户声明的项目变量表达式。
+    pub(crate) vars: BTreeMap<String, String>,
+    /// 完成链式解析后的变量值，仅用于预览。
+    pub(crate) resolved_vars: BTreeMap<String, String>,
     /// 配置格式版本。
     pub(crate) version: u32,
     /// 项目名称。
@@ -34,7 +41,7 @@ pub(crate) struct FormConfig {
     /// 当前持久选择的运行 profile。
     pub(crate) active_profile: Option<String>,
     /// 命名 profile 原始声明，保存时不展开有效值。
-    pub(crate) profiles: BTreeMap<String, serde_json::Value>,
+    pub(crate) profiles: BTreeMap<String, FormProfile>,
     /// 合并到各 Task 前的项目级默认环境。
     pub(crate) env: BTreeMap<String, String>,
     /// 应用到未显式声明对应字段的所有 Task。
@@ -85,13 +92,13 @@ pub(crate) struct FormTask {
 }
 
 /// 表单序列化时保留的健康检查配置。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct FormHealthCheck {
     /// exec 检查程序；HTTP 探针时为空。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) command: Option<String>,
     /// 检查参数。
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) args: Vec<String>,
     /// 可选工作目录。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,10 +107,28 @@ pub(crate) struct FormHealthCheck {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) http_get: Option<FormHttpHealthCheck>,
     /// 首次检查等待时间。
+    #[serde(
+        rename = "initial_delay",
+        alias = "initial_delay_ms",
+        deserialize_with = "crate::config::deserialize_duration",
+        serialize_with = "crate::config::serialize_duration"
+    )]
     pub(crate) initial_delay_ms: u64,
     /// 检查周期。
+    #[serde(
+        rename = "period",
+        alias = "period_ms",
+        deserialize_with = "crate::config::deserialize_duration",
+        serialize_with = "crate::config::serialize_duration"
+    )]
     pub(crate) period_ms: u64,
     /// 单次检查超时。
+    #[serde(
+        rename = "timeout",
+        alias = "timeout_ms",
+        deserialize_with = "crate::config::deserialize_duration",
+        serialize_with = "crate::config::serialize_duration"
+    )]
     pub(crate) timeout_ms: u64,
     /// 连续成功阈值。
     pub(crate) success_threshold: u32,
@@ -112,7 +137,7 @@ pub(crate) struct FormHealthCheck {
 }
 
 /// 表单序列化时保留的 HTTP GET 探针。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct FormHttpHealthCheck {
     /// HTTP 或 HTTPS。
     pub(crate) scheme: String,
@@ -124,7 +149,7 @@ pub(crate) struct FormHttpHealthCheck {
     /// 请求路径。
     pub(crate) path: String,
     /// 有界请求头。
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) headers: BTreeMap<String, String>,
     /// 预期状态码。
     pub(crate) status_code: u16,
@@ -176,41 +201,34 @@ pub(crate) struct FormVerify {
 impl FormConfig {
     /// 从已校验的配置构造不会丢失已支持字段的表单模型。
     pub(crate) fn from_compiled(compiled: CompiledProject, base_directory: Option<&Path>) -> Self {
+        let vars = compiled.vars;
+        let resolved_vars = compiled.resolved_vars;
         let project_env = compiled.declared_project_env;
         let task_defaults =
             FormTaskDefaults::from_spec(compiled.declared_task_defaults, base_directory);
         let active_profile = compiled.active_profile;
-        let profiles = compiled
-            .profiles
+        let profiles = form_raw_values(compiled.profiles, base_directory, relativize_profile_paths)
             .into_iter()
-            .map(|(name, profile)| {
-                let mut value = serde_json::to_value(profile).expect("Raw profile 可序列化");
-                relativize_profile_paths(&mut value, base_directory);
-                (name, value)
+            .map(|(name, value)| {
+                let profile = serde_json::from_value(value).expect("Raw profile 可转为表单声明");
+                (name, profile)
             })
             .collect();
-        let task_templates = compiled
-            .task_templates
-            .into_iter()
-            .map(|(name, template)| {
-                let mut value = serde_json::to_value(template).expect("Raw Task 模板可序列化");
-                relativize_template_paths(&mut value, base_directory);
-                (name, value)
-            })
-            .collect();
+        let task_templates = form_raw_values(
+            compiled.task_templates,
+            base_directory,
+            relativize_template_paths,
+        );
         let mut task_extends = compiled.task_extends;
         let mut task_env_files = compiled.task_env_files;
         let mut task_inline_env = compiled.task_inline_env;
         let mut task_origins = compiled.task_origins;
-        let inactive_tasks = compiled
-            .inactive_tasks
-            .into_iter()
-            .map(|(name, task)| {
-                let mut value = serde_json::to_value(task).expect("Raw Task 可序列化");
-                relativize_task_paths(&mut value, base_directory);
-                (name, value)
-            })
-            .collect();
+        let mut task_declarations = compiled.task_declarations;
+        let inactive_tasks = form_raw_values(
+            compiled.inactive_tasks,
+            base_directory,
+            relativize_task_paths,
+        );
         let tasks = compiled
             .spec
             .tasks
@@ -239,30 +257,34 @@ impl FormConfig {
                         )
                     })
                     .collect();
-                (
-                    id.to_string(),
-                    FormTask {
-                        extends: task_extends.remove(&id),
-                        command: task.command,
-                        args: task.args,
-                        cwd: task.cwd.map(|path| form_path(&path, base_directory)),
-                        env_file,
-                        env,
-                        healthcheck,
-                        success_exit_codes,
-                        depends_on,
-                        restart: restart_text(task.restart).to_owned(),
-                        restart_delay_ms: task.restart_delay_ms,
-                        max_restarts: task.max_restarts,
-                        restart_reset_after_ms: task.restart_reset_after_ms,
-                        shutdown_timeout_ms: task.shutdown_timeout_ms,
-                        origins,
-                    },
-                )
+                let mut form_task = FormTask {
+                    extends: task_extends.remove(&id),
+                    command: task.command,
+                    args: task.args,
+                    cwd: task.cwd.map(|path| form_path(&path, base_directory)),
+                    env_file,
+                    env,
+                    healthcheck,
+                    success_exit_codes,
+                    depends_on,
+                    restart: restart_text(task.restart).to_owned(),
+                    restart_delay_ms: task.restart_delay_ms,
+                    max_restarts: task.max_restarts,
+                    restart_reset_after_ms: task.restart_reset_after_ms,
+                    shutdown_timeout_ms: task.shutdown_timeout_ms,
+                    origins,
+                };
+                if let Some(declaration) = task_declarations.remove(&id) {
+                    let declaration = serde_json::to_value(declaration).expect("Raw Task 可序列化");
+                    apply_task_declaration(&mut form_task, &declaration, base_directory);
+                }
+                (id.to_string(), form_task)
             })
             .collect();
         let dependencies = form_dependencies(compiled.dependencies);
         Self {
+            vars,
+            resolved_vars,
             version: compiled.spec.version,
             project: compiled.spec.project,
             active_profile,
@@ -299,21 +321,6 @@ impl FormConfig {
         self.active_profile.as_deref()
     }
 
-    /// 返回 profile 名称迭代器。
-    pub(crate) fn profile_names(&self) -> impl Iterator<Item = &String> {
-        self.profiles.keys()
-    }
-
-    /// 判断命名 profile 是否存在。
-    pub(crate) fn has_profile(&self, name: &str) -> bool {
-        self.profiles.contains_key(name)
-    }
-
-    /// 返回命名 profile 数量。
-    pub(crate) fn profile_count(&self) -> usize {
-        self.profiles.len()
-    }
-
     /// 返回 Task 迭代器。
     pub(crate) fn tasks(&self) -> impl Iterator<Item = (&String, &FormTask)> {
         self.tasks.iter()
@@ -333,6 +340,69 @@ impl FormConfig {
     pub(crate) fn dependencies(&self) -> impl Iterator<Item = (&String, &FormDependency)> {
         self.dependencies.iter()
     }
+}
+
+/// 用原始本地声明替换表单中的显式字符串，避免变量表达式被有效值展开写回。
+fn apply_task_declaration(
+    task: &mut FormTask,
+    value: &serde_json::Value,
+    base_directory: Option<&Path>,
+) {
+    if let Some(command) = value.get("command") {
+        match command {
+            serde_json::Value::String(command) => {
+                task.command.clone_from(command);
+                task.args = value
+                    .get("args")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|values| string_array(values))
+                    .unwrap_or_default();
+            }
+            serde_json::Value::Array(argv) if !argv.is_empty() => {
+                argv[0]
+                    .as_str()
+                    .unwrap_or_default()
+                    .clone_into(&mut task.command);
+                task.args = string_array(&argv[1..]);
+            }
+            _ => {}
+        }
+    } else if let Some(args) = value.get("args").and_then(serde_json::Value::as_array) {
+        task.args = string_array(args);
+    }
+    for (field, target) in [("cwd", &mut task.cwd), ("env_file", &mut task.env_file)] {
+        if let Some(path) = value.get(field).and_then(serde_json::Value::as_str) {
+            *target = Some(form_path(Path::new(path), base_directory));
+        }
+    }
+    if let Some(healthcheck) = value.get("healthcheck") {
+        task.healthcheck = serde_json::from_value(healthcheck.clone()).ok();
+    }
+}
+
+/// 把任意原始声明 map 转成可序列化表单值并还原其中的声明路径。
+fn form_raw_values<T: Serialize>(
+    values: BTreeMap<String, T>,
+    base_directory: Option<&Path>,
+    relativize: fn(&mut serde_json::Value, Option<&Path>),
+) -> BTreeMap<String, serde_json::Value> {
+    values
+        .into_iter()
+        .map(|(name, raw)| {
+            let mut value = serde_json::to_value(raw).expect("原始配置声明可序列化");
+            relativize(&mut value, base_directory);
+            (name, value)
+        })
+        .collect()
+}
+
+/// 把已校验 JSON 字符串数组还原为表单参数。
+fn string_array(values: &[serde_json::Value]) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect()
 }
 
 /// 把已规范化的项目管理依赖转换为可编辑表单值。

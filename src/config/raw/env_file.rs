@@ -24,6 +24,7 @@ impl RawProject {
         watched_paths: &mut BTreeSet<PathBuf>,
     ) -> Result<(), Vec<ConfigDiagnostic>> {
         let mut diagnostics = Vec::new();
+        self.resolve_variables(&mut diagnostics);
         self.apply_profile(&mut diagnostics);
         self.resolve_task_templates(&mut diagnostics);
         let mut env_inputs = BTreeSet::new();

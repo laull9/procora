@@ -9,7 +9,7 @@ use crate::config::TaskDefaultsSpec;
 
 use super::{
     ConfigDiagnostic, RawRestartPolicy, RawTask, command::RawCommand, normalize_path,
-    normalize_task,
+    normalize_task, task::RawDependencies,
 };
 
 /// 只包含适合所有 Task 共享的项目级默认字段。
@@ -24,13 +24,34 @@ pub(super) struct RawTaskDefaults {
     pub(super) success_exit_codes: Option<Vec<i32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) restart: Option<RawRestartPolicy>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "restart_delay",
+        alias = "restart_delay_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_optional_duration",
+        serialize_with = "crate::config::serialize_optional_duration",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(super) restart_delay_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) max_restarts: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "restart_reset_after",
+        alias = "restart_reset_after_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_optional_duration",
+        serialize_with = "crate::config::serialize_optional_duration",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(super) restart_reset_after_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "shutdown_timeout",
+        alias = "shutdown_timeout_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_optional_duration",
+        serialize_with = "crate::config::serialize_optional_duration",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(super) shutdown_timeout_ms: Option<u64>,
 }
 
@@ -141,7 +162,7 @@ impl RawTaskDefaults {
             env_file: None,
             healthcheck: None,
             success_exit_codes: self.success_exit_codes.clone(),
-            depends_on: BTreeMap::new(),
+            depends_on: RawDependencies::default(),
             restart: self.restart,
             restart_delay_ms: self.restart_delay_ms,
             max_restarts: self.max_restarts,

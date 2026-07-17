@@ -2,7 +2,7 @@ use super::{
     config_form::{FormConfig, FormTask},
     config_form_dialog::{
         DialogField, args_text, dependencies_text, field, map_text, optional, parse_args,
-        parse_dependencies, parse_i32_list, parse_map, parse_u32, parse_u64, replace_entry,
+        parse_dependencies, parse_duration, parse_i32_list, parse_map, parse_u32, replace_entry,
         required_value,
     },
 };
@@ -61,8 +61,8 @@ pub(super) fn fields(original: Option<&str>, task: &FormTask) -> Vec<DialogField
             &["inherit", "never", "on-failure", "always"],
         ),
         field(
-            "重启等待覆盖（空=继承）",
-            &explicit_number(task, "restart_delay_ms", &task.restart_delay_ms),
+            "重启等待覆盖（如 750ms/5s，空=继承）",
+            &explicit_duration(task, "restart_delay_ms", task.restart_delay_ms),
             &[],
         ),
         field(
@@ -71,13 +71,13 @@ pub(super) fn fields(original: Option<&str>, task: &FormTask) -> Vec<DialogField
             &[],
         ),
         field(
-            "计数重置覆盖（空=继承）",
-            &explicit_number(task, "restart_reset_after_ms", &task.restart_reset_after_ms),
+            "计数重置覆盖（如 1m，空=继承）",
+            &explicit_duration(task, "restart_reset_after_ms", task.restart_reset_after_ms),
             &[],
         ),
         field(
-            "停止超时覆盖（空=继承）",
-            &explicit_number(task, "shutdown_timeout_ms", &task.shutdown_timeout_ms),
+            "停止超时覆盖（如 5s，空=继承）",
+            &explicit_duration(task, "shutdown_timeout_ms", task.shutdown_timeout_ms),
             &[],
         ),
         field(
@@ -191,7 +191,7 @@ fn apply_inheritable_fields(fields: &[DialogField], task: &mut FormTask) -> Resu
         task,
         "restart_delay_ms",
         optional(&fields[9].value)
-            .map(|value| parse_u64(&value, "重启等待毫秒"))
+            .map(|value| parse_duration(&value, "重启等待"))
             .transpose()?,
         |task, value| {
             if let Some(value) = value {
@@ -215,7 +215,7 @@ fn apply_inheritable_fields(fields: &[DialogField], task: &mut FormTask) -> Resu
         task,
         "restart_reset_after_ms",
         optional(&fields[11].value)
-            .map(|value| parse_u64(&value, "重启计数重置毫秒"))
+            .map(|value| parse_duration(&value, "重启计数重置"))
             .transpose()?,
         |task, value| {
             if let Some(value) = value {
@@ -227,7 +227,7 @@ fn apply_inheritable_fields(fields: &[DialogField], task: &mut FormTask) -> Resu
         task,
         "shutdown_timeout_ms",
         optional(&fields[12].value)
-            .map(|value| parse_u64(&value, "停止超时毫秒"))
+            .map(|value| parse_duration(&value, "停止超时"))
             .transpose()?,
         |task, value| {
             if let Some(value) = value {
@@ -260,6 +260,15 @@ fn explicit_list(task: &FormTask, field: &str, value: &[i32]) -> String {
 fn explicit_number(task: &FormTask, field: &str, value: &impl ToString) -> String {
     if task.explicit(field) {
         value.to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// 返回只有 Task 显式声明时才显示的可读时长。
+fn explicit_duration(task: &FormTask, field: &str, value: u64) -> String {
+    if task.explicit(field) {
+        crate::config::format_duration(value)
     } else {
         String::new()
     }

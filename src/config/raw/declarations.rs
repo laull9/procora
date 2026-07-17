@@ -1,4 +1,5 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use crate::{
     config::{TaskConfigOrigins, TaskDefaultsSpec, ValueOrigin},
@@ -11,6 +12,12 @@ use super::{RawTask, task_templates::TemplateSources};
 
 /// 规范化后仍需保留给编辑器和有效配置说明的声明层元数据。
 pub(crate) struct RawDeclarations {
+    /// 用户声明的原始变量表达式。
+    pub(crate) vars: BTreeMap<String, String>,
+    /// 完成链式解析的变量值。
+    pub(crate) resolved_vars: BTreeMap<String, String>,
+    /// 声明字段路径到直接引用变量名称的映射。
+    pub(crate) variable_references: BTreeMap<String, BTreeSet<String>>,
     /// 应用 profile 后的有效项目级默认环境。
     pub(crate) project_env: BTreeMap<String, String>,
     /// 入口与 include 合并后的项目级环境声明，不包含 profile。
@@ -21,6 +28,8 @@ pub(crate) struct RawDeclarations {
     pub(crate) declared_task_defaults: TaskDefaultsSpec,
     /// 当前持久选择的 profile。
     pub(crate) active_profile: Option<String>,
+    /// 每个 profile 的直接继承目标。
+    pub(crate) profile_extends: BTreeMap<String, String>,
     /// 全部命名 profile 声明，供有效配置和编辑器使用。
     pub(crate) profiles: BTreeMap<String, RawProfile>,
     /// 顶层命名模板的本地声明，供结构化编辑器无展开写回。
@@ -33,6 +42,8 @@ pub(crate) struct RawDeclarations {
     pub(crate) task_inline_env: BTreeMap<TaskId, BTreeMap<String, String>>,
     /// 每个有效 Task 的字段与环境变量来源。
     pub(crate) task_origins: BTreeMap<TaskId, TaskConfigOrigins>,
+    /// 活动 Task 的原始本地声明，保留变量表达式供编辑器写回。
+    pub(crate) task_declarations: BTreeMap<TaskId, RawTask>,
     /// 当前 profile 未准入但仍需由编辑器原样保留的 Task 声明。
     pub(crate) inactive_tasks: BTreeMap<String, RawTask>,
 }

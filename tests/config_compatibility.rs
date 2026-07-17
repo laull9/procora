@@ -46,6 +46,31 @@ const EQUIVALENT_CASES: &[CompatibilityCase] = &[
         format: ConfigFormat::Yaml,
         input: include_str!("fixtures/config/equivalent/profile.yaml"),
     },
+    CompatibilityCase {
+        name: "profile-inheritance-yaml",
+        format: ConfigFormat::Yaml,
+        input: include_str!("fixtures/config/equivalent/profile-inheritance.yaml"),
+    },
+    CompatibilityCase {
+        name: "variables-yaml",
+        format: ConfigFormat::Yaml,
+        input: include_str!("fixtures/config/equivalent/variables.yaml"),
+    },
+    CompatibilityCase {
+        name: "dependency-list-yaml",
+        format: ConfigFormat::Yaml,
+        input: include_str!("fixtures/config/equivalent/dependency-list.yaml"),
+    },
+    CompatibilityCase {
+        name: "dependency-scalar-yaml",
+        format: ConfigFormat::Yaml,
+        input: include_str!("fixtures/config/equivalent/dependency-scalar.yaml"),
+    },
+    CompatibilityCase {
+        name: "readable-durations-yaml",
+        format: ConfigFormat::Yaml,
+        input: include_str!("fixtures/config/equivalent/durations.yaml"),
+    },
 ];
 
 #[test]

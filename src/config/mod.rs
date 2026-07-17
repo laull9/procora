@@ -3,6 +3,7 @@
 mod dependency;
 mod diff;
 mod discovery;
+mod duration;
 mod error;
 mod format;
 mod health;
@@ -17,6 +18,10 @@ pub use dependency::{
 };
 pub use diff::{ProjectDiff, diff_projects};
 pub use discovery::{DiscoveredProject, DiscoveryError, discover_path};
+pub(crate) use duration::{
+    deserialize_duration, deserialize_optional_duration, format_duration, parse_duration,
+    serialize_duration, serialize_optional_duration,
+};
 pub use error::{ConfigDiagnostic, ConfigError};
 pub use format::ConfigFormat;
 pub use loader::{CompiledProject, load_path, load_str};

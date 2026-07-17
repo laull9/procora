@@ -9,6 +9,7 @@ mod config_form_serialize;
 mod config_form_state;
 mod config_form_yaml;
 mod config_health_dialog;
+mod config_profile;
 mod config_task_defaults;
 mod config_task_dialog;
 mod config_ui;

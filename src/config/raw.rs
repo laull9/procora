@@ -27,6 +27,7 @@ mod restart;
 mod task;
 mod task_defaults;
 mod task_templates;
+mod variables;
 
 /// 为结构化编辑器复用与配置编译完全一致的命令文本切分。
 pub(crate) fn split_command_text(value: &str) -> Result<(String, Vec<String>), String> {
@@ -45,6 +46,9 @@ pub(crate) struct RawProject {
     profile: Option<String>,
     #[serde(default)]
     profiles: BTreeMap<String, profile::RawProfile>,
+    /// 可在显式支持字段中通过 `${vars.NAME}` 引用的项目变量。
+    #[serde(default)]
+    vars: BTreeMap<String, String>,
     #[serde(default)]
     env: BTreeMap<String, String>,
     #[serde(default)]
@@ -67,6 +71,16 @@ pub(crate) struct RawProject {
     profile_sources: profile::ProfileSources,
     #[serde(skip)]
     admitted_tasks: Option<BTreeSet<String>>,
+    #[serde(skip)]
+    resolved_vars: BTreeMap<String, String>,
+    #[serde(skip)]
+    variable_references: BTreeMap<String, BTreeSet<String>>,
+    #[serde(skip)]
+    declared_profiles: BTreeMap<String, profile::RawProfile>,
+    #[serde(skip)]
+    declared_task_templates: BTreeMap<String, RawTask>,
+    #[serde(skip)]
+    declared_tasks: BTreeMap<String, RawTask>,
 }
 
 /// 配置前端反序列化使用的项目依赖 DTO。

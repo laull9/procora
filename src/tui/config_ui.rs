@@ -48,7 +48,7 @@ pub(crate) fn render(frame: &mut Frame<'_>, editor: &ConfigEditor) {
     frame.render_widget(footer, outer[2]);
 }
 
-/// 绘制以项目、Task 和管理依赖为核心的结构化编辑页。
+/// 绘制以项目、profile、Task 和管理依赖为核心的结构化编辑页。
 fn render_form(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
@@ -58,6 +58,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5),
+            Constraint::Min(4),
             Constraint::Min(5),
             Constraint::Min(5),
         ])
@@ -65,6 +66,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     render_project(frame, left[0], form);
     render_tasks(frame, left[1], form);
     render_dependencies(frame, left[2], form);
+    render_profiles(frame, left[3], form);
     render_form_detail(frame, columns[1], form);
     if let Some(dialog) = form.dialog() {
         render_dialog(frame, dialog);
@@ -111,44 +113,42 @@ fn render_project(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     );
 }
 
+/// 绘制可选择的命名 profile 列表。
+fn render_profiles(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
+    let items = form
+        .config()
+        .profiles()
+        .map(|(name, profile)| ListItem::new(format!("{name}  ·  {}", profile.summary())))
+        .collect();
+    render_named_list(
+        frame,
+        area,
+        form,
+        FormPane::Profiles,
+        "Profiles  ← Enter 编辑 · n 新建 · d 删除",
+        "Profiles",
+        "（暂无 profile，按 n 新建）",
+        items,
+    );
+}
+
 /// 绘制可选择的 Task 列表。
 fn render_tasks(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let items = form
         .config()
         .tasks()
         .map(|(name, task)| ListItem::new(format!("{name}  ·  {}", task.command)))
-        .collect::<Vec<_>>();
-    let focused = form.pane() == FormPane::Tasks;
-    let title = if focused {
-        "Tasks  ← Enter 编辑 · h 健康检查 · n 新建 · d 删除"
-    } else {
-        "Tasks"
-    };
-    let mut state = ListState::default();
-    if focused && !items.is_empty() {
-        state.select(Some(form.selected()));
-    }
-    let list = List::new(if items.is_empty() {
-        vec![ListItem::new("（暂无 Task，按 n 新建）")]
-    } else {
-        items
-    })
-    .block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(if focused {
-                focus_style()
-            } else {
-                Style::default()
-            }),
-    )
-    .highlight_style(
-        Style::default()
-            .bg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
+        .collect();
+    render_named_list(
+        frame,
+        area,
+        form,
+        FormPane::Tasks,
+        "Tasks  ← Enter 编辑 · h 健康检查 · n 新建 · d 删除",
+        "Tasks",
+        "（暂无 Task，按 n 新建）",
+        items,
     );
-    frame.render_stateful_widget(list, area, &mut state);
 }
 
 /// 绘制可选择的管理依赖列表。
@@ -157,25 +157,44 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         .config()
         .dependencies()
         .map(|(name, dependency)| ListItem::new(format!("{name}  ·  {}", dependency.source)))
-        .collect::<Vec<_>>();
-    let focused = form.pane() == FormPane::Dependencies;
-    let title = if focused {
-        "管理依赖  ← Enter 编辑 · n 新建 · d 删除"
-    } else {
-        "管理依赖"
-    };
+        .collect();
+    render_named_list(
+        frame,
+        area,
+        form,
+        FormPane::Dependencies,
+        "管理依赖  ← Enter 编辑 · n 新建 · d 删除",
+        "管理依赖",
+        "（暂无依赖，按 n 新建）",
+        items,
+    );
+}
+
+/// 绘制带统一焦点和空状态的命名配置列表。
+#[allow(clippy::too_many_arguments)]
+fn render_named_list(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    form: &FormState,
+    pane: FormPane,
+    focused_title: &str,
+    title: &str,
+    empty: &str,
+    items: Vec<ListItem<'_>>,
+) {
+    let focused = form.pane() == pane;
     let mut state = ListState::default();
     if focused && !items.is_empty() {
         state.select(Some(form.selected()));
     }
     let list = List::new(if items.is_empty() {
-        vec![ListItem::new("（暂无依赖，按 n 新建）")]
+        vec![ListItem::new(empty)]
     } else {
         items
     })
     .block(
         Block::default()
-            .title(title)
+            .title(if focused { focused_title } else { title })
             .borders(Borders::ALL)
             .border_style(if focused {
                 focus_style()
@@ -197,15 +216,21 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         FormPane::Project => (
             "项目",
             format!(
-                "项目名称：{}\n活动 profile：{}（共 {} 个）\n当前准入 Task：{} 个\n默认环境变量：{} 项\nTask 默认：{}\n命名模板：{} 个（F2 可编辑定义）",
+                "项目名称：{}\n活动 profile：{}（共 {} 个）\n当前准入 Task：{} 个\n项目变量：{} 个（已解析 {} 个）\n默认环境变量：{} 项\nTask 默认：{}\n命名模板：{} 个（F2 可编辑定义）",
                 form.config().project(),
                 form.config().active_profile().unwrap_or("基础配置"),
                 form.config().profile_count(),
                 form.config().tasks().count(),
+                form.config().vars.len(),
+                form.config().resolved_vars.len(),
                 form.config().env.len(),
                 form.config().task_defaults.summary(),
                 form.config().template_count()
             ),
+        ),
+        FormPane::Profiles => form.config().profiles().nth(form.selected()).map_or_else(
+            || ("Profile", "尚未配置 profile".to_owned()),
+            |(name, profile)| ("Profile", profile.detail(name)),
         ),
         FormPane::Tasks => form.config().tasks().nth(form.selected()).map_or_else(
             || ("Task", "尚未配置 Task".to_owned()),

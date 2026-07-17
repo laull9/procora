@@ -40,6 +40,12 @@ pub(super) struct GeneratedJsonCapture {
 /// 已通过结构、语义和任务图校验的项目配置。
 #[derive(Debug)]
 pub struct CompiledProject {
+    /// 用户声明的项目变量表达式。
+    pub vars: BTreeMap<String, String>,
+    /// 完成链式引用解析后的项目变量值。
+    pub resolved_vars: BTreeMap<String, String>,
+    /// 配置字段路径到直接变量引用集合的映射。
+    pub variable_references: BTreeMap<String, BTreeSet<String>>,
     /// 规范化项目配置。
     pub spec: ProjectSpec,
     /// 完成环检测的任务图。
@@ -58,6 +64,8 @@ pub struct CompiledProject {
     pub active_profile: Option<String>,
     /// 配置中声明的全部 profile 名称。
     pub profile_names: BTreeSet<String>,
+    /// 每个 profile 的直接继承目标。
+    pub profile_extends: BTreeMap<String, String>,
     /// profile 原始声明，供结构化编辑器无展开写回。
     pub(crate) profiles: BTreeMap<String, super::raw::RawProfile>,
     /// 已声明的命名 Task 模板名称。
@@ -72,6 +80,8 @@ pub struct CompiledProject {
     pub task_inline_env: BTreeMap<crate::core::TaskId, BTreeMap<String, String>>,
     /// 每个有效 Task 字段和环境变量的生效来源。
     pub task_origins: BTreeMap<crate::core::TaskId, TaskConfigOrigins>,
+    /// 活动 Task 的原始本地声明，供编辑器保留变量表达式。
+    pub(crate) task_declarations: BTreeMap<crate::core::TaskId, super::raw::RawTask>,
     /// 当前 profile 未准入但仍需编辑器保留的 Task 声明。
     pub(crate) inactive_tasks: BTreeMap<String, super::raw::RawTask>,
 }
@@ -139,6 +149,9 @@ fn compile_raw(
         raw.normalize(base_directory).map_err(validation_error)?;
     let graph = TaskGraph::compile(&spec)?;
     Ok(CompiledProject {
+        vars: declarations.vars,
+        resolved_vars: declarations.resolved_vars,
+        variable_references: declarations.variable_references,
         spec,
         graph,
         dependencies,
@@ -147,6 +160,7 @@ fn compile_raw(
         task_defaults: declarations.task_defaults,
         declared_task_defaults: declarations.declared_task_defaults,
         active_profile: declarations.active_profile,
+        profile_extends: declarations.profile_extends,
         profile_names: declarations.profiles.keys().cloned().collect(),
         profiles: declarations.profiles,
         task_template_names: declarations.task_templates.keys().cloned().collect(),
@@ -155,6 +169,7 @@ fn compile_raw(
         task_env_files: declarations.task_env_files,
         task_inline_env: declarations.task_inline_env,
         task_origins: declarations.task_origins,
+        task_declarations: declarations.task_declarations,
         inactive_tasks: declarations.inactive_tasks,
     })
 }

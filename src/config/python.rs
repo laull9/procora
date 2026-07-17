@@ -217,7 +217,7 @@ fn python_task(interpreter: &Path, script: &Path, root: &Path) -> TaskSpec {
         env,
         healthcheck: None,
         success_exit_codes: BTreeSet::from([0]),
-        depends_on: BTreeMap::new(),
+        depends_on: BTreeMap::default(),
         restart: RestartPolicy::Never,
         restart_delay_ms: 500,
         max_restarts: 0,

@@ -18,11 +18,29 @@ pub(super) struct RawHealthCheck {
     cwd: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     http_get: Option<RawHttpHealthCheck>,
-    #[serde(default)]
+    #[serde(
+        rename = "initial_delay",
+        alias = "initial_delay_ms",
+        default,
+        deserialize_with = "crate::config::deserialize_duration",
+        serialize_with = "crate::config::serialize_duration"
+    )]
     initial_delay_ms: u64,
-    #[serde(default = "default_period_ms")]
+    #[serde(
+        rename = "period",
+        alias = "period_ms",
+        default = "default_period_ms",
+        deserialize_with = "crate::config::deserialize_duration",
+        serialize_with = "crate::config::serialize_duration"
+    )]
     period_ms: u64,
-    #[serde(default = "default_timeout_ms")]
+    #[serde(
+        rename = "timeout",
+        alias = "timeout_ms",
+        default = "default_timeout_ms",
+        deserialize_with = "crate::config::deserialize_duration",
+        serialize_with = "crate::config::serialize_duration"
+    )]
     timeout_ms: u64,
     #[serde(default = "default_success_threshold")]
     success_threshold: u32,
@@ -55,6 +73,30 @@ impl RawHealthCheck {
             .cwd
             .take()
             .map(|path| normalize_path(&path, Some(base)));
+    }
+
+    /// 对健康检查中允许变量引用的字符串值执行统一转换。
+    pub(super) fn map_strings(
+        &mut self,
+        path: &str,
+        transform: &mut impl FnMut(&str, &str) -> String,
+    ) {
+        if let Some(command) = self.command.as_mut() {
+            *command = transform(&format!("{path}.command"), command);
+        }
+        for (index, argument) in self.args.iter_mut().enumerate() {
+            *argument = transform(&format!("{path}.args.{index}"), argument);
+        }
+        if let Some(cwd) = self.cwd.as_mut() {
+            *cwd = PathBuf::from(transform(&format!("{path}.cwd"), &cwd.to_string_lossy()));
+        }
+        if let Some(http) = self.http_get.as_mut() {
+            http.host = transform(&format!("{path}.http_get.host"), &http.host);
+            http.path = transform(&format!("{path}.http_get.path"), &http.path);
+            for (name, value) in &mut http.headers {
+                *value = transform(&format!("{path}.http_get.headers.{name}"), value);
+            }
+        }
     }
 }
 

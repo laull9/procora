@@ -22,6 +22,7 @@ struct NormalizedTasks {
     task_env_files: BTreeMap<TaskId, PathBuf>,
     task_inline_env: BTreeMap<TaskId, BTreeMap<String, String>>,
     task_origins: BTreeMap<TaskId, TaskConfigOrigins>,
+    task_declarations: BTreeMap<TaskId, RawTask>,
     inactive_tasks: BTreeMap<String, RawTask>,
 }
 
@@ -50,7 +51,7 @@ impl RawProject {
         let normalized_task_defaults = self
             .task_defaults
             .normalize(base_directory, &mut diagnostics);
-        let normalized_declared_defaults = if self.profile.is_some() {
+        let normalized_declared_defaults = if self.profile.is_some() || !self.vars.is_empty() {
             self.declared_task_defaults
                 .normalize(base_directory, &mut diagnostics)
         } else {
@@ -76,6 +77,7 @@ impl RawProject {
             self.tasks,
             self.task_declarations,
             self.task_template_sources,
+            self.declared_tasks,
         );
         if !diagnostics.is_empty() {
             return Err(diagnostics);
@@ -88,17 +90,31 @@ impl RawProject {
             },
             dependencies,
             RawDeclarations {
+                vars: self.vars,
+                resolved_vars: self.resolved_vars,
+                variable_references: self.variable_references,
                 project_env: self.env,
                 declared_project_env: self.declared_env,
                 task_defaults: normalized_task_defaults,
                 declared_task_defaults: normalized_declared_defaults,
                 active_profile: self.profile,
-                profiles: self.profiles,
-                task_templates: self.task_templates,
+                profile_extends: self
+                    .declared_profiles
+                    .iter()
+                    .filter_map(|(name, profile)| {
+                        profile
+                            .extends
+                            .as_ref()
+                            .map(|base| (name.clone(), base.clone()))
+                    })
+                    .collect(),
+                profiles: self.declared_profiles,
+                task_templates: self.declared_task_templates,
                 task_extends: normalized_tasks.task_extends,
                 task_env_files: normalized_tasks.task_env_files,
                 task_inline_env: normalized_tasks.task_inline_env,
                 task_origins: normalized_tasks.task_origins,
+                task_declarations: normalized_tasks.task_declarations,
                 inactive_tasks: normalized_tasks.inactive_tasks,
             },
         ))
@@ -112,6 +128,7 @@ impl TaskNormalization<'_> {
         tasks: BTreeMap<String, RawTask>,
         mut declarations: BTreeMap<String, RawTask>,
         mut template_sources: BTreeMap<String, TemplateSources>,
+        mut raw_declarations: BTreeMap<String, RawTask>,
     ) -> NormalizedTasks {
         let mut output = NormalizedTasks::default();
         for (raw_id, mut raw_task) in tasks {
@@ -125,11 +142,14 @@ impl TaskNormalization<'_> {
                 .remove(&raw_id)
                 .unwrap_or_else(|| raw_task.clone());
             let sources = template_sources.remove(&raw_id).unwrap_or_default();
+            let raw_local = raw_declarations
+                .remove(&raw_id)
+                .unwrap_or_else(|| local.clone());
             let active = self
                 .admitted_tasks
                 .as_ref()
                 .is_none_or(|tasks| tasks.contains(&raw_id));
-            self.record_declaration(&raw_id, &task_id, &local, &mut output, active);
+            self.record_declaration(&raw_id, &task_id, &raw_local, &mut output, active);
             if active {
                 output.task_origins.insert(
                     task_id.clone(),
@@ -177,6 +197,9 @@ impl TaskNormalization<'_> {
                 .insert(raw_id.to_owned(), local.clone());
             return;
         }
+        output
+            .task_declarations
+            .insert(task_id.clone(), local.clone());
         if let Some(template) = &local.extends {
             output
                 .task_extends

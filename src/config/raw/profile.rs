@@ -8,6 +8,9 @@ use super::{ConfigDiagnostic, RawProject, diagnostic, task_defaults::RawTaskDefa
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawProfile {
+    /// 可选基础 profile；继承链在全部 include 合并后解析。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) extends: Option<String>,
     /// 只允许运行这些已声明 Task；省略时保留全部 Task。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tasks: Option<Vec<String>>,
@@ -33,6 +36,9 @@ pub(super) struct ProfileSources {
 impl RawProfile {
     /// 合并同名 profile：map 按键合并，标量和 Task 白名单整体替换。
     pub(super) fn overlay(&mut self, higher: Self) {
+        if higher.extends.is_some() {
+            self.extends = higher.extends;
+        }
         if higher.tasks.is_some() {
             self.tasks = higher.tasks;
         }
@@ -49,8 +55,6 @@ impl RawProfile {
 impl RawProject {
     /// 校验命名 profile，并应用配置中持久选择的场景覆盖。
     pub(super) fn apply_profile(&mut self, diagnostics: &mut Vec<ConfigDiagnostic>) {
-        self.declared_env = self.env.clone();
-        self.declared_task_defaults = self.task_defaults.clone();
         let task_names = self.tasks.keys().cloned().collect::<BTreeSet<_>>();
         for (name, profile) in &self.profiles {
             if !super::valid_dependency_id(name) {
@@ -62,14 +66,23 @@ impl RawProject {
             validate_task_selection(name, profile, &task_names, diagnostics);
         }
 
+        let profiles = self.profiles.clone();
+        let mut resolved = BTreeMap::new();
+        for name in profiles.keys() {
+            let mut visiting = Vec::new();
+            resolve_profile(name, &profiles, &mut resolved, &mut visiting, diagnostics);
+        }
+
         let Some(name) = self.profile.as_deref() else {
             return;
         };
-        let Some(profile) = self.profiles.get(name) else {
-            diagnostics.push(diagnostic(
-                "profile",
-                format!("引用了不存在的 profile `{name}`"),
-            ));
+        let Some(profile) = resolved.get(name) else {
+            if !profiles.contains_key(name) {
+                diagnostics.push(diagnostic(
+                    "profile",
+                    format!("引用了不存在的 profile `{name}`"),
+                ));
+            }
             return;
         };
         self.profile_sources.project_env = profile.env.keys().cloned().collect();
@@ -82,6 +95,59 @@ impl RawProject {
         self.env.extend(profile.env.clone());
         self.task_defaults.overlay(profile.task_defaults.clone());
     }
+}
+
+/// 解析一条 profile 继承链，并缓存已完成的有效声明。
+fn resolve_profile(
+    name: &str,
+    profiles: &BTreeMap<String, RawProfile>,
+    cache: &mut BTreeMap<String, RawProfile>,
+    visiting: &mut Vec<String>,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> Option<RawProfile> {
+    if let Some(profile) = cache.get(name) {
+        return Some(profile.clone());
+    }
+    if let Some(position) = visiting.iter().position(|item| item == name) {
+        let mut chain = visiting[position..].to_vec();
+        chain.push(name.to_owned());
+        diagnostics.push(diagnostic(
+            format!("profiles.{name}.extends"),
+            format!("profile 继承形成循环：{}", chain.join(" -> ")),
+        ));
+        return None;
+    }
+    let profile = profiles.get(name)?.clone();
+    visiting.push(name.to_owned());
+    let mut resolved = if let Some(base) = profile.extends.as_deref() {
+        if base == name {
+            diagnostics.push(diagnostic(
+                format!("profiles.{name}.extends"),
+                "profile 不能继承自身",
+            ));
+            None
+        } else if !profiles.contains_key(base) {
+            diagnostics.push(diagnostic(
+                format!("profiles.{name}.extends"),
+                format!("引用了不存在的 profile `{base}`"),
+            ));
+            None
+        } else {
+            resolve_profile(base, profiles, cache, visiting, diagnostics)
+        }
+    } else {
+        Some(RawProfile::default())
+    };
+    visiting.pop();
+    let resolved = resolved.as_mut().map(|base| {
+        base.overlay(profile);
+        base.extends = None;
+        base.clone()
+    });
+    if let Some(profile) = &resolved {
+        cache.insert(name.to_owned(), profile.clone());
+    }
+    resolved
 }
 
 /// 校验 profile Task 白名单中的重复项和未知 Task。

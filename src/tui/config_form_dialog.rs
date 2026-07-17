@@ -2,13 +2,16 @@ use std::collections::BTreeMap;
 
 use super::{
     config_form::{FormConfig, FormDependency, FormTask, FormTaskDependency, FormVerify},
-    config_health_dialog, config_task_defaults, config_task_dialog,
+    config_health_dialog,
+    config_profile::{self, FormProfile},
+    config_task_defaults, config_task_dialog,
 };
 
 /// 弹窗正在编辑的实体类型。
 #[derive(Clone, Debug)]
 enum DialogKind {
     Project,
+    Profile(Option<String>),
     Task(Option<String>, Box<FormTask>),
     Health(String),
     Dependency(Option<String>),
@@ -45,6 +48,11 @@ impl Dialog {
         Self::task(None, &config.new_task_value())
     }
 
+    /// 创建空白 profile 弹窗。
+    pub(crate) fn new_profile(config: &FormConfig) -> Self {
+        Self::profile(None, &FormProfile::default(), config)
+    }
+
     /// 创建空白管理依赖弹窗。
     pub(crate) fn new_dependency() -> Self {
         Self::dependency(None, &FormDependency::default_value())
@@ -55,6 +63,19 @@ impl Dialog {
         Self {
             kind: DialogKind::Task(original.map(str::to_owned), Box::new(task.clone())),
             fields: config_task_dialog::fields(original, task),
+            selected: 0,
+        }
+    }
+
+    /// 创建命名 profile 编辑弹窗。
+    pub(crate) fn profile(
+        original: Option<&str>,
+        profile: &FormProfile,
+        config: &FormConfig,
+    ) -> Self {
+        Self {
+            kind: DialogKind::Profile(original.map(str::to_owned)),
+            fields: config_profile::fields(original, profile, config),
             selected: 0,
         }
     }
@@ -121,6 +142,8 @@ impl Dialog {
     pub(crate) fn title(&self) -> &'static str {
         match self.kind {
             DialogKind::Project => "编辑项目",
+            DialogKind::Profile(Some(_)) => "编辑 profile",
+            DialogKind::Profile(None) => "新建 profile",
             DialogKind::Task(Some(_), _) => "编辑 Task",
             DialogKind::Task(None, _) => "新建 Task",
             DialogKind::Health(_) => "编辑健康检查",
@@ -193,8 +216,13 @@ impl Dialog {
         match &self.kind {
             DialogKind::Project => {
                 let previous = config.active_profile.clone();
+                let previous_vars = config.vars.clone();
                 config_task_defaults::commit_project(&self.fields, config)?;
-                return Ok(previous != config.active_profile);
+                return Ok(previous != config.active_profile || previous_vars != config.vars);
+            }
+            DialogKind::Profile(original) => {
+                config_profile::commit(original.as_deref(), &self.fields, config)?;
+                return Ok(true);
             }
             DialogKind::Task(original, baseline) => {
                 config_task_dialog::commit(original.as_deref(), baseline, &self.fields, config)?;
@@ -295,25 +323,32 @@ pub(super) fn parse_map(value: &str, label: &str) -> Result<BTreeMap<String, Str
 pub(super) fn parse_dependencies(
     value: &str,
 ) -> Result<BTreeMap<String, FormTaskDependency>, String> {
-    value
-        .split(',')
-        .filter(|item| !item.trim().is_empty())
-        .map(|item| {
-            let (name, condition) = item.split_once(':').unwrap_or((item, "started"));
-            let name = name.trim();
-            require(name, "依赖 Task")?;
-            let condition = condition.trim();
-            if !matches!(condition, "started" | "healthy" | "completed_successfully") {
+    let mut dependencies = BTreeMap::new();
+    for item in value.split(',').filter(|item| !item.trim().is_empty()) {
+        let (name, condition) = item.split_once(':').unwrap_or((item, "started"));
+        let name = name.trim();
+        require(name, "依赖 Task")?;
+        let condition = match condition.trim() {
+            "started" | "process_started" => "started",
+            "healthy" | "process_healthy" => "healthy",
+            "completed_successfully" | "process_completed_successfully" => "completed_successfully",
+            _ => {
                 return Err("依赖条件只能是 started、healthy 或 completed_successfully".to_owned());
             }
-            Ok((
+        };
+        if dependencies
+            .insert(
                 name.to_owned(),
                 FormTaskDependency {
                     condition: condition.to_owned(),
                 },
-            ))
-        })
-        .collect()
+            )
+            .is_some()
+        {
+            return Err(format!("依赖 Task `{name}` 重复出现"));
+        }
+    }
+    Ok(dependencies)
 }
 
 /// 替换或新增一个带名称的配置条目，并防止意外覆盖。
@@ -368,12 +403,9 @@ pub(super) fn parse_args(value: &str, label: &str) -> Result<Vec<String>, String
     Ok(value.split_whitespace().map(str::to_owned).collect())
 }
 
-/// 解析一个毫秒数值字段。
-pub(super) fn parse_u64(value: &str, label: &str) -> Result<u64, String> {
-    value
-        .trim()
-        .parse()
-        .map_err(|_| format!("{label} 必须是非负整数"))
+/// 解析一个带单位的紧凑时长字段。
+pub(super) fn parse_duration(value: &str, label: &str) -> Result<u64, String> {
+    crate::config::parse_duration(value).map_err(|error| format!("{label}无效：{error}"))
 }
 
 /// 解析表单中的非负 32 位整数。

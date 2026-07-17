@@ -11,6 +11,9 @@ impl Serialize for FormConfig {
         let mut map = serializer.serialize_map(None)?;
         map.serialize_entry("version", &self.version)?;
         map.serialize_entry("project", &self.project)?;
+        if !self.vars.is_empty() {
+            map.serialize_entry("vars", &self.vars)?;
+        }
         if let Some(profile) = &self.active_profile {
             map.serialize_entry("profile", profile)?;
         }
@@ -84,22 +87,44 @@ impl Serialize for FormTask {
             map.serialize_entry("success_exit_codes", &self.success_exit_codes)?;
         }
         if !self.depends_on.is_empty() {
-            map.serialize_entry("depends_on", &self.depends_on)?;
+            if self
+                .depends_on
+                .values()
+                .all(|dependency| dependency.condition == "started")
+            {
+                map.serialize_entry("depends_on", &self.depends_on.keys().collect::<Vec<_>>())?;
+            } else {
+                let conditions = self
+                    .depends_on
+                    .iter()
+                    .map(|(name, dependency)| (name, dependency.condition.as_str()))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                map.serialize_entry("depends_on", &conditions)?;
+            }
         }
         if self.explicit("restart") {
             map.serialize_entry("restart", &self.restart)?;
         }
         if self.explicit("restart_delay_ms") {
-            map.serialize_entry("restart_delay_ms", &self.restart_delay_ms)?;
+            map.serialize_entry(
+                "restart_delay",
+                &crate::config::format_duration(self.restart_delay_ms),
+            )?;
         }
         if self.explicit("max_restarts") {
             map.serialize_entry("max_restarts", &self.max_restarts)?;
         }
         if self.explicit("restart_reset_after_ms") {
-            map.serialize_entry("restart_reset_after_ms", &self.restart_reset_after_ms)?;
+            map.serialize_entry(
+                "restart_reset_after",
+                &crate::config::format_duration(self.restart_reset_after_ms),
+            )?;
         }
         if self.explicit("shutdown_timeout_ms") {
-            map.serialize_entry("shutdown_timeout_ms", &self.shutdown_timeout_ms)?;
+            map.serialize_entry(
+                "shutdown_timeout",
+                &crate::config::format_duration(self.shutdown_timeout_ms),
+            )?;
         }
         map.end()
     }

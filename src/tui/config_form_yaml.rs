@@ -9,6 +9,12 @@ impl FormConfig {
             self.version,
             quoted(&self.project)
         );
+        if !self.vars.is_empty() {
+            text.push_str("vars:\n");
+            for (key, value) in &self.vars {
+                text.push_str(&format!("  {}: {}\n", quoted(key), quoted(value)));
+            }
+        }
         optional_yaml(&mut text, 0, "profile", self.active_profile.as_deref());
         if !self.profiles.is_empty() {
             text.push_str("profiles: ");
@@ -57,30 +63,29 @@ impl FormConfig {
             if task.explicit("success_exit_codes") {
                 yaml_i32_array(&mut text, 4, "success_exit_codes", &task.success_exit_codes);
             }
-            if !task.depends_on.is_empty() {
-                text.push_str("    depends_on:\n");
-                for (name, dependency) in &task.depends_on {
-                    text.push_str(&format!(
-                        "      {}:\n        condition: {}\n",
-                        quoted(name),
-                        dependency.condition
-                    ));
-                }
-            }
+            append_task_dependencies(&mut text, task);
             yaml_origin_value(&mut text, task, "restart", &task.restart);
-            yaml_origin_value(&mut text, task, "restart_delay_ms", &task.restart_delay_ms);
+            yaml_origin_duration(
+                &mut text,
+                task,
+                "restart_delay_ms",
+                "restart_delay",
+                task.restart_delay_ms,
+            );
             yaml_origin_value(&mut text, task, "max_restarts", &task.max_restarts);
-            yaml_origin_value(
+            yaml_origin_duration(
                 &mut text,
                 task,
                 "restart_reset_after_ms",
-                &task.restart_reset_after_ms,
+                "restart_reset_after",
+                task.restart_reset_after_ms,
             );
-            yaml_origin_value(
+            yaml_origin_duration(
                 &mut text,
                 task,
                 "shutdown_timeout_ms",
-                &task.shutdown_timeout_ms,
+                "shutdown_timeout",
+                task.shutdown_timeout_ms,
             );
         }
         for (id, task) in &self.inactive_tasks {
@@ -91,6 +96,35 @@ impl FormConfig {
             ));
         }
         text
+    }
+}
+
+/// 以名称数组或条件标量 map 追加紧凑 Task 依赖。
+#[allow(clippy::format_push_string)]
+fn append_task_dependencies(text: &mut String, task: &FormTask) {
+    if task.depends_on.is_empty() {
+        return;
+    }
+    if task
+        .depends_on
+        .values()
+        .all(|dependency| dependency.condition == "started")
+    {
+        let names = task
+            .depends_on
+            .keys()
+            .map(|name| quoted(name))
+            .collect::<Vec<_>>();
+        text.push_str(&format!("    depends_on: [{}]\n", names.join(", ")));
+    } else {
+        text.push_str("    depends_on:\n");
+        for (name, dependency) in &task.depends_on {
+            text.push_str(&format!(
+                "      {}: {}\n",
+                quoted(name),
+                dependency.condition
+            ));
+        }
     }
 }
 
@@ -158,6 +192,23 @@ fn yaml_origin_value(
     }
 }
 
+/// 仅在字段由 Task 显式声明时输出 YAML 可读时长。
+#[allow(clippy::format_push_string)]
+fn yaml_origin_duration(
+    text: &mut String,
+    task: &FormTask,
+    origin_key: &str,
+    output_key: &str,
+    value: u64,
+) {
+    if task.explicit(origin_key) {
+        text.push_str(&format!(
+            "    {output_key}: {}\n",
+            quoted(&crate::config::format_duration(value))
+        ));
+    }
+}
+
 /// 向 YAML Task 条目追加互斥的 exec 或 HTTP 健康检查。
 #[allow(clippy::format_push_string)]
 fn append_healthcheck_yaml(text: &mut String, healthcheck: &FormHealthCheck) {
@@ -187,8 +238,12 @@ fn append_healthcheck_yaml(text: &mut String, healthcheck: &FormHealthCheck) {
         text.push_str(&format!("        status_code: {}\n", http_get.status_code));
     }
     text.push_str(&format!(
-        "      initial_delay_ms: {}\n      period_ms: {}\n      timeout_ms: {}\n",
-        healthcheck.initial_delay_ms, healthcheck.period_ms, healthcheck.timeout_ms
+        "      initial_delay: {}\n      period: {}\n      timeout: {}\n",
+        quoted(&crate::config::format_duration(
+            healthcheck.initial_delay_ms
+        )),
+        quoted(&crate::config::format_duration(healthcheck.period_ms)),
+        quoted(&crate::config::format_duration(healthcheck.timeout_ms))
     ));
     text.push_str(&format!(
         "      success_threshold: {}\n      failure_threshold: {}\n",

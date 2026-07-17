@@ -9,6 +9,12 @@ use serde::Serialize;
 /// 面向诊断输出的完整有效配置视图。
 #[derive(Serialize)]
 struct EffectiveConfig<'a> {
+    /// 用户声明的变量表达式。
+    vars: &'a std::collections::BTreeMap<String, String>,
+    /// 完成引用解析后的变量值。
+    resolved_vars: &'a std::collections::BTreeMap<String, String>,
+    /// 字段路径到直接变量引用集合的映射。
+    variable_references: &'a std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     /// 配置模式主版本。
     version: u32,
     /// 服务稳定名称。
@@ -17,6 +23,8 @@ struct EffectiveConfig<'a> {
     active_profile: Option<&'a str>,
     /// 配置中可选择的全部 profile。
     profiles: &'a std::collections::BTreeSet<String>,
+    /// 每个 profile 的直接继承目标。
+    profile_extends: &'a std::collections::BTreeMap<String, String>,
     /// 已规范化的项目管理依赖。
     dependencies: &'a crate::config::ManagedDependencies,
     /// 合并到各 Task 前的项目级默认环境。
@@ -131,10 +139,14 @@ pub(crate) fn effective_config(path: &Path) -> anyhow::Result<()> {
     let discovered =
         discover_path(path).with_context(|| format!("有效配置生成失败: {}", path.display()))?;
     let output = EffectiveConfig {
+        vars: &discovered.compiled.vars,
+        resolved_vars: &discovered.compiled.resolved_vars,
+        variable_references: &discovered.compiled.variable_references,
         version: discovered.compiled.spec.version,
         project: &discovered.compiled.spec.project,
         active_profile: discovered.compiled.active_profile.as_deref(),
         profiles: &discovered.compiled.profile_names,
+        profile_extends: &discovered.compiled.profile_extends,
         dependencies: &discovered.compiled.dependencies,
         env: &discovered.compiled.project_env,
         task_defaults: &discovered.compiled.task_defaults,

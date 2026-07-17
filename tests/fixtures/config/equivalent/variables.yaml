@@ -1,0 +1,31 @@
+version: 1
+project: compat
+vars:
+  DB: db
+  API: api
+  PROJECT: global
+  COMMON: shared
+  LOCAL: api
+  DATA: path with space
+  PORT: "8080"
+env:
+  PROJECT: ${vars.PROJECT}
+task_defaults:
+  env:
+    COMMON: ${vars.COMMON}
+  success_exit_codes: [0, 130]
+  restart: on-failure
+  restart_delay_ms: 750
+  max_restarts: 4
+  restart_reset_after_ms: 9000
+  shutdown_timeout_ms: 3000
+tasks:
+  database:
+    command: ["${vars.DB}", "--data", "${vars.DATA}"]
+  api:
+    command: ["${vars.API}", "--port", "${vars.PORT}"]
+    env:
+      LOCAL: ${vars.LOCAL}
+    depends_on:
+      database:
+        condition: started

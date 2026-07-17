@@ -14,6 +14,7 @@ impl RawProject {
             project: None,
             profile: None,
             profiles: BTreeMap::default(),
+            vars: BTreeMap::default(),
             env: BTreeMap::default(),
             task_defaults: RawTaskDefaults::default(),
             task_templates: BTreeMap::default(),
@@ -25,6 +26,11 @@ impl RawProject {
             declared_task_defaults: RawTaskDefaults::default(),
             profile_sources: super::profile::ProfileSources::default(),
             admitted_tasks: None,
+            resolved_vars: BTreeMap::default(),
+            variable_references: BTreeMap::default(),
+            declared_profiles: BTreeMap::default(),
+            declared_task_templates: BTreeMap::default(),
+            declared_tasks: BTreeMap::default(),
         }
     }
 
@@ -82,6 +88,7 @@ impl RawProject {
         for (name, profile) in higher.profiles {
             self.profiles.entry(name).or_default().overlay(profile);
         }
+        self.vars.extend(higher.vars);
         self.env.extend(higher.env);
         self.task_defaults.overlay(higher.task_defaults);
         self.task_templates.extend(higher.task_templates);

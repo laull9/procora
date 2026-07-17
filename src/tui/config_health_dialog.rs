@@ -1,7 +1,7 @@
 use super::{
     config_form::{FormConfig, FormHealthCheck, FormHttpHealthCheck, FormTask},
     config_form_dialog::{
-        DialogField, field, map_text, optional, parse_args, parse_map, parse_u32, parse_u64,
+        DialogField, field, map_text, optional, parse_args, parse_duration, parse_map, parse_u32,
         required_value,
     },
 };
@@ -121,20 +121,18 @@ pub(super) fn fields(task: &FormTask) -> Vec<DialogField> {
             &[],
         ),
         field(
-            "首次检查等待毫秒",
-            &health
-                .map_or(0, |health| health.initial_delay_ms)
-                .to_string(),
+            "首次检查等待（如 0ms/2s）",
+            &crate::config::format_duration(health.map_or(0, |health| health.initial_delay_ms)),
             &[],
         ),
         field(
-            "检查周期毫秒",
-            &health.map_or(10_000, |health| health.period_ms).to_string(),
+            "检查周期（如 10s）",
+            &crate::config::format_duration(health.map_or(10_000, |health| health.period_ms)),
             &[],
         ),
         field(
-            "单次检查超时毫秒",
-            &health.map_or(1_000, |health| health.timeout_ms).to_string(),
+            "单次检查超时（如 1s）",
+            &crate::config::format_duration(health.map_or(1_000, |health| health.timeout_ms)),
             &[],
         ),
         field(
@@ -171,9 +169,9 @@ pub(super) fn commit(
             args: parse_args(&fields[2].value, "Exec 参数")?,
             cwd: optional(&fields[3].value),
             http_get: None,
-            initial_delay_ms: parse_u64(&fields[10].value, "首次检查等待毫秒")?,
-            period_ms: parse_u64(&fields[11].value, "检查周期毫秒")?,
-            timeout_ms: parse_u64(&fields[12].value, "单次检查超时毫秒")?,
+            initial_delay_ms: parse_duration(&fields[10].value, "首次检查等待")?,
+            period_ms: parse_duration(&fields[11].value, "检查周期")?,
+            timeout_ms: parse_duration(&fields[12].value, "单次检查超时")?,
             success_threshold: parse_u32(&fields[13].value, "连续成功阈值")?,
             failure_threshold: parse_u32(&fields[14].value, "连续失败阈值")?,
         }),
@@ -189,9 +187,9 @@ pub(super) fn commit(
                 headers: parse_map(&fields[8].value, "HTTP 请求头")?,
                 status_code: parse_u16(&fields[9].value, "HTTP 预期状态码")?,
             }),
-            initial_delay_ms: parse_u64(&fields[10].value, "首次检查等待毫秒")?,
-            period_ms: parse_u64(&fields[11].value, "检查周期毫秒")?,
-            timeout_ms: parse_u64(&fields[12].value, "单次检查超时毫秒")?,
+            initial_delay_ms: parse_duration(&fields[10].value, "首次检查等待")?,
+            period_ms: parse_duration(&fields[11].value, "检查周期")?,
+            timeout_ms: parse_duration(&fields[12].value, "单次检查超时")?,
             success_threshold: parse_u32(&fields[13].value, "连续成功阈值")?,
             failure_threshold: parse_u32(&fields[14].value, "连续失败阈值")?,
         }),
