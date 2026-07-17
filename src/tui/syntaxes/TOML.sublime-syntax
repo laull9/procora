@@ -1,0 +1,68 @@
+%YAML 1.2
+---
+name: TOML
+file_extensions:
+  - toml
+scope: source.toml
+
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.toml
+    - match: '^\s*(\[\[?)([^\]]+)(\]\]?)'
+      captures:
+        1: punctuation.definition.table.begin.toml
+        2: entity.name.section.toml
+        3: punctuation.definition.table.end.toml
+    - match: '(?x)^\s*(?:"[^"\n]*"|''[^''\n]*''|[A-Za-z0-9_-]+(?:\s*\.\s*[A-Za-z0-9_-]+)*)(?=\s*=)'
+      scope: variable.other.key.toml
+    - match: '='
+      scope: keyword.operator.assignment.toml
+    - match: '"""'
+      scope: punctuation.definition.string.begin.toml
+      push: triple-double-string
+    - match: "'''"
+      scope: punctuation.definition.string.begin.toml
+      push: triple-single-string
+    - match: '"'
+      scope: punctuation.definition.string.begin.toml
+      push: double-string
+    - match: "'"
+      scope: punctuation.definition.string.begin.toml
+      push: single-string
+    - match: '\b(?:true|false)\b'
+      scope: constant.language.boolean.toml
+    - match: '\b\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})?)?\b'
+      scope: constant.other.datetime.toml
+    - match: '(?x)(?<![A-Za-z0-9_])[-+]?(?:0x[0-9A-Fa-f](?:_?[0-9A-Fa-f])*|0o[0-7](?:_?[0-7])*|0b[01](?:_?[01])*|\d(?:_?\d)*(?:\.\d(?:_?\d)*)?(?:[eE][-+]?\d(?:_?\d)*)?|inf|nan)(?![A-Za-z0-9_])'
+      scope: constant.numeric.toml
+    - match: '[\[\]{},.]'
+      scope: punctuation.separator.toml
+
+  double-string:
+    - meta_scope: string.quoted.double.toml
+    - match: '\\(?:[btnfr"\\]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
+      scope: constant.character.escape.toml
+    - match: '"'
+      scope: punctuation.definition.string.end.toml
+      pop: true
+
+  single-string:
+    - meta_scope: string.quoted.single.toml
+    - match: "'"
+      scope: punctuation.definition.string.end.toml
+      pop: true
+
+  triple-double-string:
+    - meta_scope: string.quoted.triple.double.toml
+    - match: '\\(?:[btnfr"\\]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
+      scope: constant.character.escape.toml
+    - match: '"""'
+      scope: punctuation.definition.string.end.toml
+      pop: true
+
+  triple-single-string:
+    - meta_scope: string.quoted.triple.single.toml
+    - match: "'''"
+      scope: punctuation.definition.string.end.toml
+      pop: true

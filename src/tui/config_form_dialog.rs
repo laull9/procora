@@ -222,6 +222,15 @@ impl Dialog {
         !self.fields[self.selected].choices.is_empty()
     }
 
+    /// 返回当前可直接输入的字段，选择器不显示文本光标。
+    pub(crate) fn selected_input(&self) -> Option<(&str, &str)> {
+        let field = &self.fields[self.selected];
+        field
+            .choices
+            .is_empty()
+            .then_some((field.label, field.value.as_str()))
+    }
+
     /// 移动弹窗字段选择。
     pub(crate) fn next_field(&mut self, forward: bool) {
         self.selected = if forward {

@@ -10,7 +10,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use procora::config::ConfigFormat;
 use procora::tui::ConfigEditor;
-use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
+use ratatui::{Terminal, backend::TestBackend, buffer::Cell, style::Color};
 
 /// 同一进程内并行创建临时配置时使用的去重序号。
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -101,6 +101,47 @@ fn wide_editor_shows_config_and_dependency_guidance() {
     assert!(text.contains("version:1"));
     assert!(text.contains("管理依赖"));
     assert!(text.contains("${dependency.<id>}"));
+}
+
+#[test]
+// 高级文本模式会按配置语法为不同类型的词元着色。
+fn advanced_editor_highlights_config_syntax() {
+    for (path, format, input) in [
+        (
+            "procora.yaml",
+            ConfigFormat::Yaml,
+            "version: 1\nproject: demo\ntasks: {}",
+        ),
+        (
+            "procora.toml",
+            ConfigFormat::Toml,
+            "version = 1\nproject = \"demo\"\n[tasks]",
+        ),
+        ("procora.json", ConfigFormat::Json, r#"{"version":1}"#),
+    ] {
+        let editor = ConfigEditor::from_text(path, format, input);
+        let backend = TestBackend::new(90, 20);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| editor.render(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut colors = Vec::new();
+        for y in 4..7 {
+            for x in 6..40 {
+                let cell = buffer.cell((x, y)).unwrap();
+                if !cell.symbol().trim().is_empty()
+                    && cell.fg != Color::Reset
+                    && !colors.contains(&cell.fg)
+                {
+                    colors.push(cell.fg);
+                }
+            }
+        }
+
+        assert!(
+            colors.len() >= 2,
+            "`{path}` 的关键字、字符串和数字应使用不同颜色"
+        );
+    }
 }
 
 #[test]
@@ -233,6 +274,42 @@ fn form_shows_task_and_dependency_dialog_entries() {
     assert!(text.contains("结构化表单"));
     assert!(text.contains("新建Task"));
     assert!(text.contains("重启策略"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 普通表单的单行文本字段会在当前输入末尾显示终端光标。
+fn form_text_field_shows_cursor_at_input_end() {
+    let path = temporary_config();
+    fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Char('n'));
+    let backend = TestBackend::new(110, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let empty_cursor = terminal.backend().cursor_position();
+
+    type_text(&mut editor, "api");
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let input_cursor = terminal.backend().cursor_position();
+
+    assert_eq!(input_cursor.y, empty_cursor.y);
+    assert_eq!(input_cursor.x, empty_cursor.x + 3);
+    assert!(input_cursor.x < 110 && input_cursor.y < 30);
+
+    type_text(&mut editor, &"x".repeat(160));
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let long_cursor = terminal.backend().cursor_position();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>();
+    assert!(text.contains('…'));
+    assert!(long_cursor.x < 109 && long_cursor.y < 30);
     fs::remove_file(path).unwrap();
 }
 

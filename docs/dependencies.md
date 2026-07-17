@@ -13,6 +13,7 @@
 | 异步运行时 | [`tokio`](https://docs.rs/tokio/latest/tokio/) | process、daemon | 进程、信号、网络与有界 channel 能力完整；根 manifest 只打开当前模块所需 feature |
 | CLI | [`clap`](https://docs.rs/clap/latest/clap/) | cli | derive API、子命令、帮助和错误输出成熟 |
 | TUI | [`ratatui`](https://docs.rs/ratatui/latest/ratatui/) + [`crossterm`](https://docs.rs/crossterm/latest/crossterm/) | tui | Ratatui 默认推荐 Crossterm，覆盖 Linux、macOS、Windows 终端 |
+| 语法高亮 | [`syntect`](https://docs.rs/syntect/latest/syntect/) | tui | 复用 Sublime Text 语法定义覆盖 YAML、JSON，并补充内嵌 TOML grammar；使用纯 Rust `fancy-regex`，避免三平台构建依赖 Oniguruma C 库 |
 | 领域序列化 | [`serde`](https://docs.rs/serde/latest/serde/) | core、protocol 等 | 配置前端与协议 DTO 共用稳定数据模型接口，但不共用结构体 |
 | YAML | [`serde-saphyr`](https://docs.rs/serde-saphyr/latest/serde_saphyr/) | config | 维护中、强类型反序列化、错误位置和解析预算能力较完整 |
 | TOML / JSON | [`toml`](https://docs.rs/toml/latest/toml/) / [`serde_json`](https://docs.rs/serde_json/latest/serde_json/) | config、protocol | 官方生态实现，直接接入 Serde |

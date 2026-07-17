@@ -109,6 +109,10 @@ Task 的 `healthcheck` 支持不经过 shell 的 `command + args`，也支持带
 
 `procora source git preview/confirm` 和库接口 `GitSource` 可从受限 HTTPS/SSH/SCP 或显式本地仓库获取定义，把引用固定为完整 commit，并在资源有界的无 hooks checkout 中复用同一配置校验。两条 CLI 命令都不注册或启动服务，confirm 会重新获取并拒绝过期修订。Center 尚不持久注册远端来源，也不提供私有仓库凭据代理。
 
+## 完整配置示例
+
+完整的配置写法、规则和一份可校验的综合配置集中在[配置示例](docs/example.md)。文档中的制品地址仅作结构展示，执行 `procora deps` 前需要替换为真实来源。
+
 ## 配置发现
 
 `<path>` 可以是 YAML、TOML、JSON、精确命名的 `procora.py` 配置文件，也可以是服务目录：

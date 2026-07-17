@@ -7,7 +7,8 @@ use ratatui::{
 };
 
 use super::{
-    ConfigEditor, config_form::FormPane, config_form_dialog::Dialog, config_form_state::FormState,
+    ConfigEditor, config_dialog_ui, config_form::FormPane, config_form_state::FormState,
+    config_highlight,
 };
 
 /// 绘制配置编辑器，并按当前模式选择结构化表单或高级文本界面。
@@ -69,7 +70,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     render_profiles(frame, left[3], form);
     render_form_detail(frame, columns[1], form);
     if let Some(dialog) = form.dialog() {
-        render_dialog(frame, dialog);
+        config_dialog_ui::render(frame, dialog);
     } else if let Some(name) = form.pending_delete_name() {
         render_delete_confirmation(frame, name);
     }
@@ -308,60 +309,6 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     );
 }
 
-/// 绘制字段输入和选择器弹窗。
-fn render_dialog(frame: &mut Frame<'_>, dialog: &Dialog) {
-    let (field_count, selected) = dialog.field_position();
-    let height = u16::try_from(field_count.saturating_add(5)).unwrap_or(u16::MAX);
-    let area = centered_rect(
-        86,
-        height.min(frame.area().height.saturating_sub(2)),
-        frame.area(),
-    );
-    frame.render_widget(Clear, area);
-    let lines = dialog
-        .fields()
-        .map(|(label, value, selected)| {
-            let marker = if selected { "› " } else { "  " };
-            let style = if selected {
-                focus_style()
-            } else {
-                Style::default()
-            };
-            Line::from(vec![
-                Span::styled(marker, style),
-                Span::styled(format!("{label}："), Style::default().fg(Color::DarkGray)),
-                Span::styled(value.to_owned(), style),
-            ])
-        })
-        .collect::<Vec<_>>();
-    // 底部操作提示占用边框内最后一行，滚动窗口额外为它保留一行。
-    let visible_lines = usize::from(area.height.saturating_sub(3)).max(1);
-    let scroll = selected
-        .saturating_sub(visible_lines.saturating_sub(1))
-        .min(field_count.saturating_sub(visible_lines));
-    let hint = if dialog.selected_is_choice() {
-        "↑↓ 切换字段，←→ 选择选项，Enter 确认，Esc 取消"
-    } else {
-        "直接输入；↑↓ 切换字段，Enter 确认，Esc 取消"
-    };
-    frame.render_widget(
-        Paragraph::new(lines)
-            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
-            .block(
-                Block::default()
-                    .title(format!(
-                        "{} · {}/{}",
-                        dialog.title(),
-                        selected.saturating_add(1),
-                        field_count
-                    ))
-                    .borders(Borders::ALL)
-                    .title_bottom(hint),
-            ),
-        area,
-    );
-}
-
 /// 绘制删除条目的二次确认弹窗。
 fn render_delete_confirmation(frame: &mut Frame<'_>, name: &str) {
     let area = centered_rect(62, 5, frame.area());
@@ -398,19 +345,18 @@ fn render_editor(frame: &mut Frame<'_>, area: Rect, editor: &ConfigEditor) {
     let mut editor = editor.clone();
     editor.ensure_visible(inner_height);
     let scroll = editor.scroll();
-    let lines = editor
-        .lines()
+    let lines = config_highlight::highlighted_lines(editor.format(), editor.lines())
+        .into_iter()
         .enumerate()
         .skip(scroll)
         .take(inner_height)
-        .map(|(index, text)| {
-            Line::from(vec![
-                Span::styled(
-                    format!("{:>4} ", index + 1),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::raw(text),
-            ])
+        .map(|(index, highlighted)| {
+            let mut spans = vec![Span::styled(
+                format!("{:>4} ", index + 1),
+                Style::default().fg(Color::DarkGray),
+            )];
+            spans.extend(highlighted);
+            Line::from(spans)
         })
         .collect::<Vec<_>>();
     frame.render_widget(
@@ -423,7 +369,10 @@ fn render_editor(frame: &mut Frame<'_>, area: Rect, editor: &ConfigEditor) {
     );
     let (row, column) = editor.cursor();
     if row >= scroll && row < scroll + inner_height {
-        let x = area.x + 1 + 5 + u16::try_from(column).unwrap_or(u16::MAX);
+        let display_column = editor.lines().nth(row).map_or(column, |line| {
+            Line::from(line.chars().take(column).collect::<String>()).width()
+        });
+        let x = area.x + 1 + 5 + u16::try_from(display_column).unwrap_or(u16::MAX);
         let y = area.y + 1 + u16::try_from(row - scroll).unwrap_or(u16::MAX);
         frame.set_cursor_position((x.min(area.right().saturating_sub(1)), y));
     }
@@ -458,14 +407,14 @@ fn render_guide(frame: &mut Frame<'_>, area: Rect) {
 }
 
 /// 返回当前焦点边框和选中行的样式。
-fn focus_style() -> Style {
+pub(super) fn focus_style() -> Style {
     Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD)
 }
 
 /// 将百分比宽度和固定高度居中为弹窗区域。
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+pub(super) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

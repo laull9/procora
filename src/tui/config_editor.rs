@@ -195,6 +195,11 @@ impl ConfigEditor {
         &self.path
     }
 
+    /// 返回高级文本模式当前使用的配置格式。
+    pub(crate) const fn format(&self) -> ConfigFormat {
+        self.format
+    }
+
     /// 返回当前光标位置。
     pub const fn cursor(&self) -> (usize, usize) {
         (self.row, self.column)
