@@ -25,7 +25,7 @@
 | 平台目录 | [`directories`](https://docs.rs/directories/latest/directories/) | platform | 按 XDG、macOS 标准目录和 Windows Known Folder 定位数据目录 |
 | 状态数据库 | [`rusqlite`](https://docs.rs/rusqlite/latest/rusqlite/) + bundled SQLite | storage | 保存服务注册、当前状态和状态历史；WAL 与事务保证中心请求间的一致性 |
 | 日志压缩 | [`flate2`](https://docs.rs/flate2/latest/flate2/) | log | 以 Rust 后端生成 gzip 轮转归档，不把日志正文写入 SQLite |
-| 依赖下载 | [`ureq`](https://docs.rs/ureq/latest/ureq/) | source | 阻塞流式 HTTP(S) 下载；SSH 来源交给当前用户已配置认证的 OpenSSH `scp` |
+| 依赖下载 | [`ureq`](https://docs.rs/ureq/latest/ureq/) | source | 有界流式 HTTP(S)、瞬时故障重试和镜像切换；SSH 交给支持批处理、超时、显式密钥与 known_hosts 的 OpenSSH `scp` |
 | Git 定义获取 | 系统 `git` 客户端 | source | 使用 blobless 浅 fetch 和 `git archive`，避免引入 libgit2/C ABI；Procora 负责禁用交互、全局配置、hooks 和危险协议并实施资源上限 |
 | 归档解包 | [`zip`](https://docs.rs/zip/latest/zip/) / [`tar`](https://docs.rs/tar/latest/tar/) / `flate2` | source | 自动识别 ZIP、tar、tar.gz/tgz 和 gzip；只接受安装根目录内的安全条目 |
 | 内容摘要 | [`sha2`](https://docs.rs/sha2/latest/sha2/) | source | 下载后验证可选 SHA-256，并把实际摘要写入版本清单 |

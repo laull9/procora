@@ -58,12 +58,20 @@ impl FormDependency {
     pub(super) fn default_value() -> Self {
         Self {
             source: String::new(),
-            version: String::new(),
+            mirrors: Vec::new(),
+            version: "source".to_owned(),
             checksum: None,
             unpack: "auto".to_owned(),
             path: None,
             kind: "auto".to_owned(),
             verify: None,
+            download: super::config_form::FormDependencyDownload {
+                retries: 2,
+                timeout_ms: 120_000,
+                max_bytes: 2 * 1024 * 1024 * 1024,
+                headers: std::collections::BTreeMap::new(),
+            },
+            ssh: super::config_form::FormDependencySsh::default(),
         }
     }
 }

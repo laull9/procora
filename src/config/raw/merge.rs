@@ -3,7 +3,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use super::{RawProject, task_defaults::RawTaskDefaults};
+use super::{
+    RawManagedDependency, RawManagedDependencyFields, RawProject, task_defaults::RawTaskDefaults,
+};
 
 impl RawProject {
     /// 创建不携带任何声明的合并起点。
@@ -57,10 +59,14 @@ impl RawProject {
     /// 把当前文档的相对运行路径改写为相对声明文件的稳定路径。
     pub(crate) fn rebase(&mut self, base: &Path) {
         for dependency in self.dependencies.values_mut() {
-            dependency.source = dependency
-                .source
-                .take()
-                .map(|source| rebase_source(&source, base));
+            match dependency {
+                RawManagedDependency::Source(source) => {
+                    *source = rebase_source(source, base);
+                }
+                RawManagedDependency::Detailed(dependency) => {
+                    rebase_dependency(dependency, base);
+                }
+            }
         }
         self.task_defaults.rebase(base);
         for profile in self.profiles.values_mut() {
@@ -94,6 +100,25 @@ impl RawProject {
         self.task_templates.extend(higher.task_templates);
         self.dependencies.extend(higher.dependencies);
         self.tasks.extend(higher.tasks);
+    }
+}
+
+/// 重定位完整依赖对象中的来源、镜像和 SSH 文件。
+fn rebase_dependency(dependency: &mut RawManagedDependencyFields, base: &Path) {
+    dependency.source = dependency
+        .source
+        .take()
+        .map(|source| rebase_source(&source, base));
+    for mirror in &mut dependency.mirrors {
+        *mirror = rebase_source(mirror, base);
+    }
+    for path in [
+        &mut dependency.ssh.identity_file,
+        &mut dependency.ssh.known_hosts_file,
+    ] {
+        if let Some(value) = path.take() {
+            *path = Some(rebase_path(&value, base));
+        }
     }
 }
 

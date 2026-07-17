@@ -4,6 +4,7 @@ mod archive;
 mod download;
 mod git;
 mod manager;
+mod placeholders;
 mod revision;
 mod verify;
 

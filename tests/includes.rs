@@ -39,7 +39,7 @@ fn format_fragments_merge_in_order_with_entry_priority() {
     fs::create_dir_all(&fragments).unwrap();
     fs::write(
         fragments.join("base.toml"),
-        "[dependencies.tool]\nsource = './tool.bin'\nversion = '1'\nkind = 'file'\n\n[tasks.worker]\ncommand = 'base'\ncwd = './base-work'\n\n[tasks.api]\ncommand = 'fragment-api'\n[tasks.api.depends_on.worker]\n",
+        "[dependencies]\ncompact = './compact.bin'\n[dependencies.tool]\nsource = './tool.bin'\nmirrors = ['./backup.bin']\nversion = '1'\nkind = 'file'\n[dependencies.tool.ssh]\nidentity_file = './identity'\nknown_hosts_file = './known_hosts'\n\n[tasks.worker]\ncommand = 'base'\ncwd = './base-work'\n\n[tasks.api]\ncommand = 'fragment-api'\n[tasks.api.depends_on.worker]\n",
     )
     .unwrap();
     fs::write(
@@ -67,6 +67,25 @@ fn format_fragments_merge_in_order_with_entry_priority() {
     assert_eq!(
         compiled.dependencies["tool"].source,
         canonical_fragments.join("tool.bin").to_string_lossy()
+    );
+    assert_eq!(
+        compiled.dependencies["compact"].source,
+        canonical_fragments.join("compact.bin").to_string_lossy()
+    );
+    assert_eq!(
+        compiled.dependencies["tool"].mirrors[0],
+        canonical_fragments.join("backup.bin").to_string_lossy()
+    );
+    assert_eq!(
+        compiled.dependencies["tool"].ssh.identity_file.as_deref(),
+        Some(canonical_fragments.join("identity").as_path())
+    );
+    assert_eq!(
+        compiled.dependencies["tool"]
+            .ssh
+            .known_hosts_file
+            .as_deref(),
+        Some(canonical_fragments.join("known_hosts").as_path())
     );
     fs::remove_dir_all(root).unwrap();
 }

@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigDiagnostic;
 use super::health::normalize_healthcheck;
-use super::{DependencyVerifySpec, ManagedDependencies, ManagedDependencySpec};
 pub(crate) use profile::RawProfile;
 use restart::{
     default_restart_delay_ms, default_restart_reset_after_ms, default_shutdown_timeout_ms,
@@ -19,6 +18,7 @@ pub(crate) use task::RawTask;
 mod command;
 mod conversions;
 mod declarations;
+mod dependency;
 mod env_file;
 mod merge;
 mod profile;
@@ -28,6 +28,11 @@ mod task;
 mod task_defaults;
 mod task_templates;
 mod variables;
+
+use dependency::{
+    RawDependencyKind, RawManagedDependency, RawManagedDependencyFields, RawUnpackMode,
+    normalize_dependencies,
+};
 
 /// 为结构化编辑器复用与配置编译完全一致的命令文本切分。
 pub(crate) fn split_command_text(value: &str) -> Result<(String, Vec<String>), String> {
@@ -83,51 +88,6 @@ pub(crate) struct RawProject {
     declared_tasks: BTreeMap<String, RawTask>,
 }
 
-/// 配置前端反序列化使用的项目依赖 DTO。
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawManagedDependency {
-    source: Option<String>,
-    version: Option<String>,
-    checksum: Option<String>,
-    #[serde(default)]
-    unpack: RawUnpackMode,
-    path: Option<PathBuf>,
-    #[serde(default)]
-    kind: RawDependencyKind,
-    verify: Option<RawDependencyVerify>,
-}
-
-/// 配置前端反序列化使用的版本验证 DTO。
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawDependencyVerify {
-    command: Option<PathBuf>,
-    #[serde(default)]
-    args: Vec<String>,
-    contains: Option<String>,
-}
-
-/// 原始依赖内容类型。
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RawDependencyKind {
-    #[default]
-    Auto,
-    Binary,
-    File,
-    Directory,
-}
-
-/// 原始依赖解包模式。
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RawUnpackMode {
-    #[default]
-    Auto,
-    Never,
-}
-
 /// 原始配置支持的重启策略拼写。
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -136,87 +96,6 @@ enum RawRestartPolicy {
     Never,
     OnFailure,
     Always,
-}
-
-/// 校验并规范化全部项目级管理依赖。
-fn normalize_dependencies(
-    raw_dependencies: BTreeMap<String, RawManagedDependency>,
-    diagnostics: &mut Vec<ConfigDiagnostic>,
-) -> ManagedDependencies {
-    let mut dependencies = BTreeMap::new();
-    for (id, raw) in raw_dependencies {
-        let field = format!("dependencies.{id}");
-        if !valid_dependency_id(&id) {
-            diagnostics.push(diagnostic(
-                &field,
-                "依赖名称只能包含 ASCII 字母、数字、点、短横线和下划线",
-            ));
-            continue;
-        }
-        let source = required_text(raw.source, &format!("{field}.source"), diagnostics);
-        if !source.is_empty() && !valid_source(&source) {
-            diagnostics.push(diagnostic(
-                format!("{field}.source"),
-                "只支持 http://、https://、ssh://、SCP 地址、file:// 或本地路径",
-            ));
-        }
-        let version = required_text(raw.version, &format!("{field}.version"), diagnostics);
-        if matches!(version.as_str(), "." | "..")
-            || version.contains(['/', '\\'])
-            || version.chars().any(char::is_control)
-        {
-            diagnostics.push(diagnostic(
-                format!("{field}.version"),
-                "不能包含路径分隔符、控制字符或父目录",
-            ));
-        }
-        if let Some(checksum) = raw.checksum.as_deref()
-            && !valid_checksum(checksum)
-        {
-            diagnostics.push(diagnostic(
-                format!("{field}.checksum"),
-                "必须是 64 位十六进制 SHA-256，可带 sha256: 前缀",
-            ));
-        }
-        if raw
-            .path
-            .as_ref()
-            .is_some_and(|path| !valid_relative_path(path))
-        {
-            diagnostics.push(diagnostic(
-                format!("{field}.path"),
-                "必须是归档内不含父目录的相对路径",
-            ));
-        }
-        let verify = raw.verify.map(|verify| DependencyVerifySpec {
-            command: verify.command,
-            args: verify.args,
-            contains: verify.contains,
-        });
-        if verify
-            .as_ref()
-            .and_then(|verify| verify.command.as_ref())
-            .is_some_and(|path| !valid_relative_path(path))
-        {
-            diagnostics.push(diagnostic(
-                format!("{field}.verify.command"),
-                "必须是安装根目录内不含父目录的相对路径",
-            ));
-        }
-        dependencies.insert(
-            id,
-            ManagedDependencySpec {
-                source,
-                version,
-                checksum: raw.checksum,
-                unpack: raw.unpack.into(),
-                path: raw.path,
-                kind: raw.kind.into(),
-                verify,
-            },
-        );
-    }
-    dependencies
 }
 
 /// 读取必需的非空文本字段。
@@ -241,33 +120,6 @@ fn valid_dependency_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
-}
-
-/// 判断来源是否属于支持的网络、SSH 或本地形式。
-fn valid_source(value: &str) -> bool {
-    value.starts_with("http://")
-        || value.starts_with("https://")
-        || value.starts_with("ssh://")
-        || value.starts_with("file://")
-        || (!value.contains("://")
-            && value
-                .split_once(':')
-                .is_some_and(|(host, path)| !host.contains('/') && path.starts_with('/')))
-        || !value.contains("://")
-}
-
-/// 判断 SHA-256 字符串格式是否合法。
-fn valid_checksum(value: &str) -> bool {
-    let value = value.strip_prefix("sha256:").unwrap_or(value);
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
-/// 判断配置路径是否为不含点或父目录分量的相对路径。
-fn valid_relative_path(path: &Path) -> bool {
-    !path.as_os_str().is_empty()
-        && path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 /// 校验并返回项目稳定名称文本。

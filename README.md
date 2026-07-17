@@ -141,7 +141,7 @@ tasks:
     args: ["--version"]
 ```
 
-`source` 支持 HTTP(S)、`ssh://user@host/path`、`user@host:/path`、`file://` 和相对本地路径。ZIP、tar、tar.gz/tgz 与 gzip 会由文件头和扩展名自动识别；`unpack: never` 可保留原文件。安装位于 `<service>/.procora/dependencies/<name>/<version>/`，版本清单、路径类型、下载 SHA-256、最终文件/目录内容指纹与可选 `verify` 命令会在每次任务启动前复核。远程来源强烈建议固定 `checksum`。
+最常见的依赖只需一行，例如 `tool: https://cdn.example.com/tool.tar.gz` 或 `tool: ssh://user@host/opt/tool`；版本、解包、类型、文件选择、重试、超时和缓存都有开箱即用默认值。需要进一步控制时再展开对象：`mirrors` 提供故障转移，`download` 控制重试、总超时、大小上限和带 `${env.NAME}` 的私有 HTTP 请求头，`ssh` 可显式指定私钥与 known_hosts。TUI 的 Enter 弹窗只显示常用字段，按 `a` 才进入高级下载与 SSH 策略。ZIP、tar、tar.gz/tgz 与 gzip 会自动识别。安装位于 `<service>/.procora/dependencies/<name>/<version>/`，跨进程锁、完整暂存和可回滚替换避免并发或下载失败破坏旧缓存；版本清单、路径类型、下载 SHA-256、最终内容指纹与可选 `verify` 命令会在每次任务启动前复核。远程来源强烈建议固定 `checksum`。
 
 ## 代码边界
 

@@ -1,6 +1,71 @@
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
-use super::config_form::{FormConfig, FormTask};
+use super::config_form::{FormConfig, FormDependency, FormDependencyDownload, FormTask};
+
+impl Serialize for FormDependencyDownload {
+    /// 下载策略只保存偏离开箱默认值的字段。
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        if self.retries != 2 {
+            map.serialize_entry("retries", &self.retries)?;
+        }
+        if self.timeout_ms != 120_000 {
+            map.serialize_entry("timeout", &crate::config::format_duration(self.timeout_ms))?;
+        }
+        if self.max_bytes != 2 * 1024 * 1024 * 1024 {
+            map.serialize_entry("max_bytes", &self.max_bytes)?;
+        }
+        if !self.headers.is_empty() {
+            map.serialize_entry("headers", &self.headers)?;
+        }
+        map.end()
+    }
+}
+
+impl Serialize for FormDependency {
+    /// 默认依赖只写来源字符串，高级字段按需写成对象。
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if self.is_compact() {
+            return serializer.serialize_str(&self.source);
+        }
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("source", &self.source)?;
+        if !self.mirrors.is_empty() {
+            map.serialize_entry("mirrors", &self.mirrors)?;
+        }
+        if self.version != "source" {
+            map.serialize_entry("version", &self.version)?;
+        }
+        if let Some(checksum) = &self.checksum {
+            map.serialize_entry("checksum", checksum)?;
+        }
+        if self.unpack != "auto" {
+            map.serialize_entry("unpack", &self.unpack)?;
+        }
+        if let Some(path) = &self.path {
+            map.serialize_entry("path", path)?;
+        }
+        if self.kind != "auto" {
+            map.serialize_entry("kind", &self.kind)?;
+        }
+        if let Some(verify) = &self.verify {
+            map.serialize_entry("verify", verify)?;
+        }
+        if !self.download.is_default() {
+            map.serialize_entry("download", &self.download)?;
+        }
+        if !self.ssh.is_empty() {
+            map.serialize_entry("ssh", &self.ssh)?;
+        }
+        map.end()
+    }
+}
 
 impl Serialize for FormConfig {
     /// 保存基础声明、profile 定义和完整 Task 集合，不展开当前有效值。

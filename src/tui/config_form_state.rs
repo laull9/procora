@@ -95,6 +95,7 @@ impl FormState {
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
             KeyCode::Enter => self.open_current(),
             KeyCode::Char('h') => self.open_health(),
+            KeyCode::Char('a') => self.open_dependency_advanced(),
             KeyCode::Char('n') => self.open_new(),
             KeyCode::Char('d') => self.request_delete(),
             _ => FormEvent::None,
@@ -116,6 +117,24 @@ impl FormState {
             FormEvent::None
         } else {
             FormEvent::Message("当前列表为空；请先新建 Task".to_owned())
+        }
+    }
+
+    /// 为当前管理依赖打开高级下载与 SSH 策略。
+    fn open_dependency_advanced(&mut self) -> FormEvent {
+        if self.pane != FormPane::Dependencies {
+            return FormEvent::Message("请先切换到管理依赖区域".to_owned());
+        }
+        self.dialog = self.dependency_name().and_then(|name| {
+            self.config
+                .dependencies
+                .get(&name)
+                .map(|dependency| Dialog::dependency_advanced(&name, dependency))
+        });
+        if self.dialog.is_some() {
+            FormEvent::None
+        } else {
+            FormEvent::Message("当前列表为空；请先新建管理依赖".to_owned())
         }
     }
 

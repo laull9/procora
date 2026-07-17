@@ -7,6 +7,10 @@ use crate::{
     core::DependencyCondition,
 };
 
+pub(crate) use super::config_dependency::{
+    FormDependency, FormDependencyDownload, FormDependencySsh, FormVerify,
+};
+
 use super::{
     config_form_defaults::{form_path, restart_text},
     config_health_dialog,
@@ -160,42 +164,6 @@ pub(crate) struct FormHttpHealthCheck {
 pub(crate) struct FormTaskDependency {
     /// 依赖就绪条件。
     pub(crate) condition: String,
-}
-
-/// 表单中的管理依赖值对象。
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct FormDependency {
-    /// 下载或本地来源。
-    pub(crate) source: String,
-    /// 固定版本。
-    pub(crate) version: String,
-    /// 可选 SHA-256。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) checksum: Option<String>,
-    /// 解包策略。
-    pub(crate) unpack: String,
-    /// 归档内相对路径。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) path: Option<String>,
-    /// 最终内容类型。
-    pub(crate) kind: String,
-    /// 可选验证规则。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) verify: Option<FormVerify>,
-}
-
-/// 表单中的依赖版本验证规则。
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct FormVerify {
-    /// 验证程序。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) command: Option<String>,
-    /// 验证参数。
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) args: Vec<String>,
-    /// 预期输出片段。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) contains: Option<String>,
 }
 
 impl FormConfig {
@@ -421,12 +389,29 @@ fn form_dependencies(
                 id,
                 FormDependency {
                     source: dependency.source,
+                    mirrors: dependency.mirrors,
                     version: dependency.version,
                     checksum: dependency.checksum,
                     unpack: unpack_text(dependency.unpack).to_owned(),
                     path: dependency.path.map(|path| path.display().to_string()),
                     kind: kind_text(dependency.kind).to_owned(),
                     verify,
+                    download: FormDependencyDownload {
+                        retries: dependency.download.retries,
+                        timeout_ms: dependency.download.timeout_ms,
+                        max_bytes: dependency.download.max_bytes,
+                        headers: dependency.download.headers,
+                    },
+                    ssh: FormDependencySsh {
+                        identity_file: dependency
+                            .ssh
+                            .identity_file
+                            .map(|path| path.display().to_string()),
+                        known_hosts_file: dependency
+                            .ssh
+                            .known_hosts_file
+                            .map(|path| path.display().to_string()),
+                    },
                 },
             )
         })

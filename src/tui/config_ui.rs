@@ -163,7 +163,7 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         area,
         form,
         FormPane::Dependencies,
-        "管理依赖  ← Enter 编辑 · n 新建 · d 删除",
+        "管理依赖  ← Enter 常用字段 · a 高级策略 · n 新建 · d 删除",
         "管理依赖",
         "（暂无依赖，按 n 新建）",
         items,
@@ -266,7 +266,15 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
                 |(name, dependency)| {
                     (
                         "管理依赖",
-                        format!("名称：{name}\n来源：{}", dependency.source),
+                        format!(
+                            "名称：{name}\n来源：{}\n版本：{}\n镜像：{} 个\n重试：{} 次 · 超时：{}\n大小上限：{} 字节",
+                            dependency.source,
+                            dependency.version,
+                            dependency.mirrors.len(),
+                            dependency.download.retries,
+                            crate::config::format_duration(dependency.download.timeout_ms),
+                            dependency.download.max_bytes
+                        ),
                     )
                 },
             ),
@@ -282,7 +290,7 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         Line::raw(""),
         Line::styled("按键", Style::default().add_modifier(Modifier::BOLD)),
         Line::raw("Tab / ← → 切换区域；↑ ↓ 选择条目"),
-        Line::raw("Enter 编辑；Task 上按 h 编辑健康检查"),
+        Line::raw("Enter 编辑；Task 按 h 健康检查；依赖按 a 高级策略"),
         Line::raw("n 新建；d 删除（需二次确认）"),
         Line::raw("Ctrl-S 校验并保存；F2 高级文本"),
         Line::raw("Esc 退出（未保存内容会请求确认）"),
@@ -430,7 +438,8 @@ fn render_guide(frame: &mut Frame<'_>, area: Rect) {
         Line::raw(""),
         Line::styled("高级字段", Style::default().add_modifier(Modifier::BOLD)),
         Line::styled("管理依赖", Style::default().add_modifier(Modifier::BOLD)),
-        Line::raw("dependencies.<id>.source / version"),
+        Line::raw("dependencies.<id>: https://...（一行即可）"),
+        Line::raw("对象写法可选 source / version / mirrors"),
         Line::raw("checksum / unpack / kind / path"),
         Line::raw("verify.command / args / contains"),
         Line::raw("${dependency.<id>}"),

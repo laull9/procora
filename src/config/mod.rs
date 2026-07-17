@@ -14,7 +14,8 @@ mod raw;
 mod task_defaults;
 
 pub use dependency::{
-    DependencyKind, DependencyVerifySpec, ManagedDependencies, ManagedDependencySpec, UnpackMode,
+    DependencyDownloadSpec, DependencyKind, DependencySshSpec, DependencyVerifySpec,
+    ManagedDependencies, ManagedDependencySpec, UnpackMode,
 };
 pub use diff::{ProjectDiff, diff_projects};
 pub use discovery::{DiscoveredProject, DiscoveryError, discover_path};

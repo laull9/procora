@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::{
-    config_form::{FormConfig, FormDependency, FormTask, FormTaskDependency, FormVerify},
+    config_dependency_dialog,
+    config_form::{FormConfig, FormDependency, FormTask, FormTaskDependency},
     config_health_dialog,
     config_profile::{self, FormProfile},
     config_task_defaults, config_task_dialog,
@@ -14,7 +15,8 @@ enum DialogKind {
     Profile(Option<String>),
     Task(Option<String>, Box<FormTask>),
     Health(String),
-    Dependency(Option<String>),
+    DependencyBasic(Option<String>, Box<FormDependency>),
+    DependencyAdvanced(String, Box<FormDependency>),
 }
 
 /// 表单字段的可编辑值和可选枚举值。
@@ -91,19 +93,25 @@ impl Dialog {
 
     /// 创建管理依赖编辑弹窗。
     pub(crate) fn dependency(original: Option<&str>, dependency: &FormDependency) -> Self {
-        let verify = dependency.verify.as_ref();
+        let version = if dependency.version == "source" {
+            ""
+        } else {
+            dependency.version.as_str()
+        };
         Self {
-            kind: DialogKind::Dependency(original.map(str::to_owned)),
+            kind: DialogKind::DependencyBasic(
+                original.map(str::to_owned),
+                Box::new(dependency.clone()),
+            ),
             fields: vec![
                 field("依赖名称", original.unwrap_or(""), &[]),
-                field("来源", &dependency.source, &[]),
-                field("版本", &dependency.version, &[]),
+                field("来源（HTTP / SSH / SCP / 本地）", &dependency.source, &[]),
+                field("版本（可空，默认 source）", version, &[]),
                 field(
                     "SHA-256（可空）",
                     dependency.checksum.as_deref().unwrap_or(""),
                     &[],
                 ),
-                field("解包", &dependency.unpack, &["auto", "never"]),
                 field(
                     "类型",
                     &dependency.kind,
@@ -112,6 +120,49 @@ impl Dialog {
                 field(
                     "归档内路径（可空）",
                     dependency.path.as_deref().unwrap_or(""),
+                    &[],
+                ),
+            ],
+            selected: 0,
+        }
+    }
+
+    /// 创建管理依赖高级传输策略弹窗。
+    pub(crate) fn dependency_advanced(name: &str, dependency: &FormDependency) -> Self {
+        let verify = dependency.verify.as_ref();
+        Self {
+            kind: DialogKind::DependencyAdvanced(name.to_owned(), Box::new(dependency.clone())),
+            fields: vec![
+                field("镜像（JSON 数组）", &args_text(&dependency.mirrors), &[]),
+                field("解包", &dependency.unpack, &["auto", "never"]),
+                field(
+                    "失败重试次数",
+                    &dependency.download.retries.to_string(),
+                    &[],
+                ),
+                field(
+                    "单次总超时",
+                    &crate::config::format_duration(dependency.download.timeout_ms),
+                    &[],
+                ),
+                field(
+                    "最大下载字节",
+                    &dependency.download.max_bytes.to_string(),
+                    &[],
+                ),
+                field(
+                    "HTTP 请求头（KEY=VALUE）",
+                    &map_text(&dependency.download.headers),
+                    &[],
+                ),
+                field(
+                    "SSH 私钥（可空）",
+                    dependency.ssh.identity_file.as_deref().unwrap_or(""),
+                    &[],
+                ),
+                field(
+                    "SSH known_hosts（可空）",
+                    dependency.ssh.known_hosts_file.as_deref().unwrap_or(""),
                     &[],
                 ),
                 field(
@@ -147,8 +198,9 @@ impl Dialog {
             DialogKind::Task(Some(_), _) => "编辑 Task",
             DialogKind::Task(None, _) => "新建 Task",
             DialogKind::Health(_) => "编辑健康检查",
-            DialogKind::Dependency(Some(_)) => "编辑管理依赖",
-            DialogKind::Dependency(None) => "新建管理依赖",
+            DialogKind::DependencyBasic(Some(_), _) => "编辑管理依赖",
+            DialogKind::DependencyBasic(None, _) => "新建管理依赖",
+            DialogKind::DependencyAdvanced(_, _) => "高级下载与 SSH 策略",
         }
     }
 
@@ -230,33 +282,16 @@ impl Dialog {
             DialogKind::Health(task_name) => {
                 config_health_dialog::commit(task_name, &self.fields, config)?;
             }
-            DialogKind::Dependency(original) => {
-                let name = self.fields[0].value.trim();
-                require(name, "依赖名称")?;
-                let command = optional(&self.fields[7].value);
-                let args = parse_args(&self.fields[8].value, "验证参数")?;
-                let contains = optional(&self.fields[9].value);
-                let dependency = FormDependency {
-                    source: required_value(&self.fields[1].value, "来源")?,
-                    version: required_value(&self.fields[2].value, "版本")?,
-                    checksum: optional(&self.fields[3].value),
-                    unpack: self.fields[4].value.clone(),
-                    kind: self.fields[5].value.clone(),
-                    path: optional(&self.fields[6].value),
-                    verify: (command.is_some() || !args.is_empty() || contains.is_some())
-                        .then_some(FormVerify {
-                            command,
-                            args,
-                            contains,
-                        }),
-                };
-                replace_entry(
-                    &mut config.dependencies,
+            DialogKind::DependencyBasic(original, baseline) => {
+                config_dependency_dialog::commit_basic(
                     original.as_deref(),
-                    name,
-                    dependency,
-                    "管理依赖",
+                    baseline,
+                    &self.fields,
+                    config,
                 )?;
+            }
+            DialogKind::DependencyAdvanced(name, baseline) => {
+                config_dependency_dialog::commit_advanced(name, baseline, &self.fields, config)?;
             }
         }
         Ok(false)

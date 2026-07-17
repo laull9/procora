@@ -179,6 +179,30 @@ tasks: {}
 }
 
 #[test]
+// 单行本地来源无需版本类型和路径即可自动安装。
+fn one_line_source_installs_with_defaults() {
+    let root = temporary_directory("one-line");
+    fs::write(root.join("asset.bin"), "one line asset").unwrap();
+    let config = root.join("procora.yaml");
+    fs::write(
+        &config,
+        "version: 1\nproject: demo\ndependencies:\n  asset: asset.bin\ntasks: {}\n",
+    )
+    .unwrap();
+    let compiled = load_path(config).unwrap();
+
+    let resolved = DependencyManager::new(&root)
+        .sync(&compiled.dependencies)
+        .unwrap();
+    assert_eq!(resolved[0].version, "source");
+    assert_eq!(
+        fs::read_to_string(&resolved[0].path).unwrap(),
+        "one line asset"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 // http来源会下载并安装管理文件。
 fn http_source_downloads_and_installs_managed_file() {
     let root = temporary_directory("http");

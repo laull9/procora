@@ -1,6 +1,8 @@
 //! Procora 终端界面的状态、渲染与输入循环。
 
 mod app;
+mod config_dependency;
+mod config_dependency_dialog;
 mod config_editor;
 mod config_form;
 mod config_form_defaults;

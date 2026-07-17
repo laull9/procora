@@ -196,7 +196,18 @@ tasks:
 
 变量解析发生在 include 合并之后、profile 与模板解析之前；同名变量按 include/入口优先级整体替换。路径表达式仍相对声明它的文件目录解析。变量不是新的覆盖来源：例如 profile 环境中的引用仍以 `profile` 为值来源，另由 `variable_references` 记录声明字段直接引用了哪些变量。`procora config` 输出原始 `vars`、链式解析后的 `resolved_vars` 和该引用映射。未使用 profile、模板和未准入 Task 中的变量引用同样校验。TUI 编辑变量后立即重编译预览，YAML/TOML/JSON 保存均保留原始引用，而不是把有效值写死。
 
-配置编译结果还包含项目级 `dependencies`，由 `procora::source` 在 Task 启动前解析，不进入任务调度图。每项必须声明稳定名称、`source` 和 `version`，可选字段如下：
+配置编译结果还包含项目级 `dependencies`，由 `procora::source` 在 Task 启动前解析，不进入任务调度图。HTTP、HTTPS、SSH、SCP 和本地文件最常用的写法只有一行：
+
+```yaml
+dependencies:
+  frontend: https://cdn.example.com/frontend.tar.gz
+  model: ssh://release@files.example.com/opt/model.bin
+  helper: release@files.example.com:/opt/helper
+```
+
+一行写法自动使用 `version: source`、`unpack: auto`、`kind: auto`、2 次失败重试、2 分钟总超时和 2 GiB 大小上限。单文件、常见归档格式和单一根条目会自动识别；只有多文件归档无法唯一确定目标时才需要 `path`。同样的简写可用于 TOML 的 `frontend = "https://..."` 和 JSON 的 `"frontend": "https://..."`。
+
+需要固定发布版本、摘要、私有凭据或传输策略时再展开为对象；对象也只要求 `source`，`version` 仍可省略。可选字段如下：
 
 - `checksum`：SHA-256，接受纯 64 位十六进制或 `sha256:` 前缀。
 - `unpack`：`auto`（默认）或 `never`。
@@ -205,8 +216,43 @@ tasks:
 - `verify.command`：安装根目录内的验证程序；省略时使用最终管理路径。
 - `verify.args`：验证参数数组。
 - `verify.contains`：标准输出与标准错误必须包含的文本；省略时使用 `version`。
+- `mirrors`：主来源失败后按顺序尝试的最多 8 个镜像；每个来源独立应用重试策略。
+- `download.retries`：首次失败后的重试次数，默认 2，最大 10；只重试传输错误和 408、425、429、5xx 等瞬时 HTTP 状态。
+- `download.timeout`：单次 HTTP/SCP 传输的总超时，默认 `2m`，范围 `1s`–`30m`。
+- `download.max_bytes`：单次下载大小上限，默认 2 GiB，最大 64 GiB；HTTP 优先检查 `Content-Length`，并始终在流式写入时再次计数。
+- `download.headers`：最多 32 个私有 HTTP 请求头。值中的 `${env.NAME}` 在下载时读取 Procora 进程环境，秘密不会进入安装清单。携带自定义请求头时不跟随重定向，避免跨站泄露凭据。
+- `ssh.identity_file` / `ssh.known_hosts_file`：可选的 OpenSSH 私钥和主机密钥库，支持绝对路径或服务目录相对路径；省略时复用 SSH config、默认密钥和 agent。
 
-来源支持 HTTP(S)、SSH URL、SCP 地址、本地 `file://` 和相对服务目录路径。Task 的 `command`、`args`、`env` 与 `cwd` 可用 `${dependency.<name>}` 引用已验证的绝对路径。版本目录固定为 `.procora/dependencies/<name>/<version>`；下载和解包先在临时目录完成，成功后再切换为正式安装。版本清单同时保存最终文件或目录的确定性内容指纹，因此本地损坏即使没有 `verify` 命令也会在下次同步时触发重新安装。
+`version: source` 表示同一来源使用稳定缓存；更换 URL 会自动重装。如果同一个 URL 指向的内容会原地变化，应显式修改 `version`、固定 `checksum`，或先执行 `procora clean`，避免把可变远端误当作不可变发布物。
+
+来源支持 HTTP(S)、SSH URL、SCP 地址、本地 `file://` 和相对服务目录路径。SSH 始终以 OpenSSH 批处理模式运行，启用连接/存活检测、严格主机密钥校验和总超时；端口、Host 别名、ProxyJump 等高级路由仍可放在用户 SSH config 中。Task 的 `command`、`args`、`env` 与 `cwd` 可用 `${dependency.<name>}` 引用已验证的绝对路径。
+
+版本目录固定为 `.procora/dependencies/<name>/<version>`。HTTP 和本地来源在流式写入的同一遍计算 SHA-256；下载、摘要、解包、类型和版本命令全都在临时目录完成。单依赖跨进程锁阻止两个 Procora 实例重复下载；新安装完整后才以可回滚重命名替换旧缓存，因此网络、摘要、解包或验证失败不会先删掉仍可诊断的旧版本。版本清单同时保存来源集合和最终文件或目录的确定性内容指纹，本地损坏即使没有 `verify` 命令也会在下次同步时触发重新安装。
+
+私有 HTTP 制品示例：
+
+```yaml
+dependencies:
+  model:
+    source: https://artifacts.example.com/model-v4.bin
+    mirrors:
+      - https://backup.example.com/model-v4.bin
+      - ssh://release@files.example.com/opt/model-v4.bin
+    version: v4
+    checksum: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    unpack: never
+    kind: file
+    path: model-v4.bin
+    download:
+      retries: 3
+      timeout: 90s
+      max_bytes: 8589934592
+      headers:
+        Authorization: Bearer ${env.ARTIFACT_TOKEN}
+    ssh:
+      identity_file: .secrets/release_ed25519
+      known_hosts_file: .secrets/release_known_hosts
+```
 
 在中心服务器模型中，`project` 同时是本机服务稳定名称，必须满足 `ServiceName` 字符约束。服务目录和配置文件路径单独保存在中心注册表中，不写回领域配置。
 

@@ -6,15 +6,13 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{
-    config::{CompiledProject, DependencyKind, ManagedDependencySpec},
-    core::HealthCheckProbe,
-};
+use crate::config::{CompiledProject, DependencyKind, ManagedDependencySpec};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use super::{archive, download, verify};
+use super::{archive, download, placeholders, verify};
 
 /// 依赖下载、解包、缓存或版本验证错误。
 #[derive(Debug, Error)]
@@ -92,6 +90,8 @@ pub struct DependencyManager {
 struct InstallManifest {
     name: String,
     source: String,
+    #[serde(default)]
+    mirrors: Vec<String>,
     version: String,
     sha256: String,
     managed_path: PathBuf,
@@ -119,7 +119,7 @@ impl DependencyManager {
         compiled: &mut CompiledProject,
     ) -> Result<Vec<ResolvedDependency>, SourceError> {
         let resolved = self.sync(&compiled.dependencies)?;
-        apply_placeholders(compiled, &resolved);
+        placeholders::apply(compiled, &resolved);
         Ok(resolved)
     }
 
@@ -162,10 +162,11 @@ impl DependencyManager {
         if let Ok(resolved) = self.check_one(name, spec, false) {
             return Ok(resolved);
         }
-        let install_root = self.install_root(name, &spec.version);
-        if install_root.exists() {
-            fs::remove_dir_all(&install_root)?;
+        let _install_lock = self.acquire_install_lock(name)?;
+        if let Ok(resolved) = self.check_one(name, spec, false) {
+            return Ok(resolved);
         }
+        let install_root = self.install_root(name, &spec.version);
         let parent = install_root.parent().expect("安装路径包含父目录");
         fs::create_dir_all(parent)?;
         let staging_id = NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed);
@@ -179,7 +180,7 @@ impl DependencyManager {
             let _ = fs::remove_dir_all(&staging);
             return result;
         }
-        fs::rename(&staging, &install_root)?;
+        Self::activate_install(name, &staging, &install_root)?;
         let mut resolved = self.check_one(name, spec, true)?;
         resolved.installed = true;
         Ok(resolved)
@@ -194,9 +195,18 @@ impl DependencyManager {
     ) -> Result<ResolvedDependency, SourceError> {
         let filename = download::source_filename(&spec.source, name);
         let downloaded = staging.join(".download");
-        let source = resolve_local_source(&self.service_root, &spec.source);
-        download::fetch(&source, &downloaded)?;
-        let actual_checksum = sha256(&downloaded)?;
+        let sources = std::iter::once(&spec.source)
+            .chain(&spec.mirrors)
+            .map(|source| resolve_local_source(&self.service_root, source))
+            .collect::<Vec<_>>();
+        let mut ssh = spec.ssh.clone();
+        ssh.identity_file = ssh
+            .identity_file
+            .map(|path| resolve_service_path(&self.service_root, path));
+        ssh.known_hosts_file = ssh
+            .known_hosts_file
+            .map(|path| resolve_service_path(&self.service_root, path));
+        let actual_checksum = download::fetch(&sources, &downloaded, &spec.download, &ssh)?.sha256;
         if let Some(expected) = spec.checksum.as_deref() {
             let expected = expected.strip_prefix("sha256:").unwrap_or(expected);
             if !actual_checksum.eq_ignore_ascii_case(expected) {
@@ -221,9 +231,11 @@ impl DependencyManager {
             .map_err(|_| SourceError::ManagedPath(managed.display().to_string()))?
             .to_path_buf();
         let managed_sha256 = fingerprint(&managed)?;
+        verify::run_version_check(staging, &managed, &spec.version, spec.verify.as_ref())?;
         let manifest = InstallManifest {
             name: name.to_owned(),
             source: spec.source.clone(),
+            mirrors: spec.mirrors.clone(),
             version: spec.version.clone(),
             sha256: actual_checksum,
             managed_path: relative,
@@ -253,6 +265,7 @@ impl DependencyManager {
             serde_json::from_slice(&fs::read(install_root.join("manifest.json"))?)?;
         if manifest.name != name
             || manifest.source != spec.source
+            || manifest.mirrors != spec.mirrors
             || manifest.version != spec.version
             || spec.checksum.as_deref().is_some_and(|expected| {
                 !manifest
@@ -290,6 +303,47 @@ impl DependencyManager {
             .join(".procora/dependencies")
             .join(name)
             .join(version)
+    }
+
+    /// 获取单依赖跨线程、跨进程安装锁，避免并发删除或覆盖缓存。
+    fn acquire_install_lock(&self, name: &str) -> Result<fs::File, SourceError> {
+        let directory = self.service_root.join(".procora/dependencies/.locks");
+        fs::create_dir_all(&directory)?;
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(directory.join(format!("{name}.lock")))?;
+        lock.lock_exclusive()?;
+        Ok(lock)
+    }
+
+    /// 用可回滚的同卷重命名激活完整暂存安装。
+    fn activate_install(
+        name: &str,
+        staging: &Path,
+        install_root: &Path,
+    ) -> Result<(), SourceError> {
+        let backup = install_root.with_file_name(format!(
+            ".backup-{}-{}-{name}",
+            std::process::id(),
+            NEXT_STAGING_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        let had_previous = install_root.exists();
+        if had_previous {
+            fs::rename(install_root, &backup)?;
+        }
+        if let Err(error) = fs::rename(staging, install_root) {
+            if had_previous {
+                let _ = fs::rename(&backup, install_root);
+            }
+            return Err(error.into());
+        }
+        if had_previous {
+            let _ = fs::remove_dir_all(backup);
+        }
+        Ok(())
     }
 }
 
@@ -359,6 +413,15 @@ fn resolve_local_source(root: &Path, source: &str) -> String {
     }
 }
 
+/// 相对 SSH 辅助文件以服务目录为基准解析。
+fn resolve_service_path(root: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }
+}
+
 /// 按显式路径、类型和单根目录规则选择最终管理对象。
 fn select_managed_path(
     name: &str,
@@ -410,35 +473,4 @@ fn select_file(name: &str, root: &Path) -> Result<PathBuf, SourceError> {
         .cloned()
         .or_else(|| single_entry(files))
         .ok_or_else(|| SourceError::ManagedPath(format!("无法在归档中自动确定 `{name}`")))
-}
-
-/// 把 `${dependency.name}` 占位符替换为验证后的绝对路径。
-fn apply_placeholders(compiled: &mut CompiledProject, resolved: &[ResolvedDependency]) {
-    for task in compiled.spec.tasks.values_mut() {
-        for dependency in resolved {
-            let marker = format!("${{dependency.{}}}", dependency.name);
-            let value = dependency.path.to_string_lossy();
-            task.command = task.command.replace(&marker, &value);
-            for argument in &mut task.args {
-                *argument = argument.replace(&marker, &value);
-            }
-            for env_value in task.env.values_mut() {
-                *env_value = env_value.replace(&marker, &value);
-            }
-            if let Some(cwd) = task.cwd.as_mut() {
-                *cwd = PathBuf::from(cwd.to_string_lossy().replace(&marker, &value));
-            }
-            if let Some(healthcheck) = task.healthcheck.as_mut()
-                && let HealthCheckProbe::Exec { command, args, cwd } = &mut healthcheck.probe
-            {
-                *command = command.replace(&marker, &value);
-                for argument in args {
-                    *argument = argument.replace(&marker, &value);
-                }
-                if let Some(cwd) = cwd {
-                    *cwd = PathBuf::from(cwd.to_string_lossy().replace(&marker, &value));
-                }
-            }
-        }
-    }
 }

@@ -136,13 +136,69 @@ fn append_dependencies(text: &mut String, config: &FormConfig) {
     }
     text.push_str("dependencies:\n");
     for (id, dependency) in &config.dependencies {
+        if dependency.is_compact() {
+            text.push_str(&format!(
+                "  {}: {}\n",
+                quoted(id),
+                quoted(&dependency.source)
+            ));
+            continue;
+        }
         text.push_str(&format!("  {}:\n", quoted(id)));
         text.push_str(&format!("    source: {}\n", quoted(&dependency.source)));
-        text.push_str(&format!("    version: {}\n", quoted(&dependency.version)));
+        yaml_array(text, 4, "mirrors", &dependency.mirrors);
+        if dependency.version != "source" {
+            text.push_str(&format!("    version: {}\n", quoted(&dependency.version)));
+        }
         optional_yaml(text, 4, "checksum", dependency.checksum.as_deref());
-        text.push_str(&format!("    unpack: {}\n", dependency.unpack));
+        if dependency.unpack != "auto" {
+            text.push_str(&format!("    unpack: {}\n", dependency.unpack));
+        }
         optional_yaml(text, 4, "path", dependency.path.as_deref());
-        text.push_str(&format!("    kind: {}\n", dependency.kind));
+        if dependency.kind != "auto" {
+            text.push_str(&format!("    kind: {}\n", dependency.kind));
+        }
+        if !dependency.download.is_default() {
+            text.push_str("    download:\n");
+            if dependency.download.retries != 2 {
+                text.push_str(&format!("      retries: {}\n", dependency.download.retries));
+            }
+            if dependency.download.timeout_ms != 120_000 {
+                text.push_str(&format!(
+                    "      timeout: {}\n",
+                    quoted(&crate::config::format_duration(
+                        dependency.download.timeout_ms
+                    ))
+                ));
+            }
+            if dependency.download.max_bytes != 2 * 1024 * 1024 * 1024 {
+                text.push_str(&format!(
+                    "      max_bytes: {}\n",
+                    dependency.download.max_bytes
+                ));
+            }
+            if !dependency.download.headers.is_empty() {
+                text.push_str("      headers:\n");
+                for (name, value) in &dependency.download.headers {
+                    text.push_str(&format!("        {}: {}\n", quoted(name), quoted(value)));
+                }
+            }
+        }
+        if dependency.ssh.identity_file.is_some() || dependency.ssh.known_hosts_file.is_some() {
+            text.push_str("    ssh:\n");
+            optional_yaml(
+                text,
+                6,
+                "identity_file",
+                dependency.ssh.identity_file.as_deref(),
+            );
+            optional_yaml(
+                text,
+                6,
+                "known_hosts_file",
+                dependency.ssh.known_hosts_file.as_deref(),
+            );
+        }
         if let Some(verify) = &dependency.verify {
             text.push_str("    verify:\n");
             optional_yaml(text, 6, "command", verify.command.as_deref());
