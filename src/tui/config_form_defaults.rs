@@ -74,7 +74,10 @@ pub(super) fn form_path(path: &Path, base_directory: Option<&Path>) -> String {
         .and_then(|base| std::fs::canonicalize(base).ok())
         .and_then(|base| path.strip_prefix(base).ok())
         .unwrap_or(path);
-    relative.to_string_lossy().into_owned()
+    let text = relative.to_string_lossy().into_owned();
+    #[cfg(windows)]
+    let text = text.replace('\\', "/");
+    text
 }
 
 /// 将重启策略转为配置中的拼写。
