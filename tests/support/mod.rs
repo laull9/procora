@@ -5,7 +5,11 @@ use procora::protocol::{
     ProjectSnapshot, SnapshotSourceDto, TaskHealthDto, TaskStatusDto, TaskView,
 };
 
+#[allow(dead_code)]
+pub mod http;
+
 /// 创建包含阻塞任务的 TUI 测试快照。
+#[allow(dead_code)]
 pub fn snapshot() -> ProjectSnapshot {
     let database = TaskId::from_str("database").unwrap();
     let api = TaskId::from_str("api").unwrap();

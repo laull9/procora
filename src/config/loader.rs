@@ -1,8 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 
 use crate::core::{ProjectSpec, TaskGraph};
 
-use super::{ConfigDiagnostic, ConfigError, ConfigFormat, ManagedDependencies, raw::RawProject};
+use super::{
+    ConfigDiagnostic, ConfigError, ConfigFormat, ManagedDependencies, TaskConfigOrigins,
+    TaskDefaultsSpec, raw::RawProject,
+};
 
 mod include;
 
@@ -20,17 +26,64 @@ pub(crate) struct ConfigLoadCapture {
     pub(crate) inputs: Vec<CapturedConfigInput>,
     pub(crate) watched_paths: Vec<PathBuf>,
     pub(crate) root: PathBuf,
+    /// 入口及 include 文档数量，不包含环境文件等声明输入。
+    pub(crate) definition_documents: usize,
+}
+
+/// Python 生成 JSON 编译时额外捕获的显式环境文件。
+pub(super) struct GeneratedJsonCapture {
+    pub(super) result: Result<CompiledProject, ConfigError>,
+    pub(super) inputs: Vec<CapturedConfigInput>,
+    pub(super) watched_paths: Vec<PathBuf>,
 }
 
 /// 已通过结构、语义和任务图校验的项目配置。
 #[derive(Debug)]
 pub struct CompiledProject {
+    /// 用户声明的项目变量表达式。
+    pub vars: BTreeMap<String, String>,
+    /// 完成链式引用解析后的项目变量值。
+    pub resolved_vars: BTreeMap<String, String>,
+    /// 配置字段路径到直接变量引用集合的映射。
+    pub variable_references: BTreeMap<String, BTreeSet<String>>,
     /// 规范化项目配置。
     pub spec: ProjectSpec,
     /// 完成环检测的任务图。
     pub graph: TaskGraph,
     /// 已通过字段与来源校验的项目级管理依赖。
     pub dependencies: ManagedDependencies,
+    /// 已合并到每个 Task 的项目级默认环境变量。
+    pub project_env: BTreeMap<String, String>,
+    /// 不包含 profile 覆盖的项目级环境声明。
+    pub declared_project_env: BTreeMap<String, String>,
+    /// 项目显式声明的 Task 默认层。
+    pub task_defaults: TaskDefaultsSpec,
+    /// 不包含 profile 覆盖的 Task 默认声明。
+    pub declared_task_defaults: TaskDefaultsSpec,
+    /// 当前配置持久选择的 profile。
+    pub active_profile: Option<String>,
+    /// 配置中声明的全部 profile 名称。
+    pub profile_names: BTreeSet<String>,
+    /// 每个 profile 的直接继承目标。
+    pub profile_extends: BTreeMap<String, String>,
+    /// profile 原始声明，供结构化编辑器无展开写回。
+    pub(crate) profiles: BTreeMap<String, super::raw::RawProfile>,
+    /// 已声明的命名 Task 模板名称。
+    pub task_template_names: BTreeSet<String>,
+    /// 命名 Task 模板的本地声明，供结构化编辑器无展开写回。
+    pub(crate) task_templates: BTreeMap<String, super::raw::RawTask>,
+    /// 每个 Task 显式引用的模板名称。
+    pub(crate) task_extends: BTreeMap<crate::core::TaskId, String>,
+    /// Task 显式环境文件路径，供编辑器保留声明而非展开写回。
+    pub task_env_files: BTreeMap<crate::core::TaskId, PathBuf>,
+    /// Task 显式内联环境，不包含项目默认值或环境文件内容。
+    pub task_inline_env: BTreeMap<crate::core::TaskId, BTreeMap<String, String>>,
+    /// 每个有效 Task 字段和环境变量的生效来源。
+    pub task_origins: BTreeMap<crate::core::TaskId, TaskConfigOrigins>,
+    /// 活动 Task 的原始本地声明，供编辑器保留变量表达式。
+    pub(crate) task_declarations: BTreeMap<crate::core::TaskId, super::raw::RawTask>,
+    /// 当前 profile 未准入但仍需编辑器保留的 Task 声明。
+    pub(crate) inactive_tasks: BTreeMap<String, super::raw::RawTask>,
 }
 
 /// 从指定路径读取并编译项目配置。
@@ -71,12 +124,19 @@ fn compile(
     format: ConfigFormat,
     base_directory: Option<&Path>,
 ) -> Result<CompiledProject, ConfigError> {
-    let raw = parse_raw(input, format)?;
+    let mut raw = parse_raw(input, format)?;
     if raw.has_includes() {
         return Err(ConfigError::Include(
             "include 必须通过文件路径加载，内存文本没有安全的相对路径基准".to_owned(),
         ));
     }
+    raw.load_env_files(
+        base_directory,
+        None,
+        &mut BTreeMap::new(),
+        &mut BTreeSet::new(),
+    )
+    .map_err(validation_error)?;
     compile_raw(raw, base_directory)
 }
 
@@ -85,21 +145,62 @@ fn compile_raw(
     raw: RawProject,
     base_directory: Option<&Path>,
 ) -> Result<CompiledProject, ConfigError> {
-    let (spec, dependencies) = raw.normalize(base_directory).map_err(validation_error)?;
+    let (spec, dependencies, declarations) =
+        raw.normalize(base_directory).map_err(validation_error)?;
     let graph = TaskGraph::compile(&spec)?;
     Ok(CompiledProject {
+        vars: declarations.vars,
+        resolved_vars: declarations.resolved_vars,
+        variable_references: declarations.variable_references,
         spec,
         graph,
         dependencies,
+        project_env: declarations.project_env,
+        declared_project_env: declarations.declared_project_env,
+        task_defaults: declarations.task_defaults,
+        declared_task_defaults: declarations.declared_task_defaults,
+        active_profile: declarations.active_profile,
+        profile_extends: declarations.profile_extends,
+        profile_names: declarations.profiles.keys().cloned().collect(),
+        profiles: declarations.profiles,
+        task_template_names: declarations.task_templates.keys().cloned().collect(),
+        task_templates: declarations.task_templates,
+        task_extends: declarations.task_extends,
+        task_env_files: declarations.task_env_files,
+        task_inline_env: declarations.task_inline_env,
+        task_origins: declarations.task_origins,
+        task_declarations: declarations.task_declarations,
+        inactive_tasks: declarations.inactive_tasks,
     })
 }
 
 /// 按脚本目录解析 Python 生成的严格 JSON 文档。
-pub(super) fn load_generated_json(
-    input: &str,
-    base_directory: &Path,
-) -> Result<CompiledProject, ConfigError> {
-    compile(input, ConfigFormat::Json, Some(base_directory))
+pub(super) fn load_generated_json(input: &str, base_directory: &Path) -> GeneratedJsonCapture {
+    let mut inputs = BTreeMap::new();
+    let mut watched_paths = BTreeSet::new();
+    let result = parse_raw(input, ConfigFormat::Json).and_then(|mut raw| {
+        if raw.has_includes() {
+            return Err(ConfigError::Include(
+                "Python 生成配置不能声明 include".to_owned(),
+            ));
+        }
+        raw.load_env_files(
+            Some(base_directory),
+            Some(base_directory),
+            &mut inputs,
+            &mut watched_paths,
+        )
+        .map_err(validation_error)?;
+        compile_raw(raw, Some(base_directory))
+    });
+    GeneratedJsonCapture {
+        result,
+        inputs: inputs
+            .into_iter()
+            .map(|(path, bytes)| CapturedConfigInput { path, bytes })
+            .collect(),
+        watched_paths: watched_paths.into_iter().collect(),
+    }
 }
 
 /// 按输入格式反序列化原始配置并保留字段路径。

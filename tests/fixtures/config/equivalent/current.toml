@@ -1,0 +1,28 @@
+version = 1
+project = "compat"
+
+[env]
+PROJECT = "global"
+
+[task_defaults]
+success_exit_codes = [0, 130]
+restart = "on-failure"
+restart_delay_ms = 750
+max_restarts = 4
+restart_reset_after_ms = 9000
+shutdown_timeout_ms = 3000
+
+[task_defaults.env]
+COMMON = "shared"
+
+[tasks.database]
+command = 'db --data "path with space"'
+
+[tasks.api]
+command = "api --port 8080"
+
+[tasks.api.env]
+LOCAL = "api"
+
+[tasks.api.depends_on.database]
+condition = "started"

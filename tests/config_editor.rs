@@ -28,6 +28,25 @@ fn temporary_config() -> PathBuf {
     ))
 }
 
+/// 向编辑器发送一个无修饰键。
+fn press(editor: &mut ConfigEditor, code: KeyCode) {
+    editor.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+/// 向当前表单字段逐字输入文本。
+fn type_text(editor: &mut ConfigEditor, value: &str) {
+    for character in value.chars() {
+        press(editor, KeyCode::Char(character));
+    }
+}
+
+/// 清空当前字段末尾已知数量的字符。
+fn backspace(editor: &mut ConfigEditor, count: usize) {
+    for _ in 0..count {
+        press(editor, KeyCode::Backspace);
+    }
+}
+
 #[test]
 // 只有有效配置才会保存。
 fn only_valid_config_is_saved() {
@@ -97,7 +116,7 @@ fn include_entry_stays_text_mode_and_validates_full_closure() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    assert!(editor.message().contains("include 配置"));
+    assert!(editor.message().contains("多文件配置"));
     editor.handle_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
     assert!(editor.message().contains("避免表单展开"));
     editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
@@ -106,6 +125,60 @@ fn include_entry_stays_text_mode_and_validates_full_closure() {
 
     fs::remove_file(path).unwrap();
     fs::remove_file(fragment).unwrap();
+}
+
+#[test]
+// env_file在表单中保留声明路径且可直接切换文件，不会把文件内容写回内联env。
+fn env_file_entry_is_editable_without_expanding_file_values() {
+    let path = temporary_config();
+    let env_file = path.with_extension("env");
+    let next_env_file = path.with_extension("next.env");
+    fs::write(&env_file, "SECRET=from-file\n").unwrap();
+    fs::write(&next_env_file, "SECRET=from-next-file\nNEXT=yes\n").unwrap();
+    fs::write(
+        &path,
+        format!(
+            "version: 1\nproject: demo\ntasks:\n  api:\n    command: echo\n    env_file: {}\n",
+            env_file.file_name().unwrap().to_string_lossy()
+        ),
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    assert!(editor.message().contains("表单模式"));
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Enter);
+    for _ in 0..4 {
+        press(&mut editor, KeyCode::Tab);
+    }
+    backspace(
+        &mut editor,
+        env_file
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .chars()
+            .count(),
+    );
+    type_text(
+        &mut editor,
+        &next_env_file.file_name().unwrap().to_string_lossy(),
+    );
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_path(&path).unwrap();
+    let task = compiled.spec.tasks.values().next().unwrap();
+    assert!(saved.contains("env_file:"));
+    assert!(saved.contains(next_env_file.file_name().unwrap().to_str().unwrap()));
+    assert!(!saved.contains("from-file"));
+    assert!(!saved.contains("from-next-file"));
+    assert_eq!(task.env["SECRET"], "from-next-file");
+    assert_eq!(task.env["NEXT"], "yes");
+
+    fs::remove_file(path).unwrap();
+    fs::remove_file(env_file).unwrap();
+    fs::remove_file(next_env_file).unwrap();
 }
 
 #[test]
@@ -188,10 +261,10 @@ fn form_save_supports_json_and_toml() {
 }
 
 #[test]
-// 表单往返不会丢失健康检查。
-fn form_roundtrip_preserves_health_checks() {
+// 表单往返不会丢失健康检查和重启边界。
+fn form_roundtrip_preserves_health_and_restart_limits() {
     let path = temporary_config();
-    let initial = "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      command: checker\n      args: ['--ready']\n      period_ms: 25\n      timeout_ms: 10\n      success_threshold: 2\n      failure_threshold: 4\n";
+    let initial = "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    restart: on-failure\n    max_restarts: 7\n    restart_reset_after_ms: 1234\n    healthcheck:\n      command: checker\n      args: ['--ready']\n      period_ms: 25\n      timeout_ms: 10\n      success_threshold: 2\n      failure_threshold: 4\n";
     fs::write(&path, initial).unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
@@ -199,7 +272,35 @@ fn form_roundtrip_preserves_health_checks() {
 
     let saved = fs::read_to_string(&path).unwrap();
     let compiled = procora::config::load_str(&saved, ConfigFormat::Yaml).unwrap();
-    let healthcheck = compiled
+    let task = compiled.spec.tasks.values().next().unwrap();
+    let healthcheck = task.healthcheck.as_ref().unwrap();
+    let procora::core::HealthCheckProbe::Exec { args, .. } = &healthcheck.probe else {
+        panic!("应保留 exec 健康检查");
+    };
+    assert_eq!(args, &["--ready".to_owned()]);
+    assert_eq!(healthcheck.success_threshold, 2);
+    assert_eq!(healthcheck.failure_threshold, 4);
+    assert_eq!(task.max_restarts, 7);
+    assert_eq!(task.restart_reset_after_ms, 1234);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 结构化编辑保存不会丢失HTTP健康检查字段。
+fn form_roundtrip_preserves_http_health_check() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      http_get:\n        scheme: http\n        host: localhost\n        port: 8080\n        path: /ready\n        headers:\n          X-Probe: yes\n        status_code: 204\n      period_ms: 250\n      timeout_ms: 100\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_str(&saved, ConfigFormat::Yaml).unwrap();
+    let check = compiled
         .spec
         .tasks
         .values()
@@ -208,9 +309,156 @@ fn form_roundtrip_preserves_health_checks() {
         .healthcheck
         .as_ref()
         .unwrap();
-    assert_eq!(healthcheck.args, ["--ready"]);
-    assert_eq!(healthcheck.success_threshold, 2);
-    assert_eq!(healthcheck.failure_threshold, 4);
+    let procora::core::HealthCheckProbe::HttpGet { http_get } = &check.probe else {
+        panic!("应保留 HTTP GET 健康检查");
+    };
+    assert_eq!(http_get.host, "localhost");
+    assert_eq!(http_get.port, Some(8080));
+    assert_eq!(http_get.path, "/ready");
+    assert_eq!(http_get.headers["X-Probe"], "yes");
+    assert_eq!(http_get.status_code, 204);
+    assert_eq!(check.period_ms, 250);
+    assert_eq!(check.timeout_ms, 100);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// Task弹窗用JSON表示精确参数和环境值，编辑往返不会拆分空参数、空格或逗号。
+fn task_dialog_preserves_precise_args_and_environment_values() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    args: ['hello world', '', 'quote\"value']\n    env:\n      CSV: 'a,b'\n      EQUAL: 'a=b'\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_path(&path).unwrap();
+    let task = compiled.spec.tasks.values().next().unwrap();
+    assert_eq!(task.args, ["hello world", "", "quote\"value"]);
+    assert_eq!(task.env["CSV"], "a,b");
+    assert_eq!(task.env["EQUAL"], "a=b");
+    assert!(saved.contains(r#"command: ["api","hello world","","quote\"value"]"#));
+    assert!(!saved.contains("    args:"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// Task弹窗可以直接编辑成功退出码并保持退出码0的固定成功语义。
+fn task_dialog_edits_success_exit_codes() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Enter);
+    for _ in 0..7 {
+        press(&mut editor, KeyCode::Tab);
+    }
+    backspace(&mut editor, 3);
+    type_text(&mut editor, "[130]");
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let compiled = procora::config::load_path(&path).unwrap();
+    let codes = &compiled
+        .spec
+        .tasks
+        .values()
+        .next()
+        .unwrap()
+        .success_exit_codes;
+    assert_eq!(codes.iter().copied().collect::<Vec<_>>(), [0, 130]);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// h弹窗可以从无检查配置直接创建带精确请求头和状态码的HTTP检查。
+fn health_dialog_creates_http_probe() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Char('h'));
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Right);
+    for _ in 0..6 {
+        press(&mut editor, KeyCode::Tab);
+    }
+    type_text(&mut editor, "8080");
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Tab);
+    backspace(&mut editor, 2);
+    type_text(&mut editor, r#"{"X-Probe":"a,b"}"#);
+    press(&mut editor, KeyCode::Tab);
+    backspace(&mut editor, 3);
+    type_text(&mut editor, "204");
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let compiled = procora::config::load_path(&path).unwrap();
+    let check = compiled
+        .spec
+        .tasks
+        .values()
+        .next()
+        .unwrap()
+        .healthcheck
+        .as_ref()
+        .unwrap();
+    let procora::core::HealthCheckProbe::HttpGet { http_get } = &check.probe else {
+        panic!("应创建 HTTP GET 健康检查");
+    };
+    assert_eq!(http_get.port, Some(8080));
+    assert_eq!(http_get.headers["X-Probe"], "a,b");
+    assert_eq!(http_get.status_code, 204);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 小终端中的长健康检查弹窗会滚动到当前字段。
+fn health_dialog_scrolls_selected_field_in_small_terminal() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Char('h'));
+    for _ in 0..14 {
+        press(&mut editor, KeyCode::Down);
+    }
+
+    let backend = TestBackend::new(90, 14);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("连续失败阈值"));
+    assert!(text.contains("15/15"));
     fs::remove_file(path).unwrap();
 }
 

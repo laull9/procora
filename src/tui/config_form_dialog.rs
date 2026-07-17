@@ -1,21 +1,28 @@
 use std::collections::BTreeMap;
 
-use super::config_form::{FormConfig, FormDependency, FormTask, FormTaskDependency, FormVerify};
+use super::{
+    config_form::{FormConfig, FormDependency, FormTask, FormTaskDependency, FormVerify},
+    config_health_dialog,
+    config_profile::{self, FormProfile},
+    config_task_defaults, config_task_dialog,
+};
 
 /// 弹窗正在编辑的实体类型。
 #[derive(Clone, Debug)]
 enum DialogKind {
     Project,
-    Task(Option<String>),
+    Profile(Option<String>),
+    Task(Option<String>, Box<FormTask>),
+    Health(String),
     Dependency(Option<String>),
 }
 
 /// 表单字段的可编辑值和可选枚举值。
 #[derive(Clone, Debug)]
-struct DialogField {
-    label: &'static str,
-    value: String,
-    choices: &'static [&'static str],
+pub(super) struct DialogField {
+    pub(super) label: &'static str,
+    pub(super) value: String,
+    pub(super) choices: Vec<String>,
 }
 
 /// 表单输入弹窗。
@@ -31,14 +38,19 @@ impl Dialog {
     pub(crate) fn project(config: &FormConfig) -> Self {
         Self {
             kind: DialogKind::Project,
-            fields: vec![field("项目名称", &config.project, &[])],
+            fields: config_task_defaults::project_fields(config),
             selected: 0,
         }
     }
 
     /// 创建空白 Task 弹窗。
-    pub(crate) fn new_task() -> Self {
-        Self::task(None, &FormTask::default_value())
+    pub(crate) fn new_task(config: &FormConfig) -> Self {
+        Self::task(None, &config.new_task_value())
+    }
+
+    /// 创建空白 profile 弹窗。
+    pub(crate) fn new_profile(config: &FormConfig) -> Self {
+        Self::profile(None, &FormProfile::default(), config)
     }
 
     /// 创建空白管理依赖弹窗。
@@ -49,30 +61,30 @@ impl Dialog {
     /// 创建 Task 编辑弹窗。
     pub(crate) fn task(original: Option<&str>, task: &FormTask) -> Self {
         Self {
-            kind: DialogKind::Task(original.map(str::to_owned)),
-            fields: vec![
-                field("Task 名称", original.unwrap_or(""), &[]),
-                field("命令", &task.command, &[]),
-                field("参数（空格分隔）", &task.args.join(" "), &[]),
-                field("工作目录（可空）", task.cwd.as_deref().unwrap_or(""), &[]),
-                field(
-                    "环境变量（KEY=VALUE，逗号分隔）",
-                    &pairs_text(&task.env),
-                    &[],
-                ),
-                field(
-                    "依赖（task:条件，逗号分隔）",
-                    &dependencies_text(&task.depends_on),
-                    &[],
-                ),
-                field(
-                    "重启策略",
-                    &task.restart,
-                    &["never", "on-failure", "always"],
-                ),
-                field("重启等待毫秒", &task.restart_delay_ms.to_string(), &[]),
-                field("停止超时毫秒", &task.shutdown_timeout_ms.to_string(), &[]),
-            ],
+            kind: DialogKind::Task(original.map(str::to_owned), Box::new(task.clone())),
+            fields: config_task_dialog::fields(original, task),
+            selected: 0,
+        }
+    }
+
+    /// 创建命名 profile 编辑弹窗。
+    pub(crate) fn profile(
+        original: Option<&str>,
+        profile: &FormProfile,
+        config: &FormConfig,
+    ) -> Self {
+        Self {
+            kind: DialogKind::Profile(original.map(str::to_owned)),
+            fields: config_profile::fields(original, profile, config),
+            selected: 0,
+        }
+    }
+
+    /// 创建当前 Task 的健康检查编辑弹窗。
+    pub(crate) fn health(task_name: &str, task: &FormTask) -> Self {
+        Self {
+            kind: DialogKind::Health(task_name.to_owned()),
+            fields: config_health_dialog::fields(task),
             selected: 0,
         }
     }
@@ -111,7 +123,7 @@ impl Dialog {
                 ),
                 field(
                     "验证参数（空格分隔）",
-                    &verify.map_or_else(String::new, |value| value.args.join(" ")),
+                    &verify.map_or_else(|| "[]".to_owned(), |value| args_text(&value.args)),
                     &[],
                 ),
                 field(
@@ -130,8 +142,11 @@ impl Dialog {
     pub(crate) fn title(&self) -> &'static str {
         match self.kind {
             DialogKind::Project => "编辑项目",
-            DialogKind::Task(Some(_)) => "编辑 Task",
-            DialogKind::Task(None) => "新建 Task",
+            DialogKind::Profile(Some(_)) => "编辑 profile",
+            DialogKind::Profile(None) => "新建 profile",
+            DialogKind::Task(Some(_), _) => "编辑 Task",
+            DialogKind::Task(None, _) => "新建 Task",
+            DialogKind::Health(_) => "编辑健康检查",
             DialogKind::Dependency(Some(_)) => "编辑管理依赖",
             DialogKind::Dependency(None) => "新建管理依赖",
         }
@@ -143,6 +158,11 @@ impl Dialog {
             .iter()
             .enumerate()
             .map(|(index, field)| (field.label, field.value.as_str(), index == self.selected))
+    }
+
+    /// 返回字段数量与当前选择，供窄终端滚动显示。
+    pub(crate) const fn field_position(&self) -> (usize, usize) {
+        (self.fields.len(), self.selected)
     }
 
     /// 返回当前字段是否为选择器。
@@ -164,7 +184,7 @@ impl Dialog {
     /// 循环当前字段的可选值。
     pub(crate) fn cycle_choice(&mut self, forward: bool) {
         let field = &mut self.fields[self.selected];
-        let Some(position) = field.choices.iter().position(|value| *value == field.value) else {
+        let Some(position) = field.choices.iter().position(|value| value == &field.value) else {
             return;
         };
         let next = if forward {
@@ -172,7 +192,7 @@ impl Dialog {
         } else {
             position.checked_sub(1).unwrap_or(field.choices.len() - 1)
         };
-        field.value = field.choices[next].to_owned();
+        field.value = field.choices[next].clone();
     }
 
     /// 删除当前普通文本字段的最后一个字符。
@@ -192,42 +212,29 @@ impl Dialog {
     }
 
     /// 校验弹窗字段并提交到表单模型。
-    pub(crate) fn commit(&self, config: &mut FormConfig) -> Result<(), String> {
+    pub(crate) fn commit(&self, config: &mut FormConfig) -> Result<bool, String> {
         match &self.kind {
             DialogKind::Project => {
-                require(&self.fields[0].value, "项目名称")?;
-                config.project.clone_from(&self.fields[0].value);
+                let previous = config.active_profile.clone();
+                let previous_vars = config.vars.clone();
+                config_task_defaults::commit_project(&self.fields, config)?;
+                return Ok(previous != config.active_profile || previous_vars != config.vars);
             }
-            DialogKind::Task(original) => {
-                let name = self.fields[0].value.trim();
-                require(name, "Task 名称")?;
-                let healthcheck = original
-                    .as_ref()
-                    .and_then(|name| config.tasks.get(name))
-                    .and_then(|task| task.healthcheck.clone());
-                let success_exit_codes = original
-                    .as_ref()
-                    .and_then(|name| config.tasks.get(name))
-                    .map_or_else(|| vec![0], |task| task.success_exit_codes.clone());
-                let task = FormTask {
-                    command: required_value(&self.fields[1].value, "命令")?,
-                    args: words(&self.fields[2].value),
-                    cwd: optional(&self.fields[3].value),
-                    env: parse_pairs(&self.fields[4].value, "环境变量")?,
-                    healthcheck,
-                    success_exit_codes,
-                    depends_on: parse_dependencies(&self.fields[5].value)?,
-                    restart: self.fields[6].value.clone(),
-                    restart_delay_ms: parse_u64(&self.fields[7].value, "重启等待毫秒")?,
-                    shutdown_timeout_ms: parse_u64(&self.fields[8].value, "停止超时毫秒")?,
-                };
-                replace_entry(&mut config.tasks, original.as_deref(), name, task, "Task")?;
+            DialogKind::Profile(original) => {
+                config_profile::commit(original.as_deref(), &self.fields, config)?;
+                return Ok(true);
+            }
+            DialogKind::Task(original, baseline) => {
+                config_task_dialog::commit(original.as_deref(), baseline, &self.fields, config)?;
+            }
+            DialogKind::Health(task_name) => {
+                config_health_dialog::commit(task_name, &self.fields, config)?;
             }
             DialogKind::Dependency(original) => {
                 let name = self.fields[0].value.trim();
                 require(name, "依赖名称")?;
                 let command = optional(&self.fields[7].value);
-                let args = words(&self.fields[8].value);
+                let args = parse_args(&self.fields[8].value, "验证参数")?;
                 let contains = optional(&self.fields[9].value);
                 let dependency = FormDependency {
                     source: required_value(&self.fields[1].value, "来源")?,
@@ -252,45 +259,25 @@ impl Dialog {
                 )?;
             }
         }
-        Ok(())
-    }
-}
-
-impl FormTask {
-    /// 返回新建 Task 使用的默认值。
-    fn default_value() -> Self {
-        Self {
-            command: String::new(),
-            args: Vec::new(),
-            cwd: None,
-            env: BTreeMap::new(),
-            healthcheck: None,
-            success_exit_codes: vec![0],
-            depends_on: BTreeMap::new(),
-            restart: "never".to_owned(),
-            restart_delay_ms: 500,
-            shutdown_timeout_ms: 5_000,
-        }
-    }
-}
-
-impl FormDependency {
-    /// 返回新建管理依赖使用的默认值。
-    fn default_value() -> Self {
-        Self {
-            source: String::new(),
-            version: String::new(),
-            checksum: None,
-            unpack: "auto".to_owned(),
-            path: None,
-            kind: "auto".to_owned(),
-            verify: None,
-        }
+        Ok(false)
     }
 }
 
 /// 创建一个弹窗字段。
-fn field(label: &'static str, value: &str, choices: &'static [&'static str]) -> DialogField {
+pub(super) fn field(
+    label: &'static str,
+    value: &str,
+    choices: &'static [&'static str],
+) -> DialogField {
+    DialogField {
+        label,
+        value: value.to_owned(),
+        choices: choices.iter().map(|value| (*value).to_owned()).collect(),
+    }
+}
+
+/// 创建运行期生成选项的弹窗字段。
+pub(super) fn choice_field(label: &'static str, value: &str, choices: Vec<String>) -> DialogField {
     DialogField {
         label,
         value: value.to_owned(),
@@ -299,16 +286,12 @@ fn field(label: &'static str, value: &str, choices: &'static [&'static str]) -> 
 }
 
 /// 将环境变量映射转换为弹窗文本。
-fn pairs_text(values: &BTreeMap<String, String>) -> String {
-    values
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(",")
+pub(super) fn map_text(values: &BTreeMap<String, String>) -> String {
+    serde_json::to_string(values).expect("字符串映射序列化不会失败")
 }
 
 /// 将依赖映射转换为弹窗文本。
-fn dependencies_text(values: &BTreeMap<String, FormTaskDependency>) -> String {
+pub(super) fn dependencies_text(values: &BTreeMap<String, FormTaskDependency>) -> String {
     values
         .iter()
         .map(|(name, dependency)| format!("{name}:{}", dependency.condition))
@@ -317,7 +300,11 @@ fn dependencies_text(values: &BTreeMap<String, FormTaskDependency>) -> String {
 }
 
 /// 解析逗号分隔的环境变量集合。
-fn parse_pairs(value: &str, label: &str) -> Result<BTreeMap<String, String>, String> {
+pub(super) fn parse_map(value: &str, label: &str) -> Result<BTreeMap<String, String>, String> {
+    let value = value.trim();
+    if value.starts_with('{') {
+        return serde_json::from_str(value).map_err(|error| format!("{label} JSON 无效：{error}"));
+    }
     value
         .split(',')
         .filter(|item| !item.trim().is_empty())
@@ -333,30 +320,39 @@ fn parse_pairs(value: &str, label: &str) -> Result<BTreeMap<String, String>, Str
 }
 
 /// 解析逗号分隔的 Task 依赖集合。
-fn parse_dependencies(value: &str) -> Result<BTreeMap<String, FormTaskDependency>, String> {
-    value
-        .split(',')
-        .filter(|item| !item.trim().is_empty())
-        .map(|item| {
-            let (name, condition) = item.split_once(':').unwrap_or((item, "started"));
-            let name = name.trim();
-            require(name, "依赖 Task")?;
-            let condition = condition.trim();
-            if !matches!(condition, "started" | "healthy" | "completed_successfully") {
+pub(super) fn parse_dependencies(
+    value: &str,
+) -> Result<BTreeMap<String, FormTaskDependency>, String> {
+    let mut dependencies = BTreeMap::new();
+    for item in value.split(',').filter(|item| !item.trim().is_empty()) {
+        let (name, condition) = item.split_once(':').unwrap_or((item, "started"));
+        let name = name.trim();
+        require(name, "依赖 Task")?;
+        let condition = match condition.trim() {
+            "started" | "process_started" => "started",
+            "healthy" | "process_healthy" => "healthy",
+            "completed_successfully" | "process_completed_successfully" => "completed_successfully",
+            _ => {
                 return Err("依赖条件只能是 started、healthy 或 completed_successfully".to_owned());
             }
-            Ok((
+        };
+        if dependencies
+            .insert(
                 name.to_owned(),
                 FormTaskDependency {
                     condition: condition.to_owned(),
                 },
-            ))
-        })
-        .collect()
+            )
+            .is_some()
+        {
+            return Err(format!("依赖 Task `{name}` 重复出现"));
+        }
+    }
+    Ok(dependencies)
 }
 
 /// 替换或新增一个带名称的配置条目，并防止意外覆盖。
-fn replace_entry<T>(
+pub(super) fn replace_entry<T>(
     entries: &mut BTreeMap<String, T>,
     original: Option<&str>,
     name: &str,
@@ -383,25 +379,61 @@ fn require(value: &str, label: &str) -> Result<(), String> {
 }
 
 /// 读取必填字段，并移除首尾空白。
-fn required_value(value: &str, label: &str) -> Result<String, String> {
+pub(super) fn required_value(value: &str, label: &str) -> Result<String, String> {
     require(value, label)?;
     Ok(value.trim().to_owned())
 }
 
 /// 把可空文本转为可选字段。
-fn optional(value: &str) -> Option<String> {
+pub(super) fn optional(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.trim().to_owned())
 }
 
 /// 将空白分隔的参数文本转换为参数数组。
-fn words(value: &str) -> Vec<String> {
-    value.split_whitespace().map(str::to_owned).collect()
+pub(super) fn args_text(values: &[String]) -> String {
+    serde_json::to_string(values).expect("字符串数组序列化不会失败")
 }
 
-/// 解析一个毫秒数值字段。
-fn parse_u64(value: &str, label: &str) -> Result<u64, String> {
+/// 解析精确 JSON 参数数组，并兼容旧版空格分隔输入。
+pub(super) fn parse_args(value: &str, label: &str) -> Result<Vec<String>, String> {
+    let value = value.trim();
+    if value.starts_with('[') {
+        return serde_json::from_str(value).map_err(|error| format!("{label} JSON 无效：{error}"));
+    }
+    Ok(value.split_whitespace().map(str::to_owned).collect())
+}
+
+/// 解析一个带单位的紧凑时长字段。
+pub(super) fn parse_duration(value: &str, label: &str) -> Result<u64, String> {
+    crate::config::parse_duration(value).map_err(|error| format!("{label}无效：{error}"))
+}
+
+/// 解析表单中的非负 32 位整数。
+pub(super) fn parse_u32(value: &str, label: &str) -> Result<u32, String> {
     value
         .trim()
         .parse()
         .map_err(|_| format!("{label} 必须是非负整数"))
+}
+
+/// 解析精确 JSON 整数数组，并兼容逗号或空白分隔输入。
+pub(super) fn parse_i32_list(value: &str, label: &str) -> Result<Vec<i32>, String> {
+    let value = value.trim();
+    let values = if value.starts_with('[') {
+        serde_json::from_str(value).map_err(|error| format!("{label} JSON 无效：{error}"))?
+    } else {
+        value
+            .split([',', ' '])
+            .filter(|item| !item.trim().is_empty())
+            .map(|item| {
+                item.trim()
+                    .parse()
+                    .map_err(|_| format!("{label} 必须是整数数组"))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    if values.iter().any(|value| *value < 0) {
+        return Err(format!("{label}不能包含负数"));
+    }
+    Ok(values)
 }

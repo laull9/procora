@@ -80,11 +80,11 @@ fn local_binary_installs_verifies_cache_and_replaces_placeholder() {
         .healthcheck
         .as_ref()
         .unwrap();
-    assert_eq!(healthcheck.command, resolved[0].path.to_string_lossy());
-    assert_eq!(
-        healthcheck.args,
-        [format!("--path={}", resolved[0].path.display())]
-    );
+    let procora::core::HealthCheckProbe::Exec { command, args, .. } = &healthcheck.probe else {
+        panic!("应保留 exec 健康检查");
+    };
+    assert_eq!(command, resolved[0].path.to_string_lossy().as_ref());
+    assert_eq!(args, &[format!("--path={}", resolved[0].path.display())]);
     assert!(
         root.join(".procora/dependencies/tool/1.2.3/manifest.json")
             .is_file()

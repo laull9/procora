@@ -7,18 +7,76 @@ use serde::{Deserialize, Serialize};
 
 use super::TaskId;
 
+/// Task 就绪检查使用的具体探针。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum HealthCheckProbe {
+    /// 不经过 shell 的进程外命令探针。
+    Exec {
+        /// 检查程序。
+        command: String,
+        /// 直接传递给检查程序的参数。
+        #[serde(default)]
+        args: Vec<String>,
+        /// 检查程序独立的工作目录；缺省时继承 Task 工作目录。
+        #[serde(default)]
+        cwd: Option<PathBuf>,
+    },
+    /// 发出 GET 请求并匹配精确状态码的 HTTP 探针。
+    HttpGet {
+        /// HTTP GET 请求参数。
+        http_get: HttpHealthCheckSpec,
+    },
+}
+
+/// HTTP 就绪检查的请求目标与预期结果。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpHealthCheckSpec {
+    /// 只允许 `http` 或 `https`。
+    pub scheme: HttpScheme,
+    /// 目标主机名、IP 地址或带方括号的 IPv6 地址。
+    pub host: String,
+    /// 可选目标端口；缺省时采用协议默认端口。
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// 以斜杠开头的请求路径，可携带查询字符串。
+    pub path: String,
+    /// 附加到请求的有界 HTTP 头。
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    /// 唯一视为成功的 1xx–3xx 状态码。
+    pub status_code: u16,
+}
+
+/// HTTP 就绪检查支持的传输协议。
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HttpScheme {
+    /// 明文 HTTP。
+    #[default]
+    Http,
+    /// 使用系统信任根验证服务端的 HTTPS。
+    Https,
+}
+
+impl HttpScheme {
+    /// 返回用于构造请求 URL 的小写协议名。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Https => "https",
+        }
+    }
+}
+
 /// Task 的进程外就绪检查配置。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HealthCheckSpec {
-    /// 不经过 shell 解释的检查程序。
-    pub command: String,
-    /// 直接传递给检查程序的参数。
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// 检查程序独立的工作目录；缺省时继承 Task 工作目录。
-    #[serde(default)]
-    pub cwd: Option<PathBuf>,
+    /// 互斥的 exec 或 HTTP GET 探针。
+    #[serde(flatten)]
+    pub probe: HealthCheckProbe,
     /// Task 创建后首次检查前的等待毫秒数。
     #[serde(default)]
     pub initial_delay_ms: u64,
@@ -101,6 +159,12 @@ pub struct TaskSpec {
     /// 自动重启前的基础退避毫秒数。
     #[serde(default = "default_restart_delay_ms")]
     pub restart_delay_ms: u64,
+    /// 当前 generation 内允许的连续自动重启次数；0 表示无限。
+    #[serde(default)]
+    pub max_restarts: u32,
+    /// 单次运行达到该毫秒数后重置连续重启计数；0 表示永不重置。
+    #[serde(default = "default_restart_reset_after_ms")]
+    pub restart_reset_after_ms: u64,
     /// 优雅停止后等待强制回收的毫秒数。
     #[serde(default = "default_shutdown_timeout_ms")]
     pub shutdown_timeout_ms: u64,
@@ -121,6 +185,11 @@ pub struct ProjectSpec {
 /// 默认自动重启基础退避。
 const fn default_restart_delay_ms() -> u64 {
     500
+}
+
+/// 默认连续重启计数重置窗口。
+const fn default_restart_reset_after_ms() -> u64 {
+    60_000
 }
 
 /// 默认优雅停止宽限期。

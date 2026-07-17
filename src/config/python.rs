@@ -33,7 +33,19 @@ pub struct PythonConfigRunner {
 struct PythonExecution {
     result: Result<CompiledProject, ConfigError>,
     stdout: Vec<u8>,
+    inputs: Vec<CapturedConfigInput>,
+    watched_paths: Vec<PathBuf>,
 }
+
+/// Python 输出编译成功时携带的修订输入。
+type PythonCompileSuccess = (
+    CompiledProject,
+    Vec<u8>,
+    Vec<CapturedConfigInput>,
+    Vec<PathBuf>,
+);
+/// Python 输出编译失败时仍保留的修订输入。
+type PythonCompileFailure = Box<(ConfigError, Vec<u8>, Vec<CapturedConfigInput>, Vec<PathBuf>)>;
 
 impl Default for PythonConfigRunner {
     fn default() -> Self {
@@ -81,27 +93,33 @@ impl PythonConfigRunner {
     fn execute(&self, path: &Path) -> PythonExecution {
         let result = self.execute_inner(path);
         match result {
-            Ok((compiled, stdout)) => PythonExecution {
+            Ok((compiled, stdout, inputs, watched_paths)) => PythonExecution {
                 result: Ok(compiled),
                 stdout,
+                inputs,
+                watched_paths,
             },
-            Err((error, stdout)) => PythonExecution {
-                result: Err(error),
-                stdout,
-            },
+            Err(failure) => {
+                let (error, stdout, inputs, watched_paths) = *failure;
+                PythonExecution {
+                    result: Err(error),
+                    stdout,
+                    inputs,
+                    watched_paths,
+                }
+            }
         }
     }
 
     /// 完成创建、限时等待、整树清理和严格 JSON 编译。
-    fn execute_inner(
-        &self,
-        path: &Path,
-    ) -> Result<(CompiledProject, Vec<u8>), (ConfigError, Vec<u8>)> {
+    fn execute_inner(&self, path: &Path) -> Result<PythonCompileSuccess, PythonCompileFailure> {
         if !is_python_config(path) {
-            return Err((
+            return Err(Box::new((
                 python_error(path, "入口文件名必须是 procora.py"),
                 Vec::new(),
-            ));
+                Vec::new(),
+                Vec::new(),
+            )));
         }
         tracing::warn!(
             path = %path.display(),
@@ -110,16 +128,25 @@ impl PythonConfigRunner {
         let root = path.parent().unwrap_or_else(|| Path::new("."));
         let task = python_task(&self.interpreter, path, root);
         let output = run_bounded_command(&task, self.timeout, MAX_STDOUT_BYTES, MAX_STDERR_BYTES)
-            .map_err(|error| (python_error(path, error.to_string()), Vec::new()))?;
+            .map_err(|error| {
+            Box::new((
+                python_error(path, error.to_string()),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ))
+        })?;
         if !output.status.success() {
             let diagnostic = String::from_utf8_lossy(&output.stderr);
-            return Err((
+            return Err(Box::new((
                 python_error(
                     path,
                     format!("解释器退出 {}：{}", output.status, diagnostic.trim()),
                 ),
                 output.stdout,
-            ));
+                Vec::new(),
+                Vec::new(),
+            )));
         }
         compile_stdout(path, root, output.stdout)
     }
@@ -145,6 +172,8 @@ pub(crate) fn load_capture(path: &Path) -> ConfigLoadCapture {
                 source: io::Error::new(error.kind(), error.to_string()),
             }),
             stdout: Vec::new(),
+            inputs: Vec::new(),
+            watched_paths: Vec::new(),
         },
     };
     let mut inputs = Vec::new();
@@ -160,11 +189,15 @@ pub(crate) fn load_capture(path: &Path) -> ConfigLoadCapture {
             bytes: execution.stdout,
         });
     }
+    inputs.extend(execution.inputs);
+    let mut watched_paths = BTreeSet::from([absolute]);
+    watched_paths.extend(execution.watched_paths);
     ConfigLoadCapture {
         result: execution.result,
         inputs,
-        watched_paths: vec![absolute],
+        watched_paths: watched_paths.into_iter().collect(),
         root,
+        definition_documents: 1,
     }
 }
 
@@ -184,9 +217,11 @@ fn python_task(interpreter: &Path, script: &Path, root: &Path) -> TaskSpec {
         env,
         healthcheck: None,
         success_exit_codes: BTreeSet::from([0]),
-        depends_on: BTreeMap::new(),
+        depends_on: BTreeMap::default(),
         restart: RestartPolicy::Never,
         restart_delay_ms: 500,
+        max_restarts: 0,
+        restart_reset_after_ms: 60_000,
         shutdown_timeout_ms: 100,
     }
 }
@@ -210,17 +245,26 @@ fn compile_stdout(
     path: &Path,
     root: &Path,
     stdout: Vec<u8>,
-) -> Result<(CompiledProject, Vec<u8>), (ConfigError, Vec<u8>)> {
+) -> Result<PythonCompileSuccess, PythonCompileFailure> {
     let value: serde_json::Value = serde_json::from_slice(&stdout).map_err(|error| {
-        (
+        Box::new((
             python_error(path, format!("stdout 不是单个 JSON 文档：{error}")),
             stdout.clone(),
-        )
+            Vec::new(),
+            Vec::new(),
+        ))
     })?;
     let normalized = serde_json::to_string(&value).expect("JSON Value 序列化不会失败");
-    let compiled = load_generated_json(&normalized, root)
-        .map_err(|error| (python_error(path, error.to_string()), stdout.clone()))?;
-    Ok((compiled, stdout))
+    let capture = load_generated_json(&normalized, root);
+    match capture.result {
+        Ok(compiled) => Ok((compiled, stdout, capture.inputs, capture.watched_paths)),
+        Err(error) => Err(Box::new((
+            python_error(path, error.to_string()),
+            stdout,
+            capture.inputs,
+            capture.watched_paths,
+        ))),
+    }
 }
 
 /// 创建带入口上下文的 Python 配置错误。

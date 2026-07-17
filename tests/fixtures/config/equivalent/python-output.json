@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "project": "compat",
+  "env": { "PROJECT": "global" },
+  "task_defaults": {
+    "env": { "COMMON": "shared" },
+    "success_exit_codes": [0, 130],
+    "restart": "on-failure",
+    "restart_delay_ms": 750,
+    "max_restarts": 4,
+    "restart_reset_after_ms": 9000,
+    "shutdown_timeout_ms": 3000
+  },
+  "tasks": {
+    "database": {
+      "command": "db --data \"path with space\""
+    },
+    "api": {
+      "command": "api --port 8080",
+      "env": { "LOCAL": "api" },
+      "depends_on": { "database": { "condition": "started" } }
+    }
+  }
+}

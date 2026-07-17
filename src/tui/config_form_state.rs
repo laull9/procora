@@ -20,6 +20,8 @@ pub(crate) enum FormEvent {
     None,
     /// 表单内容已变更，需要重新生成配置文本。
     Changed,
+    /// profile 已切换，需要重编译并刷新有效值预览。
+    Reload,
     /// 需要显示提示。
     Message(String),
 }
@@ -27,6 +29,7 @@ pub(crate) enum FormEvent {
 /// 等待确认删除的条目。
 #[derive(Clone, Debug)]
 enum DeleteTarget {
+    Profile(String),
     Task(String),
     Dependency(String),
 }
@@ -66,7 +69,9 @@ impl FormState {
     /// 返回等待确认删除的名称。
     pub(crate) fn pending_delete_name(&self) -> Option<&str> {
         self.pending_delete.as_ref().map(|target| match target {
-            DeleteTarget::Task(name) | DeleteTarget::Dependency(name) => name.as_str(),
+            DeleteTarget::Profile(name)
+            | DeleteTarget::Task(name)
+            | DeleteTarget::Dependency(name) => name.as_str(),
         })
     }
 
@@ -89,9 +94,28 @@ impl FormState {
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
             KeyCode::Enter => self.open_current(),
+            KeyCode::Char('h') => self.open_health(),
             KeyCode::Char('n') => self.open_new(),
             KeyCode::Char('d') => self.request_delete(),
             _ => FormEvent::None,
+        }
+    }
+
+    /// 为当前选中 Task 打开独立健康检查编辑弹窗。
+    fn open_health(&mut self) -> FormEvent {
+        if self.pane != FormPane::Tasks {
+            return FormEvent::Message("请先切换到 Task 区域".to_owned());
+        }
+        self.dialog = self.task_name().and_then(|name| {
+            self.config
+                .tasks
+                .get(&name)
+                .map(|task| Dialog::health(&name, task))
+        });
+        if self.dialog.is_some() {
+            FormEvent::None
+        } else {
+            FormEvent::Message("当前列表为空；请先新建 Task".to_owned())
         }
     }
 
@@ -99,8 +123,9 @@ impl FormState {
     fn move_pane(&mut self, forward: bool) -> FormEvent {
         self.pane = match (self.pane, forward) {
             (FormPane::Project, true) | (FormPane::Dependencies, false) => FormPane::Tasks,
-            (FormPane::Tasks, true) | (FormPane::Project, false) => FormPane::Dependencies,
-            (FormPane::Dependencies, true) | (FormPane::Tasks, false) => FormPane::Project,
+            (FormPane::Tasks, true) | (FormPane::Profiles, false) => FormPane::Dependencies,
+            (FormPane::Dependencies, true) | (FormPane::Project, false) => FormPane::Profiles,
+            (FormPane::Profiles, true) | (FormPane::Tasks, false) => FormPane::Project,
         };
         self.selected = 0;
         FormEvent::None
@@ -123,6 +148,12 @@ impl FormState {
     fn open_current(&mut self) -> FormEvent {
         self.dialog = match self.pane {
             FormPane::Project => Some(Dialog::project(&self.config)),
+            FormPane::Profiles => self.profile_name().and_then(|name| {
+                self.config
+                    .profiles
+                    .get(&name)
+                    .map(|profile| Dialog::profile(Some(&name), profile, &self.config))
+            }),
             FormPane::Tasks => self.task_name().and_then(|name| {
                 self.config
                     .tasks
@@ -147,7 +178,8 @@ impl FormState {
     fn open_new(&mut self) -> FormEvent {
         self.dialog = Some(match self.pane {
             FormPane::Project => Dialog::project(&self.config),
-            FormPane::Tasks => Dialog::new_task(),
+            FormPane::Profiles => Dialog::new_profile(&self.config),
+            FormPane::Tasks => Dialog::new_task(&self.config),
             FormPane::Dependencies => Dialog::new_dependency(),
         });
         FormEvent::None
@@ -157,6 +189,7 @@ impl FormState {
     fn request_delete(&mut self) -> FormEvent {
         self.pending_delete = match self.pane {
             FormPane::Project => None,
+            FormPane::Profiles => self.profile_name().map(DeleteTarget::Profile),
             FormPane::Tasks => self.task_name().map(DeleteTarget::Task),
             FormPane::Dependencies => self.dependency_name().map(DeleteTarget::Dependency),
         };
@@ -164,7 +197,9 @@ impl FormState {
             || FormEvent::Message("没有可删除的条目".to_owned()),
             |target| {
                 let name = match target {
-                    DeleteTarget::Task(name) | DeleteTarget::Dependency(name) => name,
+                    DeleteTarget::Profile(name)
+                    | DeleteTarget::Task(name)
+                    | DeleteTarget::Dependency(name) => name,
                 };
                 FormEvent::Message(format!("再次按 d 删除 `{name}`，Esc 取消"))
             },
@@ -180,6 +215,18 @@ impl FormState {
             }
             KeyCode::Char('d') => {
                 match self.pending_delete.take().expect("删除确认状态存在") {
+                    DeleteTarget::Profile(name) => {
+                        let dependents = self.config.profile_dependents(&name);
+                        if !dependents.is_empty() {
+                            return FormEvent::Message(format!(
+                                "profile `{name}` 仍被 {} 继承，不能删除",
+                                dependents.join("、")
+                            ));
+                        }
+                        self.config.remove_profile(&name);
+                        self.clamp_selection();
+                        return FormEvent::Reload;
+                    }
                     DeleteTarget::Task(name) => {
                         self.config.tasks.remove(&name);
                     }
@@ -235,15 +282,24 @@ impl FormState {
     fn commit_dialog(&mut self) -> FormEvent {
         let dialog = self.dialog.take().expect("弹窗状态存在");
         match dialog.commit(&mut self.config) {
-            Ok(()) => {
+            Ok(reload) => {
                 self.clamp_selection();
-                FormEvent::Changed
+                if reload {
+                    FormEvent::Reload
+                } else {
+                    FormEvent::Changed
+                }
             }
             Err(message) => {
                 self.dialog = Some(dialog);
                 FormEvent::Message(message)
             }
         }
+    }
+
+    /// 返回当前选中 profile 的名称。
+    fn profile_name(&self) -> Option<String> {
+        self.config.profiles.keys().nth(self.selected).cloned()
     }
 
     /// 返回当前选中 Task 的名称。
@@ -260,6 +316,7 @@ impl FormState {
     fn item_count(&self) -> usize {
         match self.pane {
             FormPane::Project => 1,
+            FormPane::Profiles => self.config.profiles.len(),
             FormPane::Tasks => self.config.tasks.len(),
             FormPane::Dependencies => self.config.dependencies.len(),
         }

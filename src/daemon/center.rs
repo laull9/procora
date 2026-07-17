@@ -17,7 +17,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::{
-    ServiceHost,
+    ServiceHost, ServiceHostError,
     managed::{ActiveDefinition, ManagedService},
     project::{EVENT_CAPACITY, MAX_LOG_BATCH_BYTES},
     status::{protocol_status, status_text},
@@ -35,6 +35,9 @@ pub enum CenterError {
     /// 项目依赖下载、解包或版本验证失败。
     #[error(transparent)]
     Source(#[from] SourceError),
+    /// 服务宿主无法提交运行时策略。
+    #[error(transparent)]
+    Runtime(#[from] ServiceHostError),
     /// 注册表持久化失败。
     #[error(transparent)]
     Storage(#[from] StorageError),

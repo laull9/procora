@@ -19,13 +19,13 @@ enum EditorMode {
     Text,
 }
 
-/// 编辑器当前处理独立文件还是需要保留来源的 include 入口。
+/// 编辑器当前处理独立文件还是需要保留来源的多文件入口。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditorSource {
     /// 单个完整配置文件，可以安全转换为结构化表单。
     Standalone,
-    /// include 入口，只允许文本编辑以免展开后丢失来源。
-    IncludeClosure,
+    /// 多文件入口只允许文本编辑，以免展开后丢失来源。
+    DefinitionClosure,
 }
 
 /// 配置编辑页的文本、光标、校验和退出状态。
@@ -62,8 +62,9 @@ impl ConfigEditor {
         })?;
         let input = fs::read_to_string(&path)?;
         let mut editor = Self::from_text(path, format, &input);
-        if load_path_capture(&editor.path).watched_paths.len() > 1 {
-            editor.source = EditorSource::IncludeClosure;
+        let capture = load_path_capture(&editor.path);
+        if capture.definition_documents > 1 {
+            editor.source = EditorSource::DefinitionClosure;
         }
         editor.activate_form();
         Ok(editor)
@@ -139,7 +140,8 @@ impl ConfigEditor {
             if let Some(form) = &mut self.form {
                 match form.handle_key(key) {
                     FormEvent::None => {}
-                    FormEvent::Changed => self.synchronize_form(),
+                    FormEvent::Changed => self.synchronize_form(false),
+                    FormEvent::Reload => self.synchronize_form(true),
                     FormEvent::Message(message) => self.message = message,
                 }
             }
@@ -230,7 +232,7 @@ impl ConfigEditor {
     /// 校验并原子语义保存当前缓冲区。
     fn save(&mut self) {
         if self.mode == EditorMode::Form {
-            self.synchronize_form();
+            self.synchronize_form(false);
             if self.message.starts_with("配置无效") || self.message.starts_with("表单输出失败")
             {
                 return;
@@ -353,18 +355,27 @@ impl ConfigEditor {
 
     /// 将当前有效文本配置转换为结构化表单，失败时继续保留高级文本模式。
     fn activate_form(&mut self) {
-        if self.source == EditorSource::IncludeClosure {
+        if self.source == EditorSource::DefinitionClosure {
             self.mode = EditorMode::Text;
             self.form = None;
-            "include 配置保持高级文本模式，避免表单展开后丢失片段来源"
-                .clone_into(&mut self.message);
+            "多文件配置保持高级文本模式，避免表单展开后丢失输入来源".clone_into(&mut self.message);
             return;
         }
-        match load_str(&self.text(), self.format) {
+        let text = self.text();
+        let compiled = if self.path.exists() {
+            load_path_text(&self.path, &text)
+        } else {
+            load_str(&text, self.format)
+        };
+        match compiled {
             Ok(compiled) => {
-                self.form = Some(FormState::new(FormConfig::from_compiled(compiled)));
+                self.form = Some(FormState::new(FormConfig::from_compiled(
+                    compiled,
+                    self.path.parent(),
+                )));
                 self.mode = EditorMode::Form;
-                "表单模式：Enter 编辑，n 新建，d 删除，F2 高级文本".clone_into(&mut self.message);
+                "表单模式：Enter 编辑，h 健康检查，n 新建，d 删除，F2 高级文本"
+                    .clone_into(&mut self.message);
             }
             Err(error) => {
                 self.mode = EditorMode::Text;
@@ -375,7 +386,7 @@ impl ConfigEditor {
     }
 
     /// 把表单模型转为目标格式文本，并阻止不符合完整配置规则的改动落盘。
-    fn synchronize_form(&mut self) {
+    fn synchronize_form(&mut self, reload: bool) {
         let Some(form) = &self.form else {
             return;
         };
@@ -386,8 +397,13 @@ impl ConfigEditor {
                 return;
             }
         };
-        match load_str(&text, self.format) {
-            Ok(_) => {
+        let compiled = if self.path.exists() {
+            load_path_text(&self.path, &text)
+        } else {
+            load_str(&text, self.format)
+        };
+        match compiled {
+            Ok(compiled) => {
                 self.lines = text
                     .trim_end_matches('\n')
                     .split('\n')
@@ -400,6 +416,17 @@ impl ConfigEditor {
                 self.column = 0;
                 self.scroll = 0;
                 self.changed();
+                if reload {
+                    let profile = compiled.active_profile.clone();
+                    self.form = Some(FormState::new(FormConfig::from_compiled(
+                        compiled,
+                        self.path.parent(),
+                    )));
+                    self.message = profile.map_or_else(
+                        || "已切换到基础配置预览；Ctrl-S 保存".to_owned(),
+                        |name| format!("已切换到 profile `{name}` 预览；Ctrl-S 保存"),
+                    );
+                }
             }
             Err(error) => self.message = format!("配置无效：{error}"),
         }

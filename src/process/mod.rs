@@ -11,7 +11,7 @@ use std::{
 #[cfg(unix)]
 use std::{thread, time::Instant};
 
-use crate::core::{HealthCheckSpec, TaskSpec};
+use crate::core::TaskSpec;
 #[cfg(windows)]
 use process_wrap::std::JobObject;
 #[cfg(unix)]
@@ -264,10 +264,12 @@ fn spawn_task_with_environment(
 ///
 /// 当检查程序不存在、参数无效或平台进程容器初始化失败时返回 I/O 错误。
 pub fn spawn_health_check(
-    healthcheck: &HealthCheckSpec,
+    command_name: &str,
+    arguments: &[String],
+    working_directory: Option<&std::path::Path>,
     task: &TaskSpec,
 ) -> io::Result<ManagedChild> {
-    let mut process = process_command(&healthcheck.command, &healthcheck.args);
+    let mut process = process_command(command_name, arguments);
     {
         let command = &mut process;
         command
@@ -275,7 +277,7 @@ pub fn spawn_health_check(
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        if let Some(cwd) = healthcheck.cwd.as_ref().or(task.cwd.as_ref()) {
+        if let Some(cwd) = working_directory.or(task.cwd.as_deref()) {
             command.current_dir(cwd);
         }
     }

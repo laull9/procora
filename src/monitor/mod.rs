@@ -1,6 +1,6 @@
 //! 受管任务进程的跨平台资源采样。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessesToUpdate, System};
@@ -53,42 +53,57 @@ impl SystemMonitor {
 
     /// 刷新并聚合顶层进程及全部可识别后代的资源快照。
     pub fn snapshot_tree(&mut self, pid: u32) -> Option<ResourceSnapshot> {
-        let root = Pid::from_u32(pid);
+        self.snapshot_trees(&[pid]).remove(&pid)
+    }
+
+    /// 一次刷新后批量聚合多个顶层进程及其可识别后代。
+    ///
+    /// 不存在的根进程不会出现在结果中；嵌套根会分别获得完整子树聚合值。
+    pub fn snapshot_trees(&mut self, pids: &[u32]) -> BTreeMap<u32, ResourceSnapshot> {
+        if pids.is_empty() {
+            return BTreeMap::new();
+        }
         self.system.refresh_processes(ProcessesToUpdate::All, true);
-        self.system.process(root)?;
-        let mut included = BTreeSet::from([root]);
-        loop {
-            let before = included.len();
-            for (candidate, process) in self.system.processes() {
-                if process
-                    .parent()
-                    .is_some_and(|parent| included.contains(&parent))
-                {
-                    included.insert(*candidate);
+        let mut children = BTreeMap::<Pid, Vec<Pid>>::new();
+        for (candidate, process) in self.system.processes() {
+            if let Some(parent) = process.parent() {
+                children.entry(parent).or_default().push(*candidate);
+            }
+        }
+
+        pids.iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|pid| {
+                let root = Pid::from_u32(pid);
+                self.system.process(root)?;
+                let mut snapshot = ResourceSnapshot {
+                    pid,
+                    cpu_percent: 0.0,
+                    memory_bytes: 0,
+                    read_bytes: 0,
+                    written_bytes: 0,
+                };
+                let mut pending = vec![root];
+                while let Some(process_pid) = pending.pop() {
+                    let Some(process) = self.system.process(process_pid) else {
+                        continue;
+                    };
+                    let disk = process.disk_usage();
+                    snapshot.cpu_percent += process.cpu_usage();
+                    snapshot.memory_bytes = snapshot.memory_bytes.saturating_add(process.memory());
+                    snapshot.read_bytes = snapshot.read_bytes.saturating_add(disk.total_read_bytes);
+                    snapshot.written_bytes = snapshot
+                        .written_bytes
+                        .saturating_add(disk.total_written_bytes);
+                    if let Some(descendants) = children.get(&process_pid) {
+                        pending.extend(descendants);
+                    }
                 }
-            }
-            if included.len() == before {
-                break;
-            }
-        }
-        let mut snapshot = ResourceSnapshot {
-            pid,
-            cpu_percent: 0.0,
-            memory_bytes: 0,
-            read_bytes: 0,
-            written_bytes: 0,
-        };
-        for process_pid in included {
-            let process = self.system.process(process_pid)?;
-            let disk = process.disk_usage();
-            snapshot.cpu_percent += process.cpu_usage();
-            snapshot.memory_bytes = snapshot.memory_bytes.saturating_add(process.memory());
-            snapshot.read_bytes = snapshot.read_bytes.saturating_add(disk.total_read_bytes);
-            snapshot.written_bytes = snapshot
-                .written_bytes
-                .saturating_add(disk.total_written_bytes);
-        }
-        Some(snapshot)
+                Some((pid, snapshot))
+            })
+            .collect()
     }
 }
 

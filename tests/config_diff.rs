@@ -44,7 +44,7 @@ fn process_identity_changes_propagate_only_to_downstream_tasks() {
 fn runtime_policy_changes_are_in_place_updates() {
     let current = compile("  worker:\n    command: worker\n");
     let candidate = compile(
-        "  worker:\n    command: worker\n    restart: always\n    restart_delay_ms: 1200\n",
+        "  worker:\n    command: worker\n    restart: always\n    restart_delay_ms: 1200\n    max_restarts: 5\n    restart_reset_after_ms: 30000\n",
     );
 
     let diff = diff_projects(&current.spec, &candidate.spec);

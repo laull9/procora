@@ -10,10 +10,14 @@ use std::{
 
 use procora::{
     config::{ConfigFormat, load_str},
+    core::HealthCheckProbe,
     daemon::ServiceHost,
     protocol::{SnapshotSourceDto, TaskHealthDto},
 };
 use serde_json::json;
+
+mod support;
+use support::http::{HttpFixture, HttpMode};
 
 /// 同进程并行测试的临时目录序号。
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -93,8 +97,12 @@ fn health_check_defaults_preserve_argument_array() {
         .as_ref()
         .unwrap();
 
-    assert_eq!(healthcheck.command, "checker");
-    assert_eq!(healthcheck.args, ["--ready"]);
+    let HealthCheckProbe::Exec { command, args, cwd } = &healthcheck.probe else {
+        panic!("应编译为 exec 探针");
+    };
+    assert_eq!(command, "checker");
+    assert_eq!(args, &["--ready".to_owned()]);
+    assert!(cwd.is_none());
     assert_eq!(healthcheck.period_ms, 10_000);
     assert_eq!(healthcheck.timeout_ms, 1_000);
     assert_eq!(healthcheck.success_threshold, 1);
@@ -119,6 +127,109 @@ fn health_checks_reject_unbounded_limits() {
     ] {
         assert!(error.contains(field), "缺少字段诊断：{field}: {error}");
     }
+}
+
+#[test]
+// HTTP检查应用确定默认值并拒绝混合探针与无效请求字段。
+fn http_health_check_defaults_and_validation_are_precise() {
+    let compiled = load_str(
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      http_get:\n        port: 8080\n",
+        ConfigFormat::Yaml,
+    )
+    .expect("有效 HTTP 检查应通过配置编译");
+    let check = compiled
+        .spec
+        .tasks
+        .values()
+        .next()
+        .unwrap()
+        .healthcheck
+        .as_ref()
+        .unwrap();
+    let HealthCheckProbe::HttpGet { http_get } = &check.probe else {
+        panic!("应编译为 HTTP GET 探针");
+    };
+    assert_eq!(http_get.scheme.as_str(), "http");
+    assert_eq!(http_get.host, "127.0.0.1");
+    assert_eq!(http_get.port, Some(8080));
+    assert_eq!(http_get.path, "/");
+    assert_eq!(http_get.status_code, 200);
+    let effective = serde_json::to_value(&compiled.spec).expect("规范化配置应可序列化");
+    assert_eq!(
+        effective["tasks"]["api"]["healthcheck"]["http_get"]["host"],
+        "127.0.0.1"
+    );
+    assert!(
+        effective["tasks"]["api"]["healthcheck"]
+            .get("command")
+            .is_none()
+    );
+
+    let invalid = json!({
+        "version": 1,
+        "project": "demo",
+        "tasks": {
+            "api": {
+                "command": "api",
+                "healthcheck": {
+                    "command": "checker",
+                    "http_get": {
+                        "host": "http://bad-host",
+                        "port": 0,
+                        "path": "relative path",
+                        "status_code": 404,
+                        "headers": { "Bad Name": "bad\nvalue" }
+                    }
+                }
+            }
+        }
+    })
+    .to_string();
+    let error = load_str(&invalid, ConfigFormat::Json)
+        .expect_err("混合或无效 HTTP 检查必须被拒绝")
+        .to_string();
+    for message in [
+        "command 与 http_get",
+        "healthcheck.http_get.host",
+        "healthcheck.http_get.port",
+        "healthcheck.http_get.path",
+        "healthcheck.http_get.status_code",
+        "healthcheck.http_get.headers.Bad Name",
+    ] {
+        assert!(error.contains(message), "缺少诊断 {message}: {error}");
+    }
+}
+
+#[test]
+// YAML、TOML和JSON中的HTTP检查会编译成相同领域配置。
+fn http_health_check_is_equivalent_across_formats() {
+    let inputs = [
+        (
+            ConfigFormat::Yaml,
+            "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    healthcheck:\n      http_get:\n        scheme: https\n        host: localhost\n        port: 8443\n        path: /ready?full=1\n        headers:\n          X-Probe: yes\n        status_code: 204\n",
+        ),
+        (
+            ConfigFormat::Toml,
+            "version = 1\nproject = \"demo\"\n[tasks.api]\ncommand = \"api\"\n[tasks.api.healthcheck.http_get]\nscheme = \"https\"\nhost = \"localhost\"\nport = 8443\npath = \"/ready?full=1\"\nstatus_code = 204\n[tasks.api.healthcheck.http_get.headers]\nX-Probe = \"yes\"\n",
+        ),
+        (
+            ConfigFormat::Json,
+            r#"{"version":1,"project":"demo","tasks":{"api":{"command":"api","healthcheck":{"http_get":{"scheme":"https","host":"localhost","port":8443,"path":"/ready?full=1","headers":{"X-Probe":"yes"},"status_code":204}}}}}"#,
+        ),
+    ];
+    let probes = inputs.map(|(format, input)| {
+        load_str(input, format)
+            .expect("各格式 HTTP 检查都应有效")
+            .spec
+            .tasks
+            .into_values()
+            .next()
+            .unwrap()
+            .healthcheck
+            .unwrap()
+    });
+    assert_eq!(probes[0], probes[1]);
+    assert_eq!(probes[1], probes[2]);
 }
 
 #[test]
@@ -148,6 +259,122 @@ fn dependent_task_starts_after_consecutive_health_successes() {
     assert_eq!(server.health, TaskHealthDto::Healthy);
 
     host.stop().expect("服务应能停止并取消检查");
+    fs::remove_dir_all(directory).expect("应能清理测试目录");
+}
+
+#[test]
+// HTTP连续就绪结果会放行healthy依赖并携带声明的请求头。
+fn http_readiness_releases_dependent_after_threshold() {
+    let directory = temporary_directory();
+    let ready = directory.join("ready");
+    let dependent = directory.join("dependent");
+    let server = HttpFixture::start(HttpMode::ReadyWhen(ready.clone()));
+    let executable = std::env::current_exe().expect("应能读取当前测试二进制路径");
+    let configuration = json!({
+        "version": 1,
+        "project": "http-health-runtime",
+        "tasks": {
+            "server": {
+                "command": executable,
+                "args": ["--exact", "long_running_task_helper", "--nocapture"],
+                "env": {
+                    "PROCORA_HEALTH_TEST": "1",
+                    "PROCORA_READY_FILE": ready,
+                },
+                "shutdown_timeout_ms": 500,
+                "healthcheck": {
+                    "http_get": {
+                        "port": server.port(),
+                        "path": "/ready",
+                        "headers": { "X-Probe": "yes" },
+                        "status_code": 204
+                    },
+                    "period_ms": 20,
+                    "timeout_ms": 500,
+                    "success_threshold": 2,
+                    "failure_threshold": 2
+                }
+            },
+            "dependent": {
+                "command": executable,
+                "args": ["--exact", "dependent_task_helper", "--nocapture"],
+                "env": {
+                    "PROCORA_HEALTH_TEST": "1",
+                    "PROCORA_DEPENDENT_FILE": dependent,
+                },
+                "depends_on": { "server": { "condition": "healthy" } }
+            }
+        }
+    })
+    .to_string();
+    let compiled = load_str(&configuration, ConfigFormat::Json).expect("HTTP 运行配置应有效");
+    let mut host = ServiceHost::from_compiled_at(compiled, &directory);
+    host.start().expect("服务应能启动");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let snapshot = loop {
+        let snapshot = host.snapshot(SnapshotSourceDto::CenterLive, true);
+        if dependent.exists() {
+            break snapshot;
+        }
+        assert!(Instant::now() < deadline, "HTTP 就绪依赖没有在期限内放行");
+        thread::sleep(Duration::from_millis(10));
+    };
+    let task = snapshot
+        .tasks
+        .iter()
+        .find(|task| task.task_id.as_str() == "server")
+        .expect("应包含 server Task");
+    assert_eq!(task.health, TaskHealthDto::Healthy);
+    host.stop().expect("服务应能停止");
+    drop(server);
+    fs::remove_dir_all(directory).expect("应能清理测试目录");
+}
+
+#[test]
+// 停止Task不会等待阻塞中的HTTP检查走完整个请求超时。
+fn stopping_task_cancels_http_probe_without_blocking() {
+    let directory = temporary_directory();
+    let server = HttpFixture::start(HttpMode::Hang);
+    let executable = std::env::current_exe().expect("应能读取当前测试二进制路径");
+    let configuration = json!({
+        "version": 1,
+        "project": "http-health-cancel",
+        "tasks": {
+            "server": {
+                "command": executable,
+                "args": ["--exact", "long_running_task_helper", "--nocapture"],
+                "env": {
+                    "PROCORA_HEALTH_TEST": "1",
+                    "PROCORA_READY_FILE": directory.join("ready"),
+                },
+                "shutdown_timeout_ms": 500,
+                "healthcheck": {
+                    "http_get": { "port": server.port() },
+                    "period_ms": 100,
+                    "timeout_ms": 5000
+                }
+            }
+        }
+    })
+    .to_string();
+    let compiled = load_str(&configuration, ConfigFormat::Json).expect("HTTP 运行配置应有效");
+    let mut host = ServiceHost::from_compiled_at(compiled, &directory);
+    host.start().expect("服务应能启动");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !server.accepted() {
+        host.refresh();
+        assert!(Instant::now() < deadline, "HTTP 检查没有建立连接");
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let started = Instant::now();
+    host.stop().expect("停止不应等待 HTTP 请求超时");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "停止被 HTTP 检查阻塞"
+    );
+    drop(server);
     fs::remove_dir_all(directory).expect("应能清理测试目录");
 }
 

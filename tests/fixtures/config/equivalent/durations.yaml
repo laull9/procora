@@ -1,0 +1,21 @@
+version: 1
+project: compat
+env:
+  PROJECT: global
+task_defaults:
+  env:
+    COMMON: shared
+  success_exit_codes: [0, 130]
+  restart: on-failure
+  restart_delay: 750ms
+  max_restarts: 4
+  restart_reset_after: 9s
+  shutdown_timeout: 3s
+tasks:
+  database:
+    command: [db, "--data", "path with space"]
+  api:
+    command: [api, "--port", "8080"]
+    env:
+      LOCAL: api
+    depends_on: [database]

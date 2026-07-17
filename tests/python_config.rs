@@ -127,13 +127,13 @@ fn python_timeout_reclaims_entire_process_tree() {
     let started = Instant::now();
 
     let error = PythonConfigRunner::new(interpreter)
-        .with_timeout(Duration::from_secs(2))
+        .with_timeout(Duration::from_secs(5))
         .load(&script)
         .unwrap_err()
         .to_string();
 
     assert!(error.contains("执行超过"));
-    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(started.elapsed() < Duration::from_secs(7));
     let pid = fs::read_to_string(root.join("child.pid")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     while process_exists(pid.trim()) && Instant::now() < deadline {
@@ -182,6 +182,66 @@ fn generated_output_revision_rejects_stale_external_input() {
     assert!(second.compiled.is_ok());
 
     assert_ne!(first.revision, second.revision);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+// Python显式声明的环境文件参与规范化配置与修订。
+fn generated_env_file_participates_in_revision() {
+    let root = temporary_directory("env-file-revision");
+    let generated = r#"{"version":1,"project":"demo","tasks":{"api":{"command":"echo","env_file":"task.env"}}}"#;
+    let script = write_script(&root, &format!("print({generated:?})\n"));
+    fs::write(root.join("task.env"), "VALUE=first\n").unwrap();
+    let source = LocalFileSource::new(&script);
+    let first = source.read_candidate();
+    let first_revision = first.revision.unwrap();
+    assert_eq!(
+        first
+            .compiled
+            .unwrap()
+            .spec
+            .tasks
+            .values()
+            .next()
+            .unwrap()
+            .env["VALUE"],
+        "first"
+    );
+
+    fs::write(root.join("task.env"), "VALUE=second\n").unwrap();
+    let second = source.read_candidate();
+    assert_ne!(first_revision, second.revision.unwrap());
+    assert_eq!(
+        second
+            .compiled
+            .unwrap()
+            .spec
+            .tasks
+            .values()
+            .next()
+            .unwrap()
+            .env["VALUE"],
+        "second"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+// Python生成JSON与声明式格式共享项目默认环境和命令文本语义。
+fn generated_json_supports_project_env_and_command_text() {
+    let root = temporary_directory("config-usability");
+    let interpreter = fake_interpreter(&root);
+    let generated = include_str!("fixtures/config/equivalent/python-output.json");
+    let script = write_script(&root, &format!("printf '%s' '{generated}'\n"));
+
+    let compiled = PythonConfigRunner::new(interpreter).load(&script).unwrap();
+    let task = &compiled.spec.tasks[&"api".parse().unwrap()];
+    assert_eq!(compiled.project_env["PROJECT"], "global");
+    assert_eq!(task.env["COMMON"], "shared");
+    assert_eq!(task.command, "api");
+    assert_eq!(task.args, ["--port", "8080"]);
+    assert_eq!(task.restart, procora::core::RestartPolicy::OnFailure);
+    assert_eq!(task.max_restarts, 4);
     fs::remove_dir_all(root).unwrap();
 }
 

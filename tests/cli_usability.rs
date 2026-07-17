@@ -52,7 +52,7 @@ fn config_outputs_valid_json_with_defaults_and_paths() {
     fs::create_dir_all(directory.join("work")).expect("应能创建工作目录");
     fs::write(
         directory.join("procora.yaml"),
-        "version: 1\nproject: effective\ntasks:\n  api:\n    command: api\n    cwd: ./work\n",
+        "version: 1\nproject: effective\nenv:\n  RUST_LOG: info\ntask_defaults:\n  env:\n    TASK_SCOPE: shared\n  restart: on-failure\ntasks:\n  api:\n    command: [api, '--mode', 'hello world']\n    cwd: ./work\n",
     )
     .expect("应能写入配置");
 
@@ -65,8 +65,28 @@ fn config_outputs_valid_json_with_defaults_and_paths() {
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("输出应为 JSON");
     assert_eq!(value["project"], "effective");
-    assert_eq!(value["tasks"]["api"]["restart"], "never");
+    assert_eq!(value["env"]["RUST_LOG"], "info");
+    assert_eq!(value["tasks"]["api"]["command"], "api");
+    assert_eq!(
+        value["tasks"]["api"]["args"],
+        json!(["--mode", "hello world"])
+    );
+    assert_eq!(value["tasks"]["api"]["env"]["RUST_LOG"], "info");
+    assert_eq!(value["tasks"]["api"]["env"]["TASK_SCOPE"], "shared");
+    assert_eq!(value["tasks"]["api"]["restart"], "on-failure");
+    assert_eq!(value["task_defaults"]["restart"], "on-failure");
     assert_eq!(value["tasks"]["api"]["success_exit_codes"], json!([0]));
+    assert_eq!(value["origins"]["api"]["fields"]["command"], "task");
+    assert_eq!(value["origins"]["api"]["fields"]["args"], "task");
+    assert_eq!(
+        value["origins"]["api"]["fields"]["restart"],
+        "task_defaults"
+    );
+    assert_eq!(value["origins"]["api"]["env"]["RUST_LOG"], "project_env");
+    assert_eq!(
+        value["origins"]["api"]["env"]["TASK_SCOPE"],
+        "task_defaults"
+    );
     assert!(PathBuf::from(value["tasks"]["api"]["cwd"].as_str().unwrap()).is_absolute());
     fs::remove_dir_all(directory).expect("应能清理测试目录");
 }

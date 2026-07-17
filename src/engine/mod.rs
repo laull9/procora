@@ -1,5 +1,6 @@
 //! Procora 的任务状态机、调度计划与对账入口。
 
+mod restart;
 mod runtime;
 mod state;
 

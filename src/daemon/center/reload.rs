@@ -257,7 +257,7 @@ impl Center {
                 .host
                 .as_mut()
                 .ok_or_else(|| CenterError::Unavailable(name.to_owned()))?;
-            host.update_runtime_policies(pending.compiled);
+            host.update_runtime_policies(pending.compiled)?;
             service.candidate_view = None;
             service.active_definition = Some(active_definition);
             self.persist_service(name)?;
