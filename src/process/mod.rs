@@ -18,7 +18,9 @@ use process_wrap::std::JobObject;
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
 
-pub(crate) use helper::{run_bounded_command, run_bounded_command_monitored};
+pub(crate) use helper::{
+    BoundedCommandError, BoundedCommandOutput, run_bounded_command, run_bounded_command_monitored,
+};
 
 /// 一次停止操作的退出状态与是否强制回收。
 #[derive(Debug)]

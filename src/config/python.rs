@@ -5,10 +5,13 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "linux")]
+use std::thread;
+
 use crate::{
     config::loader::{CapturedConfigInput, ConfigLoadCapture, load_generated_json},
     core::{RestartPolicy, TaskSpec},
-    process::run_bounded_command,
+    process::{BoundedCommandError, run_bounded_command},
 };
 
 use super::{CompiledProject, ConfigError};
@@ -21,6 +24,12 @@ const MAX_STDOUT_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 /// Python 配置脚本自身最大字节数。
 const MAX_SCRIPT_BYTES: u64 = 1024 * 1024;
+/// Linux 上刚写入的解释器文件临时占用时的最大重试次数。
+#[cfg(target_os = "linux")]
+const EXECUTABLE_BUSY_RETRIES: u8 = 3;
+/// Linux 上重试解释器启动的基础等待时间。
+#[cfg(target_os = "linux")]
+const EXECUTABLE_BUSY_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 /// 可注入解释器的受控 Python 配置运行器。
 #[derive(Clone, Debug)]
@@ -127,8 +136,7 @@ impl PythonConfigRunner {
         );
         let root = path.parent().unwrap_or_else(|| Path::new("."));
         let task = python_task(&self.interpreter, path, root);
-        let output = run_bounded_command(&task, self.timeout, MAX_STDOUT_BYTES, MAX_STDERR_BYTES)
-            .map_err(|error| {
+        let output = run_python_task(&task, self.timeout).map_err(|error| {
             Box::new((
                 python_error(path, error.to_string()),
                 Vec::new(),
@@ -224,6 +232,25 @@ fn python_task(interpreter: &Path, script: &Path, root: &Path) -> TaskSpec {
         restart_reset_after_ms: 60_000,
         shutdown_timeout_ms: 100,
     }
+}
+
+/// 执行 Python 辅助进程，并在 Linux 临时占用解释器时进行有限重试。
+fn run_python_task(
+    task: &TaskSpec,
+    timeout: Duration,
+) -> Result<crate::process::BoundedCommandOutput, BoundedCommandError> {
+    #[cfg(target_os = "linux")]
+    for attempt in 0..EXECUTABLE_BUSY_RETRIES {
+        match run_bounded_command(task, timeout, MAX_STDOUT_BYTES, MAX_STDERR_BYTES) {
+            Err(BoundedCommandError::Spawn(error))
+                if error.kind() == io::ErrorKind::ExecutableFileBusy =>
+            {
+                thread::sleep(EXECUTABLE_BUSY_RETRY_DELAY * u32::from(attempt + 1));
+            }
+            result => return result,
+        }
+    }
+    run_bounded_command(task, timeout, MAX_STDOUT_BYTES, MAX_STDERR_BYTES)
 }
 
 /// 在执行前限制脚本输入大小，避免无界文件分配。

@@ -12,6 +12,9 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(target_os = "linux")]
+use std::fs::OpenOptions;
+
 use procora::{config::PythonConfigRunner, source::LocalFileSource};
 
 /// 当前测试进程内的临时目录去重序列。
@@ -242,6 +245,26 @@ fn generated_json_supports_project_env_and_command_text() {
     assert_eq!(task.args, ["--port", "8080"]);
     assert_eq!(task.restart, procora::core::RestartPolicy::OnFailure);
     assert_eq!(task.max_restarts, 4);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+// Linux 上解释器文件被短暂写入占用时，运行器会等待后重新启动。
+fn python_runner_retries_temporarily_busy_interpreter() {
+    let root = temporary_directory("busy-interpreter");
+    let interpreter = fake_interpreter(&root);
+    let script = write_script(&root, &format!("printf '%s' '{}'\n", valid_json("demo")));
+    let writer = OpenOptions::new().write(true).open(&interpreter).unwrap();
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(25));
+        drop(writer);
+    });
+
+    let compiled = PythonConfigRunner::new(&interpreter).load(&script).unwrap();
+
+    assert_eq!(compiled.spec.project, "demo");
+    release.join().unwrap();
     fs::remove_dir_all(root).unwrap();
 }
 
