@@ -13,10 +13,22 @@ struct EffectiveConfig<'a> {
     version: u32,
     /// 服务稳定名称。
     project: &'a str,
+    /// 当前持久选择的运行 profile。
+    active_profile: Option<&'a str>,
+    /// 配置中可选择的全部 profile。
+    profiles: &'a std::collections::BTreeSet<String>,
     /// 已规范化的项目管理依赖。
     dependencies: &'a crate::config::ManagedDependencies,
+    /// 合并到各 Task 前的项目级默认环境。
+    env: &'a std::collections::BTreeMap<String, String>,
+    /// 项目显式声明的 Task 默认层。
+    task_defaults: &'a crate::config::TaskDefaultsSpec,
+    /// 可供 Task 显式引用的命名模板。
+    task_templates: &'a std::collections::BTreeSet<String>,
     /// 已应用默认值和路径规范化的 Task。
     tasks: &'a std::collections::BTreeMap<crate::core::TaskId, crate::core::TaskSpec>,
+    /// 每个 Task 字段及最终环境变量的生效来源。
+    origins: &'a std::collections::BTreeMap<crate::core::TaskId, crate::config::TaskConfigOrigins>,
 }
 
 /// 打开指定目录或文件的配置编辑页面。
@@ -86,10 +98,16 @@ pub(crate) fn validate(path: &Path) -> anyhow::Result<()> {
     let discovered =
         discover_path(path).with_context(|| format!("配置校验失败: {}", path.display()))?;
     println!(
-        "配置有效：服务 `{}`，配置 `{}`，共 {} 个任务、{} 个管理依赖",
+        "配置有效：服务 `{}`，配置 `{}`，profile `{}`，共 {} 个任务、{} 个模板、{} 个管理依赖",
         discovered.compiled.spec.project,
         discovered.config_path.display(),
+        discovered
+            .compiled
+            .active_profile
+            .as_deref()
+            .unwrap_or("基础配置"),
         discovered.compiled.spec.tasks.len(),
+        discovered.compiled.task_template_names.len(),
         discovered.compiled.dependencies.len()
     );
     Ok(())
@@ -115,8 +133,14 @@ pub(crate) fn effective_config(path: &Path) -> anyhow::Result<()> {
     let output = EffectiveConfig {
         version: discovered.compiled.spec.version,
         project: &discovered.compiled.spec.project,
+        active_profile: discovered.compiled.active_profile.as_deref(),
+        profiles: &discovered.compiled.profile_names,
         dependencies: &discovered.compiled.dependencies,
+        env: &discovered.compiled.project_env,
+        task_defaults: &discovered.compiled.task_defaults,
+        task_templates: &discovered.compiled.task_template_names,
         tasks: &discovered.compiled.spec.tasks,
+        origins: &discovered.compiled.task_origins,
     };
     println!(
         "{}",

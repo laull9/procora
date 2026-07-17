@@ -6,7 +6,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::config::{CompiledProject, DependencyKind, ManagedDependencySpec};
+use crate::{
+    config::{CompiledProject, DependencyKind, ManagedDependencySpec},
+    core::HealthCheckProbe,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -425,12 +428,14 @@ fn apply_placeholders(compiled: &mut CompiledProject, resolved: &[ResolvedDepend
             if let Some(cwd) = task.cwd.as_mut() {
                 *cwd = PathBuf::from(cwd.to_string_lossy().replace(&marker, &value));
             }
-            if let Some(healthcheck) = task.healthcheck.as_mut() {
-                healthcheck.command = healthcheck.command.replace(&marker, &value);
-                for argument in &mut healthcheck.args {
+            if let Some(healthcheck) = task.healthcheck.as_mut()
+                && let HealthCheckProbe::Exec { command, args, cwd } = &mut healthcheck.probe
+            {
+                *command = command.replace(&marker, &value);
+                for argument in args {
                     *argument = argument.replace(&marker, &value);
                 }
-                if let Some(cwd) = healthcheck.cwd.as_mut() {
+                if let Some(cwd) = cwd {
                     *cwd = PathBuf::from(cwd.to_string_lossy().replace(&marker, &value));
                 }
             }

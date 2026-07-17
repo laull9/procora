@@ -10,16 +10,17 @@ use crate::engine::{Engine, EngineCommand, EngineEffect, RuntimeEvent, TaskRunId
 use crate::log::{FileLogStore, LogStream, TailBuffer};
 use crate::monitor::SystemMonitor;
 use crate::process::{ManagedChild, spawn_task};
-use crate::protocol::{LogBatchDto, LogCursorDto, ProjectSnapshot, SnapshotSourceDto, TaskView};
+use crate::protocol::{LogBatchDto, LogCursorDto};
 use thiserror::Error;
 
 use super::{
     health::HealthRuntime,
     host_logs::{LogReaderContext, LogWriter, OutputReader, join_readers, spawn_log_reader},
-    host_view::{command_label, resource_usage, task_health, task_message, task_status},
+    resources::ResourceCache,
 };
 
 mod reconfigure;
+mod snapshot;
 
 /// 单个 `ServiceHost` 的真实 Task 运行错误。
 #[derive(Debug, Error)]
@@ -56,6 +57,7 @@ struct TaskInstance {
     child: ManagedChild,
     identity: TaskRunIdentity,
     pid: u32,
+    started_at: Instant,
     readers: Vec<OutputReader>,
 }
 
@@ -74,6 +76,7 @@ pub struct ServiceHost {
     dependencies: ManagedDependencies,
     engine: Engine,
     monitor: SystemMonitor,
+    resource_cache: ResourceCache,
     logs: Arc<Mutex<TailBuffer>>,
     file_logs: Option<Arc<FileLogStore>>,
     log_writer: Option<LogWriter>,
@@ -106,6 +109,7 @@ impl ServiceHost {
             dependencies: compiled.dependencies,
             engine,
             monitor: SystemMonitor::new(),
+            resource_cache: ResourceCache::default(),
             logs: Arc::new(Mutex::new(TailBuffer::new(4096))),
             file_logs,
             log_writer,
@@ -151,6 +155,7 @@ impl ServiceHost {
     ///
     /// 当任一已就绪 Task 无法创建且没有自动重试策略时返回错误。
     pub fn start(&mut self) -> Result<(), ServiceHostError> {
+        self.pending_spawns.clear();
         let effects = self.engine.command(EngineCommand::StartAll);
         self.execute_effects(effects)
     }
@@ -193,6 +198,7 @@ impl ServiceHost {
             match result {
                 Ok(Some(status)) => {
                     let mut instance = self.instances.remove(&task_id).expect("实例仍存在");
+                    self.resource_cache.invalidate();
                     self.health.stop(&task_id, instance.identity);
                     if let Err(error) = instance.child.cleanup_after_exit() {
                         tracing::warn!(task = %task_id, %error, "顶层进程退出后清理剩余进程树失败");
@@ -203,6 +209,7 @@ impl ServiceHost {
                         identity: instance.identity,
                         exit_code: status.code(),
                         success: exit_succeeded(&self.spec.tasks[&task_id], status),
+                        run_duration_ms: elapsed_millis(instance.started_at),
                     });
                     if let Err(error) = self.execute_effects(effects) {
                         tracing::warn!(%error, "Task 退出后的调度失败");
@@ -274,35 +281,6 @@ impl ServiceHost {
             },
             gap: batch.gap,
         })
-    }
-
-    /// 把实时进程、资源与引擎状态投影为 TUI 一致性快照。
-    pub fn snapshot(&mut self, source: SnapshotSourceDto, running: bool) -> ProjectSnapshot {
-        self.refresh();
-        let tasks = self
-            .engine
-            .states()
-            .map(|(task_id, state)| {
-                let task = &self.spec.tasks[task_id];
-                let resources = self.instances.get(task_id).and_then(|instance| {
-                    self.monitor.snapshot_tree(instance.pid).map(resource_usage)
-                });
-                TaskView {
-                    task_id: task_id.clone(),
-                    command: command_label(task),
-                    status: task_status(*state, running),
-                    health: task_health(state.health),
-                    dependencies: task.depends_on.keys().cloned().collect(),
-                    resources,
-                    message: task_message(*state),
-                }
-            })
-            .collect();
-        ProjectSnapshot {
-            project: self.spec.project.clone(),
-            source,
-            tasks,
-        }
     }
 
     /// 执行一组引擎副作用并把结果事件送回同一写者。
@@ -383,12 +361,14 @@ impl ServiceHost {
                 },
             ));
         }
+        self.resource_cache.invalidate();
         self.instances.insert(
             task_id.clone(),
             TaskInstance {
                 child,
                 identity,
                 pid,
+                started_at: Instant::now(),
                 readers,
             },
         );
@@ -411,12 +391,14 @@ impl ServiceHost {
                 identity,
                 exit_code: None,
                 success: false,
+                run_duration_ms: 0,
             }));
         };
         if instance.identity != identity {
             self.instances.insert(task_id.clone(), instance);
             return Ok(Vec::new());
         }
+        self.resource_cache.invalidate();
         self.health.stop(task_id, identity);
         let timeout = Duration::from_millis(self.spec.tasks[task_id].shutdown_timeout_ms);
         let outcome = instance
@@ -432,6 +414,7 @@ impl ServiceHost {
             identity,
             exit_code: outcome.status.code(),
             success: exit_succeeded(&self.spec.tasks[task_id], outcome.status),
+            run_duration_ms: elapsed_millis(instance.started_at),
         }))
     }
 
@@ -467,6 +450,11 @@ impl ServiceHost {
             writer.flush();
         }
     }
+}
+
+/// 把单调时钟运行时长有界转换为协议使用的毫秒数。
+fn elapsed_millis(started_at: Instant) -> u64 {
+    u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 /// 按 Task 声明判断平台退出状态是否属于成功结束。

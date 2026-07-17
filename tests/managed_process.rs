@@ -25,6 +25,8 @@ fn task(command: &str, args: &[&str]) -> TaskSpec {
         depends_on: BTreeMap::new(),
         restart: RestartPolicy::Never,
         restart_delay_ms: 10,
+        max_restarts: 0,
+        restart_reset_after_ms: 60_000,
         shutdown_timeout_ms: 500,
     }
 }

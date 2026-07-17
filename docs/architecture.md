@@ -136,7 +136,7 @@ procora/
 | --- | --- | --- |
 | `procora::core` | `ServiceName`、`TaskId`、`ProjectSpec`、任务图、状态、事件值对象、错误分类 | 文件解析、异步运行时、系统调用 |
 | `procora::engine` | 命令处理、调度、依赖判定、状态机、重启策略、配置对账 | 直接创建进程、写日志、绘制界面 |
-| `procora::config` | 格式探测、include 合并、受控 Python JSON 前端、Raw DTO 反序列化、字段诊断、路径规范化、校验、图编译 | 运行服务 Task、监听 UI；profile 与通用变量仍属后续能力 |
+| `procora::config` | 格式探测、include 合并、持久 profile 准入、命名 Task 模板、受控 Python JSON 前端、Raw DTO 反序列化、来源、路径规范化、校验、图编译 | 运行服务 Task、监听 UI；通用变量仍属后续能力 |
 | `procora::source` | 发现、监听、拉取本地或 Git 任务定义，固定来源身份并生成带版本候选 | 直接应用配置或修改引擎状态 |
 | `procora::process` | 启动进程、输出管道、信号/控制事件、退出观察、进程树回收 | 决定任务是否应该启动 |
 | `procora::monitor` | 采样进程树资源、归一化、能力上报 | 重启或终止高占用任务 |

@@ -173,3 +173,45 @@ fn on_failure_creates_new_run_after_backoff() {
     host.stop().unwrap();
     fs::remove_dir_all(service).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+// max_restarts会停止真实失败进程的持续创建风暴。
+fn max_restarts_stops_real_spawn_storm() {
+    let service = temporary_service();
+    let counter = service.join("bounded-runs.txt");
+    let configuration = format!(
+        "{{\"version\":1,\"project\":\"runtime\",\"tasks\":{{\"app\":{{\"command\":\"sh\",\"args\":[\"-c\",\"printf run\\\\n >> \\\"$1\\\"; exit 1\",\"procora-test\",{}],\"restart\":\"on-failure\",\"restart_delay_ms\":10,\"max_restarts\":2,\"restart_reset_after_ms\":0}}}}}}",
+        serde_json::to_string(&counter).unwrap()
+    );
+    let compiled = load_str(&configuration, ConfigFormat::Json).unwrap();
+    let mut host = ServiceHost::from_compiled_at(compiled, &service);
+    host.start().unwrap();
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let snapshot = host.snapshot(SnapshotSourceDto::CenterLive, true);
+        if snapshot.tasks[0].status == TaskStatusDto::Failed {
+            assert!(
+                snapshot.tasks[0]
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("2 次自动重启上限"))
+            );
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "任务没有停止重启");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let runs = fs::read_to_string(&counter).unwrap();
+    assert_eq!(runs.matches("run").count(), 3);
+    thread::sleep(Duration::from_millis(80));
+    host.refresh();
+    assert_eq!(
+        fs::read_to_string(&counter).unwrap().matches("run").count(),
+        3
+    );
+
+    host.stop().unwrap();
+    fs::remove_dir_all(service).unwrap();
+}

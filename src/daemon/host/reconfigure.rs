@@ -5,13 +5,20 @@ use crate::{config::CompiledProject, core::TaskId};
 use super::{ServiceHost, ServiceHostError};
 
 impl ServiceHost {
-    /// 不重建运行进程地提交退出码、重启退避和停止宽限策略。
+    /// 不重建运行进程地提交退出码、重启边界和停止宽限策略。
+    ///
+    /// # Errors
+    ///
+    /// 当放宽重启上限后恢复调度失败时返回错误。
     ///
     /// # Panics
     ///
     /// 仅当调用方把 Task 集合变化错误分类为原地更新时 panic。
-    pub fn update_runtime_policies(&mut self, compiled: CompiledProject) {
-        self.engine.update_runtime_policies(&compiled.spec);
+    pub fn update_runtime_policies(
+        &mut self,
+        compiled: CompiledProject,
+    ) -> Result<(), ServiceHostError> {
+        let effects = self.engine.update_runtime_policies(&compiled.spec);
         for (task_id, candidate) in compiled.spec.tasks {
             let current = self
                 .spec
@@ -21,8 +28,11 @@ impl ServiceHost {
             current.success_exit_codes = candidate.success_exit_codes;
             current.restart = candidate.restart;
             current.restart_delay_ms = candidate.restart_delay_ms;
+            current.max_restarts = candidate.max_restarts;
+            current.restart_reset_after_ms = candidate.restart_reset_after_ms;
             current.shutdown_timeout_ms = candidate.shutdown_timeout_ms;
         }
+        self.execute_effects(effects)
     }
 
     /// 提交候选图，只重启语义差异影响集合，并在失败时恢复旧图。

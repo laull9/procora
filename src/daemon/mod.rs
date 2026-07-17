@@ -8,6 +8,7 @@ mod host_view;
 mod ipc;
 mod managed;
 mod project;
+mod resources;
 mod status;
 
 pub use center::{Center, CenterError};

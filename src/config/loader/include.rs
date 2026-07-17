@@ -45,12 +45,14 @@ fn load_capture(path: &Path, entry_override: Option<&[u8]>) -> ConfigLoadCapture
     let mut capture_root = fs::canonicalize(&root).unwrap_or(root);
     let mut inputs = BTreeMap::new();
     let mut watched_paths = BTreeSet::from([entry.clone()]);
+    let mut definition_documents = 0;
     let result = load_entry(
         &entry,
         entry_override,
         &mut capture_root,
         &mut inputs,
         &mut watched_paths,
+        &mut definition_documents,
     );
     ConfigLoadCapture {
         result,
@@ -60,6 +62,7 @@ fn load_capture(path: &Path, entry_override: Option<&[u8]>) -> ConfigLoadCapture
             .collect(),
         watched_paths: watched_paths.into_iter().collect(),
         root: capture_root,
+        definition_documents,
     }
 }
 
@@ -70,6 +73,7 @@ fn load_entry(
     root: &mut PathBuf,
     inputs: &mut BTreeMap<PathBuf, Vec<u8>>,
     watched_paths: &mut BTreeSet<PathBuf>,
+    definition_documents: &mut usize,
 ) -> Result<crate::config::CompiledProject, ConfigError> {
     let canonical = fs::canonicalize(entry).map_err(|source| ConfigError::Read {
         path: entry.to_path_buf(),
@@ -107,10 +111,23 @@ fn load_entry(
         inputs: std::mem::take(inputs),
         watched_paths: std::mem::take(watched_paths),
     };
+    *definition_documents = 1;
     let merged = merge_document(&canonical, &mut raw, 0, &mut context);
+    let compiled = merged.and_then(|mut merged| {
+        merged
+            .load_env_files(
+                None,
+                Some(&context.root),
+                &mut context.inputs,
+                &mut context.watched_paths,
+            )
+            .map_err(super::validation_error)?;
+        compile_raw(merged, None)
+    });
     *inputs = context.inputs;
     *watched_paths = context.watched_paths;
-    compile_raw(merged?, None)
+    *definition_documents = context.documents;
+    compiled
 }
 
 /// 以深度优先顺序合并当前文档声明的全部 include。

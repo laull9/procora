@@ -59,6 +59,7 @@ fn completed_dependency_waits_for_successful_exit() {
         identity,
         exit_code: Some(0),
         success: true,
+        run_duration_ms: 1,
     });
     assert_eq!(spawn(&next[0]).0.as_str(), "app");
 }
@@ -121,6 +122,7 @@ fn late_events_cannot_override_new_generation() {
                 identity: old_identity,
                 exit_code: Some(1),
                 success: false,
+                run_duration_ms: 1,
             })
             .is_empty()
     );
@@ -149,4 +151,94 @@ fn on_failure_uses_bounded_retry_backoff() {
         panic!("应产生重启意图");
     };
     assert_eq!(delay_ms, 25);
+}
+
+#[test]
+// 自动重启达到上限后停止，放宽上限可原地恢复，手动启动会清零计数。
+fn restart_limit_stops_resumes_and_resets() {
+    let compiled = load_str(
+        "version: 1\nproject: demo\ntasks:\n  app:\n    command: missing\n    restart: on-failure\n    restart_delay_ms: 25\n    max_restarts: 2\n    restart_reset_after_ms: 0\n",
+        ConfigFormat::Yaml,
+    )
+    .unwrap();
+    let mut engine = Engine::new(&compiled.spec, compiled.graph);
+    let first = engine.command(EngineCommand::StartAll);
+    let (task_id, first_identity) = spawn(&first[0]);
+
+    let second = engine.event(RuntimeEvent::SpawnFailed {
+        task_id: task_id.clone(),
+        identity: first_identity,
+    });
+    let (task_id, second_identity) = spawn(&second[0]);
+    assert!(matches!(
+        second[0],
+        EngineEffect::Spawn { delay_ms: 25, .. }
+    ));
+    let third = engine.event(RuntimeEvent::SpawnFailed {
+        task_id: task_id.clone(),
+        identity: second_identity,
+    });
+    let (task_id, third_identity) = spawn(&third[0]);
+    assert!(matches!(third[0], EngineEffect::Spawn { delay_ms: 50, .. }));
+    assert!(
+        engine
+            .event(RuntimeEvent::SpawnFailed {
+                task_id: task_id.clone(),
+                identity: third_identity,
+            })
+            .is_empty()
+    );
+    let exhausted = engine.state(task_id).unwrap();
+    assert_eq!(exhausted.restart_attempt, 2);
+    assert!(exhausted.restart_exhausted);
+
+    let relaxed = load_str(
+        "version: 1\nproject: demo\ntasks:\n  app:\n    command: missing\n    restart: on-failure\n    restart_delay_ms: 25\n    max_restarts: 3\n    restart_reset_after_ms: 0\n",
+        ConfigFormat::Yaml,
+    )
+    .unwrap();
+    let resumed = engine.update_runtime_policies(&relaxed.spec);
+    assert!(matches!(
+        resumed[0],
+        EngineEffect::Spawn { delay_ms: 100, .. }
+    ));
+    assert!(!engine.state(task_id).unwrap().restart_exhausted);
+
+    let manual = engine.command(EngineCommand::StartAll);
+    assert!(matches!(manual[0], EngineEffect::Spawn { delay_ms: 0, .. }));
+    assert_eq!(engine.state(task_id).unwrap().restart_attempt, 0);
+}
+
+#[test]
+// 单次运行达到稳定窗口后从首次退避重新计算连续重启。
+fn stable_run_resets_consecutive_restart_count() {
+    let compiled = load_str(
+        "version: 1\nproject: demo\ntasks:\n  app:\n    command: app\n    restart: on-failure\n    restart_delay_ms: 25\n    max_restarts: 1\n    restart_reset_after_ms: 1000\n",
+        ConfigFormat::Yaml,
+    )
+    .unwrap();
+    let mut engine = Engine::new(&compiled.spec, compiled.graph);
+    let first = engine.command(EngineCommand::StartAll);
+    let (task_id, first_identity) = spawn(&first[0]);
+    let retry = engine.event(RuntimeEvent::SpawnFailed {
+        task_id: task_id.clone(),
+        identity: first_identity,
+    });
+    let (task_id, retry_identity) = spawn(&retry[0]);
+
+    let after_stable_run = engine.event(RuntimeEvent::Exited {
+        task_id: task_id.clone(),
+        identity: retry_identity,
+        exit_code: Some(1),
+        success: false,
+        run_duration_ms: 1000,
+    });
+
+    assert!(matches!(
+        after_stable_run[0],
+        EngineEffect::Spawn { delay_ms: 25, .. }
+    ));
+    let state = engine.state(task_id).unwrap();
+    assert_eq!(state.restart_attempt, 1);
+    assert!(!state.restart_exhausted);
 }

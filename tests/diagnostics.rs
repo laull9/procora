@@ -85,14 +85,16 @@ fn relative_working_directory_uses_config_directory() {
 }
 
 #[test]
-// 生命周期时间拒绝可能冻结中心服务器的极端值。
+// 生命周期边界拒绝可能冻结中心服务器或制造重启风暴的极端值。
 fn lifecycle_limits_reject_extreme_values() {
     let error = load_str(
-        "version: 1\nproject: demo\ntasks:\n  app:\n    command: echo\n    restart_delay_ms: 30001\n    shutdown_timeout_ms: 300001\n",
+        "version: 1\nproject: demo\ntasks:\n  app:\n    command: echo\n    restart_delay_ms: 30001\n    max_restarts: 1000001\n    restart_reset_after_ms: 86400001\n    shutdown_timeout_ms: 300001\n",
         ConfigFormat::Yaml,
     )
     .expect_err("极端生命周期时间必须被拒绝");
     let message = error.to_string();
     assert!(message.contains("restart_delay_ms"));
+    assert!(message.contains("max_restarts"));
+    assert!(message.contains("restart_reset_after_ms"));
     assert!(message.contains("shutdown_timeout_ms"));
 }

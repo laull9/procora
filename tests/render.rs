@@ -114,6 +114,7 @@ fn mac_log_view_shows_fn_keys_and_task_switch_hint() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     app.append_log(task_id, b"log\n", false);
+    app.set_plain_mode(false);
     app.set_mac_key_hints(true);
     app.handle_key(KeyCode::Char('3'));
 

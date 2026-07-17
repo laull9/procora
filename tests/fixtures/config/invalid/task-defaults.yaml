@@ -1,0 +1,6 @@
+version: 1
+project: invalid-defaults
+task_defaults:
+  restart_delay_ms: 0
+  success_exit_codes: [-1]
+tasks: {}

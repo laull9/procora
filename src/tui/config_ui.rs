@@ -57,7 +57,7 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let left = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),
+            Constraint::Length(5),
             Constraint::Min(5),
             Constraint::Min(5),
         ])
@@ -87,10 +87,20 @@ fn render_project(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         Style::default()
     };
     frame.render_widget(
-        Paragraph::new(vec![Line::from(vec![
-            Span::styled("名称：", Style::default().fg(Color::DarkGray)),
-            Span::raw(form.config().project()),
-        ])])
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled("名称：", Style::default().fg(Color::DarkGray)),
+                Span::raw(form.config().project()),
+            ]),
+            Line::from(vec![
+                Span::styled("默认环境：", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{} 项", form.config().env.len())),
+            ]),
+            Line::from(vec![
+                Span::styled("命名模板：", Style::default().fg(Color::DarkGray)),
+                Span::raw(format!("{} 个", form.config().template_count())),
+            ]),
+        ])
         .block(
             Block::default()
                 .title(title)
@@ -110,7 +120,7 @@ fn render_tasks(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         .collect::<Vec<_>>();
     let focused = form.pane() == FormPane::Tasks;
     let title = if focused {
-        "Tasks  ← Enter 编辑 · n 新建 · d 删除"
+        "Tasks  ← Enter 编辑 · h 健康检查 · n 新建 · d 删除"
     } else {
         "Tasks"
     };
@@ -184,10 +194,43 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
 /// 绘制当前结构化编辑状态的操作说明。
 fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let (section, detail) = match form.pane() {
-        FormPane::Project => ("项目", format!("项目名称：{}", form.config().project())),
+        FormPane::Project => (
+            "项目",
+            format!(
+                "项目名称：{}\n活动 profile：{}（共 {} 个）\n当前准入 Task：{} 个\n默认环境变量：{} 项\nTask 默认：{}\n命名模板：{} 个（F2 可编辑定义）",
+                form.config().project(),
+                form.config().active_profile().unwrap_or("基础配置"),
+                form.config().profile_count(),
+                form.config().tasks().count(),
+                form.config().env.len(),
+                form.config().task_defaults.summary(),
+                form.config().template_count()
+            ),
+        ),
         FormPane::Tasks => form.config().tasks().nth(form.selected()).map_or_else(
             || ("Task", "尚未配置 Task".to_owned()),
-            |(name, task)| ("Task", format!("名称：{name}\n命令：{}", task.command)),
+            |(name, task)| {
+                (
+                    "Task",
+                    format!(
+                        "名称：{name}\n继承模板：{}\n命令：{}\n工作目录：{}（{}）\n环境文件：{}\n健康检查：{}\n成功退出码：{}（{}）\n重启策略：{}（{}）",
+                        task.extends.as_deref().unwrap_or("未配置"),
+                        task.command,
+                        task.cwd.as_deref().unwrap_or("未配置"),
+                        task.origin_label("cwd"),
+                        task.env_file.as_deref().unwrap_or("未配置"),
+                        task.health_label(),
+                        task.success_exit_codes
+                            .iter()
+                            .map(i32::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        task.origin_label("success_exit_codes"),
+                        task.restart,
+                        task.origin_label("restart")
+                    ),
+                )
+            },
         ),
         FormPane::Dependencies => form
             .config()
@@ -214,13 +257,14 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         Line::raw(""),
         Line::styled("按键", Style::default().add_modifier(Modifier::BOLD)),
         Line::raw("Tab / ← → 切换区域；↑ ↓ 选择条目"),
-        Line::raw("Enter 编辑；n 新建；d 删除（需二次确认）"),
+        Line::raw("Enter 编辑；Task 上按 h 编辑健康检查"),
+        Line::raw("n 新建；d 删除（需二次确认）"),
         Line::raw("Ctrl-S 校验并保存；F2 高级文本"),
         Line::raw("Esc 退出（未保存内容会请求确认）"),
         Line::raw(""),
         Line::styled("字段提示", Style::default().add_modifier(Modifier::BOLD)),
-        Line::raw("参数和验证参数用空格分隔。"),
-        Line::raw("环境变量用 KEY=VALUE,KEY2=VALUE2。"),
+        Line::raw("命令可直接带参数；精确参数仍优先使用 JSON 数组。"),
+        Line::raw("环境变量/请求头优先使用 JSON 对象。"),
         Line::raw("依赖用 task:started,task2:healthy。"),
     ];
     frame.render_widget(
@@ -233,7 +277,8 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
 
 /// 绘制字段输入和选择器弹窗。
 fn render_dialog(frame: &mut Frame<'_>, dialog: &Dialog) {
-    let height = u16::try_from(dialog.fields().count().saturating_add(5)).unwrap_or(u16::MAX);
+    let (field_count, selected) = dialog.field_position();
+    let height = u16::try_from(field_count.saturating_add(5)).unwrap_or(u16::MAX);
     let area = centered_rect(
         86,
         height.min(frame.area().height.saturating_sub(2)),
@@ -256,18 +301,30 @@ fn render_dialog(frame: &mut Frame<'_>, dialog: &Dialog) {
             ])
         })
         .collect::<Vec<_>>();
+    // 底部操作提示占用边框内最后一行，滚动窗口额外为它保留一行。
+    let visible_lines = usize::from(area.height.saturating_sub(3)).max(1);
+    let scroll = selected
+        .saturating_sub(visible_lines.saturating_sub(1))
+        .min(field_count.saturating_sub(visible_lines));
     let hint = if dialog.selected_is_choice() {
         "↑↓ 切换字段，←→ 选择选项，Enter 确认，Esc 取消"
     } else {
         "直接输入；↑↓ 切换字段，Enter 确认，Esc 取消"
     };
     frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .title(dialog.title())
-                .borders(Borders::ALL)
-                .title_bottom(hint),
-        ),
+        Paragraph::new(lines)
+            .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
+            .block(
+                Block::default()
+                    .title(format!(
+                        "{} · {}/{}",
+                        dialog.title(),
+                        selected.saturating_add(1),
+                        field_count
+                    ))
+                    .borders(Borders::ALL)
+                    .title_bottom(hint),
+            ),
         area,
     );
 }

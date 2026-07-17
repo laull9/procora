@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    core::{HealthCheckSpec, TaskId, TaskSpec},
+    core::{HealthCheckProbe, HealthCheckSpec, HttpHealthCheckSpec, TaskId, TaskSpec},
     engine::{HealthState, RuntimeEvent, TaskRunIdentity},
     process::spawn_health_check,
 };
@@ -27,14 +27,49 @@ struct ActiveCheck {
     cancelled: Arc<AtomicBool>,
     result: Arc<Mutex<Option<ProbeResult>>>,
     thread: Option<JoinHandle<()>>,
+    join_on_cancel: bool,
 }
 
 impl ActiveCheck {
-    /// 请求回收检查进程树并等待短轮询线程退出。
-    fn cancel(self) {
+    /// 请求取消检查；exec 等待整树回收，HTTP 请求交给有界超时线程退出。
+    fn cancel(mut self) -> Option<Self> {
         self.cancelled.store(true, Ordering::Release);
-        if self.thread.is_some_and(|thread| thread.join().is_err()) {
-            tracing::warn!("健康检查线程异常退出");
+        if self.join_on_cancel
+            || self
+                .thread
+                .as_ref()
+                .is_none_or(std::thread::JoinHandle::is_finished)
+        {
+            if self
+                .thread
+                .take()
+                .is_some_and(|thread| thread.join().is_err())
+            {
+                tracing::warn!("健康检查线程异常退出");
+            }
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    /// 回收已经自然结束的取消线程，仍在请求中的 HTTP 检查继续保留。
+    fn reap(mut self) -> Option<Self> {
+        if self
+            .thread
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            if self
+                .thread
+                .take()
+                .is_some_and(|thread| thread.join().is_err())
+            {
+                tracing::warn!("健康检查线程异常退出");
+            }
+            None
+        } else {
+            Some(self)
         }
     }
 }
@@ -56,6 +91,7 @@ struct HealthEntry {
 #[derive(Debug, Default)]
 pub(super) struct HealthRuntime {
     entries: BTreeMap<TaskId, HealthEntry>,
+    retired: Vec<ActiveCheck>,
 }
 
 impl HealthRuntime {
@@ -93,13 +129,18 @@ impl HealthRuntime {
 
     /// 收集完成结果、应用连续阈值并启动已到期且不重叠的新检查。
     pub(super) fn refresh(&mut self) -> Vec<RuntimeEvent> {
+        self.retired = std::mem::take(&mut self.retired)
+            .into_iter()
+            .filter_map(ActiveCheck::reap)
+            .collect();
         let mut events = Vec::new();
         let now = Instant::now();
-        let mut active_count = self
-            .entries
-            .values()
-            .filter(|entry| entry.active.is_some())
-            .count();
+        let mut active_count = self.retired.len().saturating_add(
+            self.entries
+                .values()
+                .filter(|entry| entry.active.is_some())
+                .count(),
+        );
         for (task_id, entry) in &mut self.entries {
             let result = entry.active.as_ref().and_then(|active| {
                 active
@@ -139,8 +180,9 @@ impl HealthRuntime {
     fn remove(&mut self, task_id: &TaskId) {
         if let Some(mut entry) = self.entries.remove(task_id)
             && let Some(active) = entry.active.take()
+            && let Some(retired) = active.cancel()
         {
-            active.cancel();
+            self.retired.push(retired);
         }
     }
 }
@@ -179,6 +221,7 @@ fn spawn_check(task_id: &TaskId, check: &HealthCheckSpec, task: &TaskSpec) -> Ac
     let thread_result = Arc::clone(&result);
     let check = check.clone();
     let task = task.clone();
+    let join_on_cancel = matches!(check.probe, HealthCheckProbe::Exec { .. });
     let thread_name = format!("procora-health-{task_id}");
     let thread = thread::Builder::new().name(thread_name).spawn(move || {
         let outcome = run_check(&check, &task, &thread_cancelled);
@@ -202,6 +245,7 @@ fn spawn_check(task_id: &TaskId, check: &HealthCheckSpec, task: &TaskSpec) -> Ac
         cancelled,
         result,
         thread,
+        join_on_cancel,
     }
 }
 
@@ -210,7 +254,31 @@ const MAX_ACTIVE_CHECKS: usize = 32;
 
 /// 执行一次检查，并在取消或超时时回收整个检查进程树。
 fn run_check(check: &HealthCheckSpec, task: &TaskSpec, cancelled: &AtomicBool) -> ProbeResult {
-    let mut child = match spawn_health_check(check, task) {
+    match &check.probe {
+        HealthCheckProbe::Exec { command, args, cwd } => run_exec_check(
+            command,
+            args,
+            cwd.as_deref(),
+            check.timeout_ms,
+            task,
+            cancelled,
+        ),
+        HealthCheckProbe::HttpGet { http_get } => {
+            run_http_check(http_get, check.timeout_ms, cancelled)
+        }
+    }
+}
+
+/// 执行一次 exec 检查，并在取消或超时时回收整个检查进程树。
+fn run_exec_check(
+    command: &str,
+    args: &[String],
+    cwd: Option<&std::path::Path>,
+    timeout_ms: u64,
+    task: &TaskSpec,
+    cancelled: &AtomicBool,
+) -> ProbeResult {
+    let mut child = match spawn_health_check(command, args, cwd, task) {
         Ok(child) => child,
         Err(error) => {
             return ProbeResult {
@@ -219,7 +287,7 @@ fn run_check(check: &HealthCheckSpec, task: &TaskSpec, cancelled: &AtomicBool) -
             };
         }
     };
-    let deadline = Instant::now() + Duration::from_millis(check.timeout_ms);
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     loop {
         if cancelled.load(Ordering::Acquire) {
             let _ = child.kill();
@@ -245,7 +313,7 @@ fn run_check(check: &HealthCheckSpec, task: &TaskSpec, cancelled: &AtomicBool) -
                 let _ = child.kill();
                 return ProbeResult {
                     success: false,
-                    detail: format!("检查超过 {} 毫秒", check.timeout_ms),
+                    detail: format!("检查超过 {timeout_ms} 毫秒"),
                 };
             }
             Err(error) => {
@@ -257,4 +325,60 @@ fn run_check(check: &HealthCheckSpec, task: &TaskSpec, cancelled: &AtomicBool) -
             }
         }
     }
+}
+
+/// 执行一次有总超时、无重定向且精确匹配状态码的 HTTP GET 检查。
+fn run_http_check(
+    check: &HttpHealthCheckSpec,
+    timeout_ms: u64,
+    cancelled: &AtomicBool,
+) -> ProbeResult {
+    if cancelled.load(Ordering::Acquire) {
+        return ProbeResult {
+            success: false,
+            detail: "检查已取消".to_owned(),
+        };
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_millis(timeout_ms))
+        .redirects(0)
+        .build();
+    let mut request = agent.get(&http_probe_url(check));
+    for (name, value) in &check.headers {
+        request = request.set(name, value);
+    }
+    let outcome = request.call();
+    if cancelled.load(Ordering::Acquire) {
+        return ProbeResult {
+            success: false,
+            detail: "检查已取消".to_owned(),
+        };
+    }
+    let status = match outcome {
+        Ok(response) => response.status(),
+        Err(ureq::Error::Status(status, _)) => status,
+        Err(ureq::Error::Transport(error)) => {
+            return ProbeResult {
+                success: false,
+                detail: format!("HTTP 请求失败：{error}"),
+            };
+        }
+    };
+    ProbeResult {
+        success: status == check.status_code,
+        detail: format!("HTTP 状态码 {status}，预期 {}", check.status_code),
+    }
+}
+
+/// 从已验证字段构造不携带用户信息的 HTTP 探针 URL。
+fn http_probe_url(check: &HttpHealthCheckSpec) -> String {
+    let host = if check.host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{}]", check.host)
+    } else {
+        check.host.clone()
+    };
+    let authority = check
+        .port
+        .map_or_else(|| host.clone(), |port| format!("{host}:{port}"));
+    format!("{}://{authority}{}", check.scheme.as_str(), check.path)
 }

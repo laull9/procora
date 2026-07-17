@@ -3,7 +3,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use super::RawProject;
+use super::{RawProject, task_defaults::RawTaskDefaults};
 
 impl RawProject {
     /// 创建不携带任何声明的合并起点。
@@ -12,8 +12,19 @@ impl RawProject {
             include: Vec::new(),
             version: None,
             project: None,
+            profile: None,
+            profiles: BTreeMap::default(),
+            env: BTreeMap::default(),
+            task_defaults: RawTaskDefaults::default(),
+            task_templates: BTreeMap::default(),
             dependencies: BTreeMap::default(),
             tasks: BTreeMap::default(),
+            task_declarations: BTreeMap::default(),
+            task_template_sources: BTreeMap::default(),
+            declared_env: BTreeMap::default(),
+            declared_task_defaults: RawTaskDefaults::default(),
+            profile_sources: super::profile::ProfileSources::default(),
+            admitted_tasks: None,
         }
     }
 
@@ -45,11 +56,15 @@ impl RawProject {
                 .take()
                 .map(|source| rebase_source(&source, base));
         }
+        self.task_defaults.rebase(base);
+        for profile in self.profiles.values_mut() {
+            profile.rebase(base);
+        }
+        for template in self.task_templates.values_mut() {
+            rebase_task(template, base);
+        }
         for task in self.tasks.values_mut() {
-            task.cwd = task.cwd.take().map(|path| rebase_path(&path, base));
-            if let Some(healthcheck) = task.healthcheck.as_mut() {
-                healthcheck.rebase(base);
-            }
+            rebase_task(task, base);
         }
     }
 
@@ -61,8 +76,26 @@ impl RawProject {
         if higher.project.is_some() {
             self.project = higher.project;
         }
+        if higher.profile.is_some() {
+            self.profile = higher.profile;
+        }
+        for (name, profile) in higher.profiles {
+            self.profiles.entry(name).or_default().overlay(profile);
+        }
+        self.env.extend(higher.env);
+        self.task_defaults.overlay(higher.task_defaults);
+        self.task_templates.extend(higher.task_templates);
         self.dependencies.extend(higher.dependencies);
         self.tasks.extend(higher.tasks);
+    }
+}
+
+/// 把 Task 或模板中的相对路径改写为声明文件目录路径。
+fn rebase_task(task: &mut super::RawTask, base: &Path) {
+    task.cwd = task.cwd.take().map(|path| rebase_path(&path, base));
+    task.env_file = task.env_file.take().map(|path| rebase_path(&path, base));
+    if let Some(healthcheck) = task.healthcheck.as_mut() {
+        healthcheck.rebase(base);
     }
 }
 

@@ -41,6 +41,11 @@ pub(crate) fn task_message(state: TaskRuntimeState) -> Option<String> {
     match state.observed {
         ObservedState::Blocked => Some("等待依赖条件满足".to_owned()),
         ObservedState::Backoff => Some(format!("等待第 {} 次自动重启", state.restart_attempt)),
+        ObservedState::Failed | ObservedState::Exited if state.restart_exhausted => Some(format!(
+            "{}；已达到 {} 次自动重启上限",
+            exit_message("Task 退出", state.exit_code),
+            state.restart_attempt
+        )),
         ObservedState::Failed => Some(exit_message("Task 失败", state.exit_code)),
         ObservedState::Exited => Some(exit_message("Task 已退出", state.exit_code)),
         ObservedState::Orphaned => Some("无法验证遗留进程身份，未执行接管或终止".to_owned()),

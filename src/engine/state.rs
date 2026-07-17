@@ -68,6 +68,9 @@ pub struct TaskRuntimeState {
     pub exit_code: Option<i32>,
     /// 当前 generation 内连续自动重启次数。
     pub restart_attempt: u32,
+    /// 最近一次退出因达到自动重启上限而没有继续调度。
+    #[serde(default)]
+    pub restart_exhausted: bool,
 }
 
 impl Default for TaskRuntimeState {
@@ -80,6 +83,7 @@ impl Default for TaskRuntimeState {
             run_id: None,
             exit_code: None,
             restart_attempt: 0,
+            restart_exhausted: false,
         }
     }
 }

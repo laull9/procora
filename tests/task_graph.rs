@@ -24,6 +24,8 @@ fn task(dependencies: &[&str]) -> TaskSpec {
             .collect(),
         restart: RestartPolicy::Never,
         restart_delay_ms: 500,
+        max_restarts: 0,
+        restart_reset_after_ms: 60_000,
         shutdown_timeout_ms: 5_000,
     }
 }

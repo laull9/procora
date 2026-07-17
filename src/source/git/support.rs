@@ -97,6 +97,8 @@ pub(super) fn git_task(args: Vec<String>, cwd: &Path) -> TaskSpec {
         depends_on: BTreeMap::new(),
         restart: RestartPolicy::Never,
         restart_delay_ms: 500,
+        max_restarts: 0,
+        restart_reset_after_ms: 60_000,
         shutdown_timeout_ms: 100,
     }
 }

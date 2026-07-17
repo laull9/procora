@@ -29,7 +29,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 ## 3. 项目初始化与中心进程
 
 - `procora init --config yaml|json|toml`：在当前目录写入不依赖 Cargo 的可运行示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。交互式终端会自动进入配置编辑页，脚本使用 `--no-edit` 跳过。
-- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。通过 `Tab` 或左右方向键在项目、Task、管理依赖间切换，`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F2` 可进入高级文本模式，`F1` 在配置有效时返回表单；未保存退出需要二次确认。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
+- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。项目弹窗可编辑基础项目环境、`task_defaults`，并在已声明 profile 与基础配置之间循环切换；确认 profile 后立即重编译活动 Task 和有效来源预览，保存时保留未准入 Task 及 profile 原始声明。项目卡片显示活动 profile、准入 Task 数和模板数；Task 弹窗可填写 `extends` 选择模板、预览具体来源并只保存局部覆盖，profile/模板定义使用 F2 高级文本编辑。Task 命令字段可直接输入带引号的完整命令文本，保存时规范化为精确 argv。新建和保存 Task 不会复制继承值；覆盖字段留空、或把重启策略设为 `inherit`，会删除本地覆盖并恢复模板/profile/项目/内建默认。通过 `Tab` 或左右方向键在项目、Task、管理依赖间切换，`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F1` 在配置有效时返回表单；未保存退出需要二次确认。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
 - `procora clean [path]`：删除服务目录下的 `.procora` 运行时目录，包括日志和管理依赖缓存；省略路径时使用当前目录。配置文件和其他项目文件不会删除，目录不存在时正常返回。
 - `procora deps [path]`：同步项目声明依赖；`--check` 仅依据版本清单、目标类型和版本命令离线复核。
 - `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
@@ -38,7 +38,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
 - `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。
-- `procora config <path>`：输出应用默认值、目录规范化和稳定字段顺序后的有效配置 JSON；不会下载依赖、注册服务或启动 Task。
+- `procora config <path>`：输出活动 profile、可选 profile/模板列表、项目环境、`task_defaults`、命令文本/argv 简写、其他默认值和目录规范化全部展开后的稳定有效配置 JSON，并在 `origins` 中说明各 Task 字段、依赖边及最终环境变量来自内建默认、项目 env、Task 默认层、profile、具体命名模板、env_file 还是 Task；不会下载依赖、注册服务或启动 Task。
 - `procora source git preview <repository> [--reference REF] [--config PATH]`：受限获取 Git 引用，输出完整 commit、组合修订和配置校验结果；`--local` 才允许显式本地仓库。不会启动 Center、注册服务或运行 Task。
 - `procora source git confirm <repository> <revision> [...]`：按相同来源参数重新获取，只有仓库、commit 与配置闭包修订仍匹配时成功；仍不自动应用。默认缓存位于当前用户 Procora 数据目录，也可用 `--cache` 覆盖。
 

@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::{DependencyCondition, ProjectSpec, RestartPolicy, TaskGraph, TaskId};
+use crate::core::{DependencyCondition, ProjectSpec, TaskGraph, TaskId};
 use uuid::Uuid;
 
+use super::restart::{
+    RestartConfig, restart_configs, restart_delay, restart_wanted, schedule_restart,
+};
 use super::{DesiredState, HealthState, ObservedState, TaskRuntimeState};
 
 /// 一个 Task 进程运行实例的不可复用身份。
@@ -50,6 +53,8 @@ pub enum RuntimeEvent {
         exit_code: Option<i32>,
         /// 退出是否成功。
         success: bool,
+        /// 本次进程从创建到退出的运行毫秒数。
+        run_duration_ms: u64,
     },
     /// 指定运行实例的健康检查状态发生变化。
     HealthChanged {
@@ -89,7 +94,7 @@ pub struct Engine {
     project: String,
     graph: TaskGraph,
     states: BTreeMap<TaskId, TaskRuntimeState>,
-    restart: BTreeMap<TaskId, (RestartPolicy, u64)>,
+    restart: BTreeMap<TaskId, RestartConfig>,
     health_configured: BTreeSet<TaskId>,
     generation: u64,
 }
@@ -103,11 +108,7 @@ impl Engine {
             .cloned()
             .map(|task_id| (task_id, TaskRuntimeState::default()))
             .collect();
-        let restart = spec
-            .tasks
-            .iter()
-            .map(|(task_id, task)| (task_id.clone(), (task.restart, task.restart_delay_ms)))
-            .collect();
+        let restart = restart_configs(spec);
         let health_configured = spec
             .tasks
             .iter()
@@ -153,12 +154,18 @@ impl Engine {
     }
 
     /// 原地更新不改变进程身份的退出与重启策略。
-    pub fn update_runtime_policies(&mut self, spec: &ProjectSpec) {
-        self.restart = spec
-            .tasks
-            .iter()
-            .map(|(task_id, task)| (task_id.clone(), (task.restart, task.restart_delay_ms)))
-            .collect();
+    pub fn update_runtime_policies(&mut self, spec: &ProjectSpec) -> Vec<EngineEffect> {
+        self.restart = restart_configs(spec);
+        for (task_id, state) in &mut self.states {
+            let config = self.restart[task_id];
+            if state.desired == DesiredState::Running
+                && state.run_id.is_none()
+                && restart_wanted(config.policy, state.observed)
+            {
+                schedule_restart(state, config.max_restarts);
+            }
+        }
+        self.reconcile()
     }
 
     /// 在替换任务图前把受影响 Task 置为停止期望并生成反向停止意图。
@@ -231,11 +238,7 @@ impl Engine {
             .collect();
         self.project.clone_from(&spec.project);
         self.graph = graph;
-        self.restart = spec
-            .tasks
-            .iter()
-            .map(|(task_id, task)| (task_id.clone(), (task.restart, task.restart_delay_ms)))
-            .collect();
+        self.restart = restart_configs(spec);
         self.health_configured = spec
             .tasks
             .iter()
@@ -266,6 +269,7 @@ impl Engine {
                     state.run_id = None;
                     state.exit_code = None;
                     state.restart_attempt = 0;
+                    state.restart_exhausted = false;
                 }
                 self.reconcile()
             }
@@ -315,14 +319,15 @@ impl Engine {
                 self.states.get_mut(&task_id).expect("身份已经匹配").health = health;
             }
             RuntimeEvent::SpawnFailed { task_id, .. } => {
-                self.finish_run(&task_id, None, false);
+                self.finish_run(&task_id, None, false, 0);
             }
             RuntimeEvent::Exited {
                 task_id,
                 exit_code,
                 success,
+                run_duration_ms,
                 ..
-            } => self.finish_run(&task_id, exit_code, success),
+            } => self.finish_run(&task_id, exit_code, success, run_duration_ms),
         }
         self.reconcile()
     }
@@ -335,7 +340,13 @@ impl Engine {
     }
 
     /// 记录一次创建失败或进程退出并应用重启策略。
-    fn finish_run(&mut self, task_id: &TaskId, exit_code: Option<i32>, success: bool) {
+    fn finish_run(
+        &mut self,
+        task_id: &TaskId,
+        exit_code: Option<i32>,
+        success: bool,
+        run_duration_ms: u64,
+    ) {
         let state = self.states.get_mut(task_id).expect("身份已经匹配");
         state.exit_code = exit_code;
         state.run_id = None;
@@ -349,11 +360,14 @@ impl Engine {
         } else {
             ObservedState::Failed
         };
+        state.restart_exhausted = false;
         if state.desired == DesiredState::Running {
-            let (policy, _) = self.restart[task_id];
-            if policy == RestartPolicy::Always || (policy == RestartPolicy::OnFailure && !success) {
-                state.restart_attempt = state.restart_attempt.saturating_add(1);
-                state.observed = ObservedState::Backoff;
+            let config = self.restart[task_id];
+            if config.reset_after_ms > 0 && run_duration_ms >= config.reset_after_ms {
+                state.restart_attempt = 0;
+            }
+            if restart_wanted(config.policy, state.observed) {
+                schedule_restart(state, config.max_restarts);
             }
         }
     }
@@ -381,7 +395,7 @@ impl Engine {
                 run_id: Uuid::new_v4(),
             };
             let delay_ms = if restarting {
-                restart_delay(self.restart[&task_id].1, state.restart_attempt)
+                restart_delay(self.restart[&task_id].delay_ms, state.restart_attempt)
             } else {
                 0
             };
@@ -438,10 +452,4 @@ fn event_identity(event: &RuntimeEvent) -> (&TaskId, TaskRunIdentity) {
             task_id, identity, ..
         } => (task_id, *identity),
     }
-}
-
-/// 计算以 30 秒为上限的指数重启退避。
-fn restart_delay(base_ms: u64, attempt: u32) -> u64 {
-    let exponent = attempt.saturating_sub(1).min(10);
-    base_ms.saturating_mul(1_u64 << exponent).min(30_000)
 }

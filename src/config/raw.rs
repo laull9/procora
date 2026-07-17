@@ -3,18 +3,35 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use crate::core::{
-    DependencyCondition, DependencySpec, ProjectSpec, RestartPolicy, ServiceName, TaskId, TaskSpec,
-};
-use serde::Deserialize;
+use crate::core::{DependencySpec, ServiceName, TaskId, TaskSpec};
+use serde::{Deserialize, Serialize};
 
 use super::ConfigDiagnostic;
-use super::health::{RawHealthCheck, normalize_healthcheck};
-use super::{
-    DependencyKind, DependencyVerifySpec, ManagedDependencies, ManagedDependencySpec, UnpackMode,
+use super::health::normalize_healthcheck;
+use super::{DependencyVerifySpec, ManagedDependencies, ManagedDependencySpec};
+pub(crate) use profile::RawProfile;
+use restart::{
+    default_restart_delay_ms, default_restart_reset_after_ms, default_shutdown_timeout_ms,
 };
+use task::RawDependencyCondition;
+pub(crate) use task::RawTask;
 
+mod command;
+mod conversions;
+mod declarations;
+mod env_file;
 mod merge;
+mod profile;
+mod project_normalize;
+mod restart;
+mod task;
+mod task_defaults;
+mod task_templates;
+
+/// 为结构化编辑器复用与配置编译完全一致的命令文本切分。
+pub(crate) fn split_command_text(value: &str) -> Result<(String, Vec<String>), String> {
+    command::split_text(value)
+}
 
 /// 配置前端反序列化使用的原始项目 DTO。
 #[derive(Debug, Deserialize)]
@@ -24,10 +41,32 @@ pub(crate) struct RawProject {
     include: Vec<PathBuf>,
     version: Option<u32>,
     project: Option<String>,
+    /// 当前持久选择的命名运行场景。
+    profile: Option<String>,
+    #[serde(default)]
+    profiles: BTreeMap<String, profile::RawProfile>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    task_defaults: task_defaults::RawTaskDefaults,
+    #[serde(default)]
+    task_templates: BTreeMap<String, RawTask>,
     #[serde(default)]
     dependencies: BTreeMap<String, RawManagedDependency>,
     #[serde(default)]
     tasks: BTreeMap<String, RawTask>,
+    #[serde(skip)]
+    task_declarations: BTreeMap<String, RawTask>,
+    #[serde(skip)]
+    task_template_sources: BTreeMap<String, task_templates::TemplateSources>,
+    #[serde(skip)]
+    declared_env: BTreeMap<String, String>,
+    #[serde(skip)]
+    declared_task_defaults: task_defaults::RawTaskDefaults,
+    #[serde(skip)]
+    profile_sources: profile::ProfileSources,
+    #[serde(skip)]
+    admitted_tasks: Option<BTreeSet<String>>,
 }
 
 /// 配置前端反序列化使用的项目依赖 DTO。
@@ -75,110 +114,14 @@ enum RawUnpackMode {
     Never,
 }
 
-/// 配置前端反序列化使用的原始 Task DTO。
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawTask {
-    command: Option<String>,
-    #[serde(default)]
-    args: Vec<String>,
-    cwd: Option<PathBuf>,
-    #[serde(default)]
-    env: BTreeMap<String, String>,
-    healthcheck: Option<RawHealthCheck>,
-    #[serde(default)]
-    success_exit_codes: Vec<i32>,
-    #[serde(default)]
-    depends_on: BTreeMap<String, RawDependency>,
-    #[serde(default)]
-    restart: RawRestartPolicy,
-    #[serde(default = "default_restart_delay_ms")]
-    restart_delay_ms: u64,
-    #[serde(default = "default_shutdown_timeout_ms")]
-    shutdown_timeout_ms: u64,
-}
-
-/// 原始配置中的依赖边 DTO。
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawDependency {
-    #[serde(default)]
-    condition: RawDependencyCondition,
-}
-
-/// 原始配置支持的依赖条件拼写。
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum RawDependencyCondition {
-    #[default]
-    Started,
-    Healthy,
-    CompletedSuccessfully,
-}
-
 /// 原始配置支持的重启策略拼写。
-#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum RawRestartPolicy {
     #[default]
     Never,
     OnFailure,
     Always,
-}
-
-impl RawProject {
-    /// 校验并规范化原始 DTO，独立错误尽量一次返回。
-    pub(crate) fn normalize(
-        self,
-        base_directory: Option<&Path>,
-    ) -> Result<(ProjectSpec, ManagedDependencies), Vec<ConfigDiagnostic>> {
-        let mut diagnostics = Vec::new();
-        let version = self.version.unwrap_or_else(|| {
-            diagnostics.push(diagnostic("version", "缺少必需字段"));
-            0
-        });
-        if version != 0 && version != 1 {
-            diagnostics.push(diagnostic(
-                "version",
-                format!("不支持版本 {version}，当前只支持版本 1"),
-            ));
-        }
-        let project = normalize_project(self.project, &mut diagnostics);
-        let dependencies = normalize_dependencies(self.dependencies, &mut diagnostics);
-        let valid_ids = self
-            .tasks
-            .keys()
-            .filter_map(|value| value.parse::<TaskId>().ok())
-            .collect::<BTreeSet<_>>();
-        let mut tasks = BTreeMap::new();
-        for (raw_id, raw_task) in self.tasks {
-            let path = format!("tasks.{raw_id}");
-            let Ok(task_id) = raw_id.parse::<TaskId>() else {
-                diagnostics.push(diagnostic(&path, "Task ID 包含非法字符"));
-                continue;
-            };
-            let task = normalize_task(
-                raw_task,
-                &path,
-                base_directory,
-                &valid_ids,
-                &mut diagnostics,
-            );
-            tasks.insert(task_id, task);
-        }
-        if diagnostics.is_empty() {
-            Ok((
-                ProjectSpec {
-                    version,
-                    project,
-                    tasks,
-                },
-                dependencies,
-            ))
-        } else {
-            Err(diagnostics)
-        }
-    }
 }
 
 /// 校验并规范化全部项目级管理依赖。
@@ -333,34 +276,14 @@ fn normalize_task(
     path: &str,
     base_directory: Option<&Path>,
     valid_ids: &BTreeSet<TaskId>,
+    project_env: &BTreeMap<String, String>,
+    validate_runtime_limits: bool,
     diagnostics: &mut Vec<ConfigDiagnostic>,
 ) -> TaskSpec {
-    let command = raw.command.unwrap_or_else(|| {
-        diagnostics.push(diagnostic(format!("{path}.command"), "缺少必需字段"));
-        String::new()
-    });
-    if command.trim().is_empty() {
-        diagnostics.push(diagnostic(format!("{path}.command"), "命令不能为空"));
+    if validate_runtime_limits {
+        raw.validate_runtime_limits(path, diagnostics);
     }
-    if raw.shutdown_timeout_ms == 0 {
-        diagnostics.push(diagnostic(
-            format!("{path}.shutdown_timeout_ms"),
-            "必须大于零",
-        ));
-    } else if raw.shutdown_timeout_ms > MAX_SHUTDOWN_TIMEOUT_MS {
-        diagnostics.push(diagnostic(
-            format!("{path}.shutdown_timeout_ms"),
-            format!("不能超过 {MAX_SHUTDOWN_TIMEOUT_MS} 毫秒"),
-        ));
-    }
-    if raw.restart_delay_ms == 0 {
-        diagnostics.push(diagnostic(format!("{path}.restart_delay_ms"), "必须大于零"));
-    } else if raw.restart_delay_ms > MAX_RESTART_DELAY_MS {
-        diagnostics.push(diagnostic(
-            format!("{path}.restart_delay_ms"),
-            format!("不能超过 {MAX_RESTART_DELAY_MS} 毫秒"),
-        ));
-    }
+    let (command, args) = command::normalize(raw.command, raw.args, path, diagnostics);
     let mut depends_on = BTreeMap::new();
     for (raw_dependency, dependency) in raw.depends_on {
         let dependency_path = format!("{path}.depends_on.{raw_dependency}");
@@ -379,6 +302,7 @@ fn normalize_task(
     }
     let mut success_exit_codes = raw
         .success_exit_codes
+        .unwrap_or_default()
         .into_iter()
         .filter(|code| {
             if *code < 0 {
@@ -393,17 +317,27 @@ fn normalize_task(
         })
         .collect::<BTreeSet<_>>();
     success_exit_codes.insert(0);
+    let mut env = project_env.clone();
+    env.extend(raw.env);
     TaskSpec {
         command,
-        args: raw.args,
+        args,
         cwd: raw.cwd.map(|path| normalize_path(&path, base_directory)),
-        env: raw.env,
+        env,
         healthcheck: normalize_healthcheck(raw.healthcheck, path, base_directory, diagnostics),
         success_exit_codes,
         depends_on,
-        restart: raw.restart.into(),
-        restart_delay_ms: raw.restart_delay_ms,
-        shutdown_timeout_ms: raw.shutdown_timeout_ms,
+        restart: raw.restart.unwrap_or_default().into(),
+        restart_delay_ms: raw
+            .restart_delay_ms
+            .unwrap_or_else(default_restart_delay_ms),
+        max_restarts: raw.max_restarts.unwrap_or_default(),
+        restart_reset_after_ms: raw
+            .restart_reset_after_ms
+            .unwrap_or_else(default_restart_reset_after_ms),
+        shutdown_timeout_ms: raw
+            .shutdown_timeout_ms
+            .unwrap_or_else(default_shutdown_timeout_ms),
     }
 }
 
@@ -432,63 +366,5 @@ fn diagnostic(path: impl Into<String>, message: impl Into<String>) -> ConfigDiag
     ConfigDiagnostic {
         path: path.into(),
         message: message.into(),
-    }
-}
-
-/// 默认重启退避毫秒数。
-const fn default_restart_delay_ms() -> u64 {
-    500
-}
-
-/// 默认停止宽限毫秒数。
-const fn default_shutdown_timeout_ms() -> u64 {
-    5_000
-}
-
-/// 配置允许的最大自动重启基础退避时间。
-const MAX_RESTART_DELAY_MS: u64 = 30_000;
-
-/// 配置允许的最大单 Task 优雅停止时间。
-const MAX_SHUTDOWN_TIMEOUT_MS: u64 = 300_000;
-
-impl From<RawDependencyCondition> for DependencyCondition {
-    fn from(value: RawDependencyCondition) -> Self {
-        match value {
-            RawDependencyCondition::Started => Self::Started,
-            RawDependencyCondition::Healthy => Self::Healthy,
-            RawDependencyCondition::CompletedSuccessfully => Self::CompletedSuccessfully,
-        }
-    }
-}
-
-impl From<RawRestartPolicy> for RestartPolicy {
-    fn from(value: RawRestartPolicy) -> Self {
-        match value {
-            RawRestartPolicy::Never => Self::Never,
-            RawRestartPolicy::OnFailure => Self::OnFailure,
-            RawRestartPolicy::Always => Self::Always,
-        }
-    }
-}
-
-impl From<RawDependencyKind> for DependencyKind {
-    /// 把配置拼写映射为依赖内容类型。
-    fn from(value: RawDependencyKind) -> Self {
-        match value {
-            RawDependencyKind::Auto => Self::Auto,
-            RawDependencyKind::Binary => Self::Binary,
-            RawDependencyKind::File => Self::File,
-            RawDependencyKind::Directory => Self::Directory,
-        }
-    }
-}
-
-impl From<RawUnpackMode> for UnpackMode {
-    /// 把配置拼写映射为解包模式。
-    fn from(value: RawUnpackMode) -> Self {
-        match value {
-            RawUnpackMode::Auto => Self::Auto,
-            RawUnpackMode::Never => Self::Never,
-        }
     }
 }

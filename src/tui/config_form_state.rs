@@ -20,6 +20,8 @@ pub(crate) enum FormEvent {
     None,
     /// 表单内容已变更，需要重新生成配置文本。
     Changed,
+    /// profile 已切换，需要重编译并刷新有效值预览。
+    Reload,
     /// 需要显示提示。
     Message(String),
 }
@@ -89,9 +91,28 @@ impl FormState {
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
             KeyCode::Enter => self.open_current(),
+            KeyCode::Char('h') => self.open_health(),
             KeyCode::Char('n') => self.open_new(),
             KeyCode::Char('d') => self.request_delete(),
             _ => FormEvent::None,
+        }
+    }
+
+    /// 为当前选中 Task 打开独立健康检查编辑弹窗。
+    fn open_health(&mut self) -> FormEvent {
+        if self.pane != FormPane::Tasks {
+            return FormEvent::Message("请先切换到 Task 区域".to_owned());
+        }
+        self.dialog = self.task_name().and_then(|name| {
+            self.config
+                .tasks
+                .get(&name)
+                .map(|task| Dialog::health(&name, task))
+        });
+        if self.dialog.is_some() {
+            FormEvent::None
+        } else {
+            FormEvent::Message("当前列表为空；请先新建 Task".to_owned())
         }
     }
 
@@ -147,7 +168,7 @@ impl FormState {
     fn open_new(&mut self) -> FormEvent {
         self.dialog = Some(match self.pane {
             FormPane::Project => Dialog::project(&self.config),
-            FormPane::Tasks => Dialog::new_task(),
+            FormPane::Tasks => Dialog::new_task(&self.config),
             FormPane::Dependencies => Dialog::new_dependency(),
         });
         FormEvent::None
@@ -235,9 +256,13 @@ impl FormState {
     fn commit_dialog(&mut self) -> FormEvent {
         let dialog = self.dialog.take().expect("弹窗状态存在");
         match dialog.commit(&mut self.config) {
-            Ok(()) => {
+            Ok(reload) => {
                 self.clamp_selection();
-                FormEvent::Changed
+                if reload {
+                    FormEvent::Reload
+                } else {
+                    FormEvent::Changed
+                }
             }
             Err(message) => {
                 self.dialog = Some(dialog);
