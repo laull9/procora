@@ -22,14 +22,14 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 
 这个默认入口不会仅因打开 TUI 而留下新的后台进程。需要持久托管时使用 `procora add <path>`。
 
-连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。
+连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。Task、依赖和表单等字段型文本只有超出区域宽度时才响应左右方向键；日志是统一的大块纯文本视口，任一日志行需要横移时全部行使用同一偏移。`F3` 开关当前页面的自动横移，速度固定为每秒 4 个字符；字段型文本在自动模式下仍只移动实际溢出的行。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
 
 已知命令优先于同名路径；同名路径使用 `./status` 这类显式路径。命令和子命令支持唯一前缀推断，接近但不唯一或拼写错误的输入会显示最相近命令；运行期错误统一提示通过 `procora --help` 查看完整用法。
 
 ## 3. 项目初始化与中心进程
 
 - `procora init --config yaml|json|toml`：在当前目录写入不依赖 Cargo 的可运行示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。交互式终端会自动进入配置编辑页，脚本使用 `--no-edit` 跳过。
-- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。项目弹窗可编辑项目变量、基础项目环境、`task_defaults`，并在已声明 profile 与基础配置之间循环切换；独立 Profiles 区域可新增、编辑、重命名和删除 profile，包括继承目标、可空/显式空 Task 白名单、环境及默认层覆盖。变量或 profile 改变后立即重编译活动 Task 和有效来源预览，保存时保留变量表达式、未准入 Task 及 profile 原始声明；重命名会同步活动选择和直接继承引用，仍被继承的 profile 不能删除。项目卡片显示变量解析数、活动 profile、准入 Task 数和模板数；Task 弹窗可填写 `extends` 选择模板、预览具体来源并只保存局部覆盖，依赖字段接受 `task:condition` 及 process-compose 条件别名，保存时规范化为数组或标量 map；生命周期与健康检查时长接受 `750ms`、`5s`、`1m30s` 并保存为带单位的新字段；模板定义使用 F2 高级文本编辑。Task 命令字段可直接输入带引号的完整命令文本，保存时规范化为精确 argv。新建和保存 Task 不会复制继承值；覆盖字段留空、或把重启策略设为 `inherit`，会删除本地覆盖并恢复模板/profile/项目/内建默认。通过 `Tab` 或左右方向键在项目、Task、管理依赖和 Profiles 间切换，`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F1` 在配置有效时返回表单；未保存退出需要二次确认。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
+- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。项目弹窗可编辑项目变量、基础项目环境、`task_defaults`，并在已声明 profile 与基础配置之间循环切换；独立 Profiles 区域可新增、编辑、重命名和删除 profile，包括继承目标、可空/显式空 Task 白名单、环境及默认层覆盖。变量或 profile 改变后立即重编译活动 Task 和有效来源预览，保存时保留变量表达式、未准入 Task 及 profile 原始声明；重命名会同步活动选择和直接继承引用，仍被继承的 profile 不能删除。项目卡片显示变量解析数、活动 profile、准入 Task 数和模板数；Task 弹窗可填写 `extends` 选择模板、预览具体来源并只保存局部覆盖，依赖字段接受 `task:condition` 及 process-compose 条件别名，保存时规范化为数组或标量 map；生命周期与健康检查时长接受 `750ms`、`5s`、`1m30s` 并保存为带单位的新字段，健康检查弹窗根据 `none`、`exec`、`http` 类型只显示适用字段；模板定义使用 F2 高级文本编辑。Task 命令字段可直接输入带引号的完整命令文本，保存时规范化为精确 argv。新建和保存 Task 不会复制继承值；覆盖字段留空、或把重启策略设为 `inherit`，会删除本地覆盖并恢复模板/profile/项目/内建默认。通过 `Tab` 或 `Shift-Tab` 切换区域，上下方向键在列表边界自动跨区，左右方向键只横移当前高亮的溢出文本，`F3` 开关全局自动横移；`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F1` 在配置有效时返回表单；未保存退出需要二次确认。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
 - `procora clean [path]`：删除服务目录下的 `.procora` 运行时目录，包括日志和管理依赖缓存；省略路径时使用当前目录。配置文件和其他项目文件不会删除，目录不存在时正常返回。
 - `procora deps [path]`：同步项目声明依赖；`--check` 仅依据版本清单、目标类型和版本命令离线复核。
 - `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
@@ -38,7 +38,9 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
 - `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。
+- `procora mcp`：通过 stdio 运行本地 MCP 服务，向可信客户端提供配置查询、服务生命周期工具和内嵌文档 Prompts；不监听网络端口。完整接口见 [MCP 本地服务](mcp.md)。
 - `procora config <path>`：输出原始/解析变量及逐字段引用、活动 profile、可选 profile/模板列表、`profile_extends` 直接继承映射、项目环境、`task_defaults`、命令文本/argv 简写、其他默认值和目录规范化全部展开后的稳定有效配置 JSON，并在 `origins` 中说明各 Task 字段、依赖边及最终环境变量来自内建默认、项目 env、Task 默认层、profile、具体命名模板、env_file 还是 Task；不会下载依赖、注册服务或启动 Task。
+- 结构化配置编辑页中，Task 的“工作目录覆盖”字段可按 F5 打开跨平台目录浏览器；选定结果优先保存为相对配置目录的 `cwd`。
 - `procora source git preview <repository> [--reference REF] [--config PATH]`：受限获取 Git 引用，输出完整 commit、组合修订和配置校验结果；`--local` 才允许显式本地仓库。不会启动 Center、注册服务或运行 Task。
 - `procora source git confirm <repository> <revision> [...]`：按相同来源参数重新获取，只有仓库、commit 与配置闭包修订仍匹配时成功；仍不自动应用。默认缓存位于当前用户 Procora 数据目录，也可用 `--cache` 覆盖。
 

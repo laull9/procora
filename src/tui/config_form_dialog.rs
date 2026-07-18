@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
-
 use crossterm::event::{KeyCode, KeyEvent};
 
+pub(super) use super::config_form_field::{
+    DialogField, choice_field, directory_field, field, map_field,
+};
 pub(super) use super::config_form_value::{
     args_text, dependencies_text, map_text, optional, parse_args, parse_dependencies,
     parse_duration, parse_i32_list, parse_map, parse_u32, replace_entry, required_value,
@@ -13,6 +14,10 @@ use super::{
     config_map_dialog::MapEditor,
     config_profile::{self, FormProfile},
     config_task_defaults, config_task_dialog,
+};
+use super::{
+    config_directory_picker::DirectoryPicker,
+    config_form_field::{DialogFieldKind, char_to_byte},
 };
 
 /// 弹窗正在编辑的实体类型。
@@ -26,31 +31,14 @@ enum DialogKind {
     DependencyAdvanced(String, Box<FormDependency>),
 }
 
-/// 表单字段的可编辑值和可选枚举值。
-#[derive(Clone, Debug)]
-pub(super) struct DialogField {
-    pub(super) label: &'static str,
-    pub(super) value: String,
-    pub(super) choices: Vec<String>,
-    cursor: usize,
-    kind: DialogFieldKind,
-}
-
-/// 弹窗字段采用的输入控件类型。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DialogFieldKind {
-    Text,
-    Choice,
-    Map,
-}
-
 /// 表单输入弹窗。
 #[derive(Clone, Debug)]
 pub(crate) struct Dialog {
     kind: DialogKind,
-    fields: Vec<DialogField>,
-    selected: usize,
+    pub(super) fields: Vec<DialogField>,
+    pub(super) selected: usize,
     map_editor: Option<MapEditor>,
+    pub(super) directory_picker: Option<DirectoryPicker>,
 }
 
 impl Dialog {
@@ -61,6 +49,7 @@ impl Dialog {
             fields: config_task_defaults::project_fields(config),
             selected: 0,
             map_editor: None,
+            directory_picker: None,
         }
     }
 
@@ -86,6 +75,7 @@ impl Dialog {
             fields: config_task_dialog::fields(original, task),
             selected: 0,
             map_editor: None,
+            directory_picker: None,
         }
     }
 
@@ -100,6 +90,7 @@ impl Dialog {
             fields: config_profile::fields(original, profile, config),
             selected: 0,
             map_editor: None,
+            directory_picker: None,
         }
     }
 
@@ -110,6 +101,7 @@ impl Dialog {
             fields: config_health_dialog::fields(task),
             selected: 0,
             map_editor: None,
+            directory_picker: None,
         }
     }
 
@@ -147,6 +139,7 @@ impl Dialog {
             ],
             selected: 0,
             map_editor: None,
+            directory_picker: None,
         }
     }
 
@@ -209,6 +202,7 @@ impl Dialog {
             ],
             selected: 0,
             map_editor: None,
+            directory_picker: None,
         }
     }
 
@@ -232,12 +226,23 @@ impl Dialog {
         self.fields
             .iter()
             .enumerate()
+            .filter(|(index, _)| self.field_visible(*index))
             .map(|(index, field)| (field.label, field.value.as_str(), index == self.selected))
     }
 
     /// 返回字段数量与当前选择，供窄终端滚动显示。
-    pub(crate) const fn field_position(&self) -> (usize, usize) {
-        (self.fields.len(), self.selected)
+    pub(crate) fn field_position(&self) -> (usize, usize) {
+        let mut count = 0;
+        let mut selected = 0;
+        for index in 0..self.fields.len() {
+            if self.field_visible(index) {
+                if index == self.selected {
+                    selected = count;
+                }
+                count += 1;
+            }
+        }
+        (count, selected)
     }
 
     /// 返回当前字段是否为选择器。
@@ -252,7 +257,7 @@ impl Dialog {
 
     /// 返回当前可直接输入的字段，选择器和子弹窗不显示文本光标。
     pub(crate) fn selected_input(&self) -> Option<(&str, &str, usize)> {
-        if self.map_editor.is_some() {
+        if self.map_editor.is_some() || self.directory_picker.is_some() {
             return None;
         }
         let field = &self.fields[self.selected];
@@ -314,13 +319,18 @@ impl Dialog {
 
     /// 移动弹窗字段选择。
     pub(crate) fn next_field(&mut self, forward: bool) {
-        self.selected = if forward {
-            (self.selected + 1) % self.fields.len()
-        } else {
-            self.selected
-                .checked_sub(1)
-                .unwrap_or(self.fields.len() - 1)
-        };
+        let mut next = self.selected;
+        loop {
+            next = if forward {
+                (next + 1) % self.fields.len()
+            } else {
+                next.checked_sub(1).unwrap_or(self.fields.len() - 1)
+            };
+            if self.field_visible(next) {
+                self.selected = next;
+                break;
+            }
+        }
     }
 
     /// 循环当前字段的可选值。
@@ -414,54 +424,15 @@ impl Dialog {
         }
         Ok(false)
     }
-}
 
-/// 创建一个弹窗字段。
-pub(super) fn field(
-    label: &'static str,
-    value: &str,
-    choices: &'static [&'static str],
-) -> DialogField {
-    DialogField {
-        label,
-        value: value.to_owned(),
-        choices: choices.iter().map(|value| (*value).to_owned()).collect(),
-        cursor: value.chars().count(),
-        kind: if choices.is_empty() {
-            DialogFieldKind::Text
-        } else {
-            DialogFieldKind::Choice
-        },
+    /// 返回字段在当前弹窗模式下是否应该显示和参与导航。
+    fn field_visible(&self, index: usize) -> bool {
+        if !matches!(&self.kind, DialogKind::Health(_)) {
+            return true;
+        }
+        matches!(
+            (self.fields[0].value.as_str(), index),
+            (_, 0 | 10..=14) | ("exec", 1..=3) | ("http", 4..=9)
+        )
     }
-}
-
-/// 创建运行期生成选项的弹窗字段。
-pub(super) fn choice_field(label: &'static str, value: &str, choices: Vec<String>) -> DialogField {
-    DialogField {
-        label,
-        value: value.to_owned(),
-        choices,
-        cursor: value.chars().count(),
-        kind: DialogFieldKind::Choice,
-    }
-}
-
-/// 创建使用键值表子弹窗编辑的映射字段。
-pub(super) fn map_field(label: &'static str, values: &BTreeMap<String, String>) -> DialogField {
-    let value = map_text(values);
-    DialogField {
-        label,
-        cursor: value.chars().count(),
-        value,
-        choices: Vec::new(),
-        kind: DialogFieldKind::Map,
-    }
-}
-
-/// 把字符序号转换为 UTF-8 字节位置。
-fn char_to_byte(value: &str, index: usize) -> usize {
-    value
-        .char_indices()
-        .nth(index)
-        .map_or(value.len(), |(byte, _)| byte)
 }

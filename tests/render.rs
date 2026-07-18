@@ -7,6 +7,7 @@ use procora::core::TaskId;
 use procora::protocol::SnapshotSourceDto;
 use procora::tui::App;
 use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
+use std::time::Duration;
 use std::{fmt::Write as _, str::FromStr};
 
 /// 把测试终端缓冲转换成便于断言的文本。
@@ -35,6 +36,61 @@ fn wide_task_view_shows_details_and_connection_state() {
     assert!(text.contains("预览"));
     assert!(text.contains("api"));
     assert!(text.contains("等待database启动"));
+}
+
+#[test]
+// 水平移动只影响溢出的长字段，未折叠的字段保持原位。
+fn horizontal_scroll_only_moves_overflowing_task_text() {
+    let mut snapshot = support::snapshot();
+    snapshot.tasks[0].command = format!("BEGIN-{}-END", "x".repeat(100));
+    snapshot.tasks[0].message = Some("短说明".to_owned());
+    let mut app = App::new(snapshot);
+
+    let initial = render_text(&app, 80, 20);
+    for _ in 0..8 {
+        app.handle_key(KeyCode::Right);
+    }
+    let shifted = render_text(&app, 80, 20);
+
+    assert!(initial.contains("BEGIN-"));
+    assert!(!shifted.contains("BEGIN-"));
+    assert!(shifted.contains("任务database"));
+    assert!(shifted.contains("健康未配置"));
+    assert!(shifted.contains("说明短说明"));
+}
+
+#[test]
+// F3自动滚动会移动全局所有溢出文本，包括未高亮的列表项。
+fn automatic_horizontal_scroll_moves_non_selected_overflowing_text() {
+    let mut snapshot = support::snapshot();
+    snapshot.tasks[1].task_id = TaskId::from_str(&format!("prefix-{}", "x".repeat(70))).unwrap();
+    let mut app = App::new(snapshot);
+
+    for _ in 0..8 {
+        app.handle_key(KeyCode::Right);
+    }
+    assert!(render_text(&app, 80, 20).contains("prefix-"));
+
+    app.handle_key(KeyCode::F(3));
+    assert!(app.advance_auto_scroll(Duration::from_secs(2)));
+    assert!(!render_text(&app, 80, 20).contains("prefix-"));
+}
+
+#[test]
+// 开启自动横移后，未溢出的短字段仍保持原位。
+fn automatic_horizontal_scroll_keeps_non_overflowing_fields_fixed() {
+    let mut snapshot = support::snapshot();
+    snapshot.tasks[0].command = format!("BEGIN-{}-END", "x".repeat(100));
+    snapshot.tasks[0].message = Some("SHORT-STABLE".to_owned());
+    let mut app = App::new(snapshot);
+
+    app.handle_key(KeyCode::F(3));
+    assert!(app.advance_auto_scroll(Duration::from_secs(2)));
+    let shifted = render_text(&app, 80, 20);
+
+    assert!(!shifted.contains("BEGIN-"));
+    assert!(shifted.contains("说明SHORT-STABLE"));
+    assert!(shifted.contains("任务database"));
 }
 
 #[test]
@@ -106,6 +162,41 @@ fn log_tab_follows_tail_and_pages_to_history() {
     assert!(history.contains("已上翻40行"));
     assert!(history.contains("record-01"));
     assert!(!history.contains("record-40"));
+}
+
+#[test]
+// 日志是统一的大文本视口，短行会与长行使用相同的水平偏移。
+fn log_horizontal_scroll_moves_the_whole_text_viewport() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    let content = format!("short-line\nBEGIN-{}-END\n", "x".repeat(100));
+    app.append_log(task_id, content.as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+
+    for _ in 0..8 {
+        app.handle_key(KeyCode::Right);
+    }
+    let shifted = render_text(&app, 50, 16);
+
+    assert!(!shifted.contains("short-line"));
+    assert!(!shifted.contains("BEGIN-"));
+}
+
+#[test]
+// 日志自动横移与手动横移保持相同的整块文本视口语义。
+fn automatic_log_horizontal_scroll_moves_the_whole_text_viewport() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    let content = format!("short-line\nBEGIN-{}-END\n", "x".repeat(100));
+    app.append_log(task_id, content.as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+
+    app.handle_key(KeyCode::F(3));
+    assert!(app.advance_auto_scroll(Duration::from_secs(2)));
+    let shifted = render_text(&app, 50, 16);
+
+    assert!(!shifted.contains("short-line"));
+    assert!(!shifted.contains("BEGIN-"));
 }
 
 #[test]

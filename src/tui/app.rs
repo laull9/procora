@@ -1,10 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 
 use crate::core::TaskId;
 use crate::protocol::{ProjectSnapshot, ServiceActionDto, TaskView};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::Frame;
 
+use super::text_view;
 use super::ui;
 
 /// 单次日志翻页移动的逻辑行数。
@@ -77,7 +81,7 @@ pub struct App {
     log_buffers: BTreeMap<TaskId, Vec<u8>>,
     log_gaps: BTreeSet<TaskId>,
     log_scrolls: BTreeMap<TaskId, usize>,
-    horizontal_offset: usize,
+    horizontal_scroll: text_view::HorizontalScroll,
 }
 
 impl App {
@@ -100,7 +104,7 @@ impl App {
             log_buffers: BTreeMap::new(),
             log_gaps: BTreeSet::new(),
             log_scrolls: BTreeMap::new(),
-            horizontal_offset: 0,
+            horizontal_scroll: text_view::HorizontalScroll::default(),
         }
     }
 
@@ -122,7 +126,7 @@ impl App {
             self.should_quit,
             self.pending_action,
             self.current_log_scroll(),
-            self.horizontal_offset,
+            self.horizontal_scroll,
         );
         match key {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
@@ -132,6 +136,7 @@ impl App {
             KeyCode::BackTab => self.switch_tab(self.active_tab.previous()),
             KeyCode::Left => self.scroll_horizontal(false),
             KeyCode::Right => self.scroll_horizontal(true),
+            KeyCode::F(3) => self.toggle_auto_scroll(),
             KeyCode::Char('1') => self.switch_tab(ActiveTab::Tasks),
             KeyCode::Char('2') => self.switch_tab(ActiveTab::Dependencies),
             KeyCode::Char('3') => self.switch_tab(ActiveTab::Logs),
@@ -159,7 +164,7 @@ impl App {
                 self.should_quit,
                 self.pending_action,
                 self.current_log_scroll(),
-                self.horizontal_offset,
+                self.horizontal_scroll,
             )
     }
 
@@ -244,7 +249,33 @@ impl App {
 
     /// 返回当前页面选中文本的水平字符偏移。
     pub const fn horizontal_offset(&self) -> usize {
-        self.horizontal_offset
+        self.horizontal_scroll.manual_offset()
+    }
+
+    /// 返回折叠文本全局自动滚动是否开启。
+    pub const fn auto_scroll_enabled(&self) -> bool {
+        self.horizontal_scroll.auto_enabled()
+    }
+
+    /// 返回一段文本应使用的水平偏移；自动模式覆盖所有文本。
+    pub(crate) const fn text_offset(&self, selected: bool) -> usize {
+        self.horizontal_scroll.offset(selected)
+    }
+
+    /// 返回非选中界面文本仅在自动模式下使用的水平偏移。
+    pub(crate) const fn automatic_text_offset(&self) -> usize {
+        self.horizontal_scroll.automatic_offset()
+    }
+
+    /// 推进一次全局折叠文本自动滚动，并在到达末尾后回到起点。
+    pub fn advance_auto_scroll(&mut self, elapsed: Duration) -> bool {
+        let maximum = super::app_horizontal::page_text_maximum(self, true).saturating_sub(1);
+        self.horizontal_scroll.advance(elapsed, maximum)
+    }
+
+    /// 返回当前高亮文本是否处于手动滚动冻结期。
+    pub const fn manual_scroll_frozen(&self) -> bool {
+        self.horizontal_scroll.manual_frozen()
     }
 
     /// 设置是否使用适合低能力终端的纯文本显示。
@@ -352,7 +383,7 @@ impl App {
     fn select_next(&mut self) {
         if !self.snapshot.tasks.is_empty() {
             self.selected = (self.selected + 1) % self.snapshot.tasks.len();
-            self.horizontal_offset = 0;
+            self.horizontal_scroll.reset_position();
         }
     }
 
@@ -363,70 +394,25 @@ impl App {
                 .selected
                 .checked_sub(1)
                 .unwrap_or(self.snapshot.tasks.len() - 1);
-            self.horizontal_offset = 0;
+            self.horizontal_scroll.reset_position();
         }
     }
 
     /// 切换页签并让新页面从文本起点开始显示。
     fn switch_tab(&mut self, tab: ActiveTab) {
         self.active_tab = tab;
-        self.horizontal_offset = 0;
+        self.horizontal_scroll.reset_position();
     }
 
     /// 在当前页面最长的相关文本范围内移动水平视口。
     fn scroll_horizontal(&mut self, forward: bool) {
-        let maximum = match self.active_tab {
-            ActiveTab::Tasks => self.selected_task().map_or(0, |task| {
-                let dependencies = task
-                    .dependencies
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                [
-                    task.task_id.as_str().chars().count(),
-                    task.command.chars().count(),
-                    dependencies.chars().count(),
-                    task.message
-                        .as_deref()
-                        .map_or(0, |value| value.chars().count()),
-                ]
-                .into_iter()
-                .max()
-                .unwrap_or(0)
-            }),
-            ActiveTab::Dependencies => self
-                .snapshot
-                .tasks
-                .iter()
-                .map(|task| {
-                    let dependency = task
-                        .dependencies
-                        .iter()
-                        .map(ToString::to_string)
-                        .map(|value| value.chars().count())
-                        .max()
-                        .unwrap_or(0);
-                    dependency.saturating_add(task.task_id.as_str().chars().count() + 4)
-                })
-                .max()
-                .unwrap_or(0),
-            ActiveTab::Logs => self
-                .selected_task()
-                .and_then(|task| self.log_text(&task.task_id))
-                .map_or(0, |text| {
-                    text.lines()
-                        .map(|line| line.chars().count())
-                        .max()
-                        .unwrap_or(0)
-                }),
-        }
-        .saturating_sub(1);
-        self.horizontal_offset = if forward {
-            self.horizontal_offset.saturating_add(1).min(maximum)
-        } else {
-            self.horizontal_offset.saturating_sub(1)
-        };
+        let maximum = super::app_horizontal::page_text_maximum(self, false).saturating_sub(1);
+        self.horizontal_scroll.scroll_manual(forward, maximum);
+    }
+
+    /// 切换全局自动滚动并让新模式从文本起点开始。
+    fn toggle_auto_scroll(&mut self) {
+        self.horizontal_scroll.toggle_auto();
     }
 
     /// 返回当前任务的日志滚动距离。

@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use super::{
+    config_directory_picker::DirectoryPicker,
     config_form_dialog::Dialog,
     config_map_dialog::{MapColumn, MapEditor},
     config_ui_support::{centered_rect, focus_style},
@@ -62,7 +63,9 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
     let scroll = selected
         .saturating_sub(visible_lines.saturating_sub(1))
         .min(field_count.saturating_sub(visible_lines));
-    let hint = if dialog.selected_is_map() {
+    let hint = if dialog.selected_is_directory() {
+        "F5 浏览目录；也可直接输入，Enter 确认"
+    } else if dialog.selected_is_map() {
         "F4 键值表；←→ 移动光标，↑↓ 切换字段，Enter 确认"
     } else if selected_is_choice {
         "↑↓ 切换字段，←→ 选择选项，Enter 确认，Esc 取消"
@@ -89,6 +92,42 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
     if let Some(editor) = dialog.map_editor() {
         render_map_editor(frame, editor);
     }
+    if let Some(picker) = dialog.directory_picker() {
+        render_directory_picker(frame, picker);
+    }
+}
+
+/// 绘制跨平台目录选择子弹窗。
+fn render_directory_picker(frame: &mut Frame<'_>, picker: &DirectoryPicker) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let height = u16::try_from(picker.entries().count().saturating_add(5))
+        .unwrap_or(u16::MAX)
+        .min(frame.area().height.saturating_sub(4))
+        .max(8);
+    let area = centered_rect(78, height, frame.area());
+    frame.render_widget(Clear, area);
+    let mut items = picker
+        .entries()
+        .map(|(label, selected)| {
+            ListItem::new(label).style(if selected {
+                focus_style()
+            } else {
+                Style::default()
+            })
+        })
+        .collect::<Vec<_>>();
+    if let Some(error) = picker.error() {
+        items.push(ListItem::new(format!("⚠ {error}")));
+    }
+    let mut state = ListState::default().with_selected(Some(picker.selected()));
+    let list = List::new(items).highlight_symbol("› ").block(
+        Block::default()
+            .title(format!("选择运行目录 · {}", picker.location()))
+            .title_bottom("↑↓ 选择 · Enter/→ 打开 · Space 选定当前目录 · ← 返回 · Esc 取消")
+            .borders(Borders::ALL),
+    );
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 /// 把光标放在可编辑字段的真实字符位置。

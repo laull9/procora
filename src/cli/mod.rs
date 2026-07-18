@@ -1,5 +1,7 @@
 //! Procora 命令行参数与中心服务器客户端入口。
 
+/// CLI 与其他本地入口共享的程序化接口。
+pub mod api;
 mod autostart_command;
 mod center_runtime;
 #[cfg(target_os = "windows")]
@@ -168,6 +170,8 @@ pub enum Command {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+    /// 通过标准输入输出运行本地 MCP 服务。
+    Mcp,
     /// 运行内部全局服务器进程。
     #[command(name = "__daemon", hide = true)]
     Daemon {

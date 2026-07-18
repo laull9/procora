@@ -12,6 +12,8 @@ pub mod daemon;
 pub mod engine;
 /// 任务日志帧、文件存储与尾部缓冲。
 pub mod log;
+/// 面向本地智能体的 MCP stdio 服务。
+pub mod mcp;
 /// 受管任务进程的跨平台资源采样。
 pub mod monitor;
 /// 操作系统能力、标准目录与自启动集成。

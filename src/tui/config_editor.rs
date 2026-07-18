@@ -1,4 +1,4 @@
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf, time::Duration};
 
 use crate::config::{ConfigFormat, load_path_capture, load_path_text, load_str};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -225,6 +225,14 @@ impl ConfigEditor {
         self.horizontal_scroll
     }
 
+    /// 推进一次结构化表单的全局折叠文本自动滚动。
+    pub fn advance_auto_scroll(&mut self, elapsed: Duration) -> bool {
+        self.form
+            .as_mut()
+            .filter(|_| self.mode == EditorMode::Form)
+            .is_some_and(|form| form.advance_auto_scroll(elapsed))
+    }
+
     /// 更新首个可见行以保持光标在编辑区域内。
     pub fn ensure_visible(&mut self, height: usize) {
         if self.row < self.scroll {
@@ -403,12 +411,12 @@ impl ConfigEditor {
         };
         match compiled {
             Ok(compiled) => {
-                self.form = Some(FormState::new(FormConfig::from_compiled(
-                    compiled,
-                    self.path.parent(),
-                )));
+                self.form = Some(FormState::new(
+                    FormConfig::from_compiled(compiled, self.path.parent()),
+                    self.config_directory(),
+                ));
                 self.mode = EditorMode::Form;
-                "表单模式：Enter 编辑，h 健康检查，n 新建，d 删除，F2 高级文本"
+                "表单模式：Enter 编辑，h 健康检查，n 新建，d 删除，F3 自动滚动，F2 高级文本"
                     .clone_into(&mut self.message);
             }
             Err(error) => {
@@ -453,10 +461,10 @@ impl ConfigEditor {
                 self.changed();
                 if reload {
                     let profile = compiled.active_profile.clone();
-                    self.form = Some(FormState::new(FormConfig::from_compiled(
-                        compiled,
-                        self.path.parent(),
-                    )));
+                    self.form = Some(FormState::new(
+                        FormConfig::from_compiled(compiled, self.path.parent()),
+                        self.config_directory(),
+                    ));
                     self.message = profile.map_or_else(
                         || "已切换到基础配置预览；Ctrl-S 保存".to_owned(),
                         |name| format!("已切换到 profile `{name}` 预览；Ctrl-S 保存"),
@@ -465,5 +473,15 @@ impl ConfigEditor {
             }
             Err(error) => self.message = format!("配置无效：{error}"),
         }
+    }
+
+    /// 返回配置入口所在目录，优先使用可跨进程稳定传递的规范路径。
+    fn config_directory(&self) -> PathBuf {
+        let parent = self
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
     }
 }

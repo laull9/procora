@@ -84,6 +84,14 @@ fn service_management_commands_are_top_level() {
 }
 
 #[test]
+// mcp命令解析为本地标准输入输出服务入口。
+fn mcp_command_is_top_level() {
+    let cli = Cli::try_parse_from(["procora", "mcp"]).unwrap();
+
+    assert!(matches!(cli.command, Some(Command::Mcp)));
+}
+
+#[test]
 // 旧server层级保持隐藏兼容。
 fn legacy_server_hierarchy_remains_compatible() {
     let cli = Cli::try_parse_from(["procora", "server", "remove", "demo"]).unwrap();

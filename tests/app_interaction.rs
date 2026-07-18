@@ -3,6 +3,7 @@
 mod support;
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use procora::core::TaskId;
@@ -36,6 +37,36 @@ fn horizontal_keys_do_not_change_tabs() {
     app.handle_key(KeyCode::Left);
     assert_eq!(app.active_tab(), ActiveTab::Tasks);
     assert_eq!(app.horizontal_offset(), 0);
+}
+
+#[test]
+// F3切换全局折叠文本自动滚动并可按固定步进推进。
+fn f3_toggles_global_auto_scroll() {
+    let mut app = App::new(support::snapshot());
+
+    assert!(!app.auto_scroll_enabled());
+    assert!(app.handle_key(KeyCode::F(3)));
+    assert!(app.auto_scroll_enabled());
+    assert!(app.advance_auto_scroll(Duration::from_millis(250)));
+    assert!(app.handle_key(KeyCode::F(3)));
+    assert!(!app.auto_scroll_enabled());
+    assert!(!app.advance_auto_scroll(Duration::from_secs(1)));
+}
+
+#[test]
+// 手动横移会冻结高亮文本十秒，同时全局自动滚动继续推进。
+fn manual_scroll_freezes_selected_text_for_ten_seconds() {
+    let mut app = App::new(support::snapshot());
+    app.handle_key(KeyCode::F(3));
+    assert!(app.advance_auto_scroll(Duration::from_secs(1)));
+
+    app.handle_key(KeyCode::Right);
+    assert_eq!(app.horizontal_offset(), 5);
+    assert!(app.manual_scroll_frozen());
+    assert!(app.advance_auto_scroll(Duration::from_secs(9)));
+    assert!(app.manual_scroll_frozen());
+    assert!(app.advance_auto_scroll(Duration::from_secs(1)));
+    assert!(!app.manual_scroll_frozen());
 }
 
 #[test]

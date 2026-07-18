@@ -265,7 +265,9 @@ dependencies:
 - 依赖：`depends_on` 及每条边的满足条件。
 - 生命周期：`restart`、`restart_delay`、`max_restarts`、`restart_reset_after`、`shutdown_timeout`、`success_exit_codes`。
 
-`restart` 可取 `never`、`on-failure`、`always`。`restart_delay` 必须在 1ms–30s 之间，并按 30 秒封顶的指数退避应用。`max_restarts` 限制当前 generation 内的连续自动重启次数，默认 0 表示无限；达到上限后 Task 保持最终 `failed` 或 `exited` 状态，手动启动会清零计数。`restart_reset_after` 默认 1m，单次真实运行达到该稳定窗口后，下一次退出重新从首次退避和计数开始；`0ms` 表示永不自动重置，最大为 24h。`shutdown_timeout` 必须在 1ms–5m 之间，避免极端配置长期占用 Center 控制路径。相对 `cwd` 以配置文件所在目录解析并规范化，daemon 不修改自己的全局工作目录。
+`restart` 可取 `never`、`on-failure`、`always`。`restart_delay` 必须在 1ms–30s 之间，并按 30 秒封顶的指数退避应用。`max_restarts` 限制当前 generation 内的连续自动重启次数，默认 0 表示无限；达到上限后 Task 保持最终 `failed` 或 `exited` 状态，手动启动会清零计数。`restart_reset_after` 默认 1m，单次真实运行达到该稳定窗口后，下一次退出重新从首次退避和计数开始；`0ms` 表示永不自动重置，最大为 24h。`shutdown_timeout` 必须在 1ms–5m 之间，避免极端配置长期占用 Center 控制路径。Task 的 `dir` 是 `cwd` 的输入别名，结构化保存和有效配置统一输出 `cwd`；两者不能同时声明。相对 `cwd` 以配置文件所在目录解析并规范化，daemon 不修改自己的全局工作目录。
+
+结构化 TUI 的 Task 弹窗在“工作目录覆盖”字段提供 F5 目录浏览器。Linux 与 macOS 可浏览到文件系统根目录，Windows 在驱动器根继续返回时显示可用盘符；三平台均只列目录，并支持方向键/`j`/`k` 导航、Enter 进入、Space 选择当前位置、左方向键返回和 Esc 取消。选中目录会尽量写成相对配置入口的 `/` 分隔路径；Windows 跨盘选择无法相对化时保留绝对路径。
 
 `success_exit_codes` 是非负整数数组，退出码 0 无论是否显式声明都始终视为成功。该结果同时用于 `on-failure` 重启判断和 `completed_successfully` 依赖，例如 `[0, 130]` 可把收到信号后返回 130 的程序视为正常结束。
 

@@ -180,7 +180,7 @@ fn form_edits_and_saves_readable_durations() {
     press(&mut editor, KeyCode::Enter);
 
     press(&mut editor, KeyCode::Char('h'));
-    for _ in 0..11 {
+    for _ in 0..5 {
         press(&mut editor, KeyCode::Tab);
     }
     clear_field(&mut editor, 3);

@@ -66,6 +66,7 @@ fn help_command_runs() {
     assert!(stdout.contains("enable"));
     assert!(stdout.contains("disable"));
     assert!(stdout.contains("completions"));
+    assert!(stdout.contains("mcp"));
     let usage = if cfg!(windows) {
         "procora.exe [PATH]"
     } else {

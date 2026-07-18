@@ -1,18 +1,22 @@
 //! Procora 终端界面的状态、渲染与输入循环。
 
 mod app;
+mod app_horizontal;
 mod config_dependency;
 mod config_dependency_dialog;
 mod config_dialog_ui;
+mod config_directory_picker;
 mod config_editor;
 mod config_form;
 mod config_form_defaults;
 mod config_form_dialog;
+mod config_form_field;
 mod config_form_serialize;
 mod config_form_state;
 mod config_form_value;
 mod config_form_yaml;
 mod config_health_dialog;
+mod config_help_ui;
 mod config_highlight;
 mod config_map_dialog;
 mod config_profile;
@@ -35,6 +39,9 @@ use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
 };
+
+/// TUI 等待输入的最长间隔，兼顾后台刷新与低空转开销。
+const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
 
 pub use app::{ActiveTab, App};
 pub use config_editor::ConfigEditor;
@@ -76,12 +83,27 @@ pub struct LogUpdate {
 pub fn edit_config(path: &std::path::Path) -> io::Result<()> {
     let mut editor = ConfigEditor::open(path)?;
     ratatui::run(|terminal| {
+        let mut dirty = true;
+        let mut last_auto_scroll = Instant::now();
         loop {
-            terminal.draw(|frame| editor.render(frame))?;
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => editor.handle_key(key),
-                _ => {}
+            if dirty {
+                terminal.draw(|frame| editor.render(frame))?;
+                dirty = false;
             }
+            if event::poll(INPUT_MAX_WAIT)? {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        editor.handle_key(key);
+                        dirty = true;
+                    }
+                    Event::Resize(_, _) => dirty = true,
+                    _ => {}
+                }
+            }
+            let now = Instant::now();
+            let elapsed = now.saturating_duration_since(last_auto_scroll);
+            last_auto_scroll = now;
+            dirty |= editor.advance_auto_scroll(elapsed);
             if editor.should_quit() {
                 break Ok(());
             }
@@ -123,20 +145,27 @@ pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
+        let mut last_auto_scroll = Instant::now();
         loop {
             if dirty {
                 terminal.draw(|frame| app.render(frame))?;
                 dirty = false;
             }
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    let page_lines = log_viewport_lines(terminal.size()?.height);
-                    dirty |= app.handle_key_event_with_log_page(key, page_lines);
+            if event::poll(INPUT_MAX_WAIT)? {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        let page_lines = log_viewport_lines(terminal.size()?.height);
+                        dirty |= app.handle_key_event_with_log_page(key, page_lines);
+                    }
+                    Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
+                    Event::Resize(_, _) => dirty = true,
+                    _ => {}
                 }
-                Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
-                Event::Resize(_, _) => dirty = true,
-                _ => {}
             }
+            let now = Instant::now();
+            let elapsed = now.saturating_duration_since(last_auto_scroll);
+            last_auto_scroll = now;
+            dirty |= app.advance_auto_scroll(elapsed);
             if app.should_quit() {
                 break Ok(());
             }
@@ -154,7 +183,6 @@ pub fn run_live(
     control_allowed: bool,
     session: &mut dyn LiveSession,
 ) -> io::Result<()> {
-    const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
     const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(500);
     const LOG_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -165,6 +193,7 @@ pub fn run_live(
         let mut dirty = true;
         let mut next_snapshot = Instant::now();
         let mut next_log = Instant::now();
+        let mut last_auto_scroll = Instant::now();
         loop {
             if dirty {
                 terminal.draw(|frame| app.render(frame))?;
@@ -226,6 +255,11 @@ pub fn run_live(
                     }
                 }
             }
+
+            let auto_now = Instant::now();
+            let auto_elapsed = auto_now.saturating_duration_since(last_auto_scroll);
+            last_auto_scroll = auto_now;
+            dirty |= app.advance_auto_scroll(auto_elapsed);
         }
     })
 }

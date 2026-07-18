@@ -4,7 +4,7 @@ use std::{
     fs,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -145,6 +145,32 @@ fn advanced_editor_highlights_config_syntax() {
 }
 
 #[test]
+// 结构化表单右侧的键位提示使用独立强调色。
+fn form_key_hints_are_color_highlighted() {
+    let path = temporary_config();
+    fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
+    let editor = ConfigEditor::open(&path).unwrap();
+    let backend = TestBackend::new(110, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let mut highlighted_tab = false;
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width.saturating_sub(2) {
+            let first = buffer.cell((x, y)).unwrap();
+            let second = buffer.cell((x + 1, y)).unwrap();
+            let third = buffer.cell((x + 2, y)).unwrap();
+            if first.symbol() == "T" && second.symbol() == "a" && third.symbol() == "b" {
+                highlighted_tab = first.fg == Color::Yellow;
+            }
+        }
+    }
+
+    assert!(highlighted_tab);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 // include入口保持文本模式并按完整闭包校验保存。
 fn include_entry_stays_text_mode_and_validates_full_closure() {
     let path = temporary_config();
@@ -278,6 +304,57 @@ fn form_shows_task_and_dependency_dialog_entries() {
 }
 
 #[test]
+// Task工作目录字段可在TUI中浏览子目录并保存为相对配置路径。
+fn task_dialog_selects_working_directory() {
+    let root = temporary_config().with_extension("");
+    let work = root.join("work");
+    let path = root.join("procora.yaml");
+    fs::create_dir_all(&work).unwrap();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Enter);
+    for _ in 0..3 {
+        press(&mut editor, KeyCode::Down);
+    }
+    press(&mut editor, KeyCode::F(5));
+
+    let backend = TestBackend::new(110, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("选择运行目录"));
+    assert!(text.contains("work/"));
+
+    press(&mut editor, KeyCode::Down);
+    press(&mut editor, KeyCode::Down);
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_path(&path).unwrap();
+    let task = compiled.spec.tasks.values().next().unwrap();
+    let canonical_work = fs::canonicalize(&work).unwrap();
+    assert_eq!(task.cwd.as_deref(), Some(canonical_work.as_path()));
+    assert!(saved.contains("cwd: \"work\""));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 // 普通表单的单行文本字段会在当前输入末尾显示终端光标。
 fn form_text_field_shows_cursor_at_input_end() {
     let path = temporary_config();
@@ -346,6 +423,50 @@ fn form_navigation_uses_vertical_boundaries_and_keeps_horizontal_focus() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("新建Task"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 表单F3自动滚动会覆盖未聚焦区域内所有溢出的摘要文本。
+fn form_auto_scroll_moves_global_overflowing_summaries() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        format!(
+            "version: 1\nproject: demo\ntasks:\n  api:\n    command: prefix-{}\n",
+            "x".repeat(100)
+        ),
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    let backend = TestBackend::new(100, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let initial = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| index % 100 < 42)
+        .map(|(_, cell)| cell.symbol())
+        .collect::<String>();
+    assert!(initial.contains("prefix-"));
+
+    press(&mut editor, KeyCode::F(3));
+    assert!(editor.advance_auto_scroll(Duration::from_millis(2_500)));
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let shifted = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| index % 100 < 42)
+        .map(|(_, cell)| cell.symbol())
+        .collect::<String>();
+    assert!(!shifted.contains("prefix-"));
     fs::remove_file(path).unwrap();
 }
 
@@ -573,7 +694,7 @@ fn health_dialog_creates_http_probe() {
     press(&mut editor, KeyCode::Char('h'));
     press(&mut editor, KeyCode::Right);
     press(&mut editor, KeyCode::Right);
-    for _ in 0..6 {
+    for _ in 0..3 {
         press(&mut editor, KeyCode::Tab);
     }
     type_text(&mut editor, "8080");
@@ -607,6 +728,64 @@ fn health_dialog_creates_http_probe() {
 }
 
 #[test]
+// 健康检查弹窗只显示当前类型相关的Exec或HTTP字段。
+fn health_dialog_hides_inactive_probe_fields() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Char('h'));
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let none = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(!none.contains("Exec"));
+    assert!(!none.contains("HTTP"));
+    assert!(none.contains("1/6"));
+
+    press(&mut editor, KeyCode::Right);
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let exec = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(exec.contains("Exec"));
+    assert!(!exec.contains("HTTP"));
+    assert!(exec.contains("1/9"));
+
+    press(&mut editor, KeyCode::Right);
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let http = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(!http.contains("Exec"));
+    assert!(http.contains("HTTP"));
+    assert!(http.contains("1/12"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 // 小终端中的长健康检查弹窗会滚动到当前字段。
 fn health_dialog_scrolls_selected_field_in_small_terminal() {
     let path = temporary_config();
@@ -618,7 +797,8 @@ fn health_dialog_scrolls_selected_field_in_small_terminal() {
     let mut editor = ConfigEditor::open(&path).unwrap();
     press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('h'));
-    for _ in 0..14 {
+    press(&mut editor, KeyCode::Right);
+    for _ in 0..8 {
         press(&mut editor, KeyCode::Down);
     }
 
@@ -634,7 +814,7 @@ fn health_dialog_scrolls_selected_field_in_small_terminal() {
         .collect::<String>()
         .replace(' ', "");
     assert!(text.contains("连续失败阈值"));
-    assert!(text.contains("15/15"));
+    assert!(text.contains("9/9"));
     fs::remove_file(path).unwrap();
 }
 

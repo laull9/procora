@@ -1,43 +1,10 @@
 use std::{env, fs, io::IsTerminal, path::Path};
 
 use crate::config::{DiscoveredProject, discover_path, is_python_config};
-use crate::daemon::ServiceHost;
 use crate::source::DependencyManager;
 use anyhow::{Context, bail};
-use serde::Serialize;
 
-/// 面向诊断输出的完整有效配置视图。
-#[derive(Serialize)]
-struct EffectiveConfig<'a> {
-    /// 用户声明的变量表达式。
-    vars: &'a std::collections::BTreeMap<String, String>,
-    /// 完成引用解析后的变量值。
-    resolved_vars: &'a std::collections::BTreeMap<String, String>,
-    /// 字段路径到直接变量引用集合的映射。
-    variable_references: &'a std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
-    /// 配置模式主版本。
-    version: u32,
-    /// 服务稳定名称。
-    project: &'a str,
-    /// 当前持久选择的运行 profile。
-    active_profile: Option<&'a str>,
-    /// 配置中可选择的全部 profile。
-    profiles: &'a std::collections::BTreeSet<String>,
-    /// 每个 profile 的直接继承目标。
-    profile_extends: &'a std::collections::BTreeMap<String, String>,
-    /// 已规范化的项目管理依赖。
-    dependencies: &'a crate::config::ManagedDependencies,
-    /// 合并到各 Task 前的项目级默认环境。
-    env: &'a std::collections::BTreeMap<String, String>,
-    /// 项目显式声明的 Task 默认层。
-    task_defaults: &'a crate::config::TaskDefaultsSpec,
-    /// 可供 Task 显式引用的命名模板。
-    task_templates: &'a std::collections::BTreeSet<String>,
-    /// 已应用默认值和路径规范化的 Task。
-    tasks: &'a std::collections::BTreeMap<crate::core::TaskId, crate::core::TaskSpec>,
-    /// 每个 Task 字段及最终环境变量的生效来源。
-    origins: &'a std::collections::BTreeMap<crate::core::TaskId, crate::config::TaskConfigOrigins>,
-}
+use super::api;
 
 /// 打开指定目录或文件的配置编辑页面。
 pub(crate) fn edit(path: Option<&Path>) -> anyhow::Result<()> {
@@ -103,20 +70,15 @@ pub(crate) fn clean(path: Option<&Path>) -> anyhow::Result<()> {
 /// 完整发现并校验配置，但不下载、注册或启动服务。
 pub(crate) fn validate(path: &Path) -> anyhow::Result<()> {
     warn_python_execution(path);
-    let discovered =
-        discover_path(path).with_context(|| format!("配置校验失败: {}", path.display()))?;
+    let report = api::validate_project(path)?;
     println!(
         "配置有效：服务 `{}`，配置 `{}`，profile `{}`，共 {} 个任务、{} 个模板、{} 个管理依赖",
-        discovered.compiled.spec.project,
-        discovered.config_path.display(),
-        discovered
-            .compiled
-            .active_profile
-            .as_deref()
-            .unwrap_or("基础配置"),
-        discovered.compiled.spec.tasks.len(),
-        discovered.compiled.task_template_names.len(),
-        discovered.compiled.dependencies.len()
+        report.project,
+        report.config_path.display(),
+        report.active_profile.as_deref().unwrap_or("基础配置"),
+        report.task_count,
+        report.template_count,
+        report.dependency_count
     );
     Ok(())
 }
@@ -124,10 +86,7 @@ pub(crate) fn validate(path: &Path) -> anyhow::Result<()> {
 /// 输出指定配置中的确定性任务启动顺序。
 pub(crate) fn graph(path: &Path) -> anyhow::Result<()> {
     warn_python_execution(path);
-    let discovered =
-        discover_path(path).with_context(|| format!("任务图编译失败: {}", path.display()))?;
-    let host = ServiceHost::from_compiled(discovered.compiled);
-    for (index, task) in host.start_plan().iter().enumerate() {
+    for (index, task) in api::task_graph(path)?.iter().enumerate() {
         println!("{}. {task}", index + 1);
     }
     Ok(())
@@ -136,27 +95,10 @@ pub(crate) fn graph(path: &Path) -> anyhow::Result<()> {
 /// 以确定性 JSON 输出默认值与路径规范化后的有效配置。
 pub(crate) fn effective_config(path: &Path) -> anyhow::Result<()> {
     warn_python_execution(path);
-    let discovered =
-        discover_path(path).with_context(|| format!("有效配置生成失败: {}", path.display()))?;
-    let output = EffectiveConfig {
-        vars: &discovered.compiled.vars,
-        resolved_vars: &discovered.compiled.resolved_vars,
-        variable_references: &discovered.compiled.variable_references,
-        version: discovered.compiled.spec.version,
-        project: &discovered.compiled.spec.project,
-        active_profile: discovered.compiled.active_profile.as_deref(),
-        profiles: &discovered.compiled.profile_names,
-        profile_extends: &discovered.compiled.profile_extends,
-        dependencies: &discovered.compiled.dependencies,
-        env: &discovered.compiled.project_env,
-        task_defaults: &discovered.compiled.task_defaults,
-        task_templates: &discovered.compiled.task_template_names,
-        tasks: &discovered.compiled.spec.tasks,
-        origins: &discovered.compiled.task_origins,
-    };
     println!(
         "{}",
-        serde_json::to_string_pretty(&output).context("有效配置 JSON 序列化失败")?
+        serde_json::to_string_pretty(&api::effective_config(path)?)
+            .context("有效配置 JSON 序列化失败")?
     );
     Ok(())
 }
