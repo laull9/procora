@@ -66,8 +66,9 @@ fn release_and_audit_actions_use_node24() {
 #[test]
 // CI只在dev和main提交时运行。
 fn ci_avoids_duplicate_pull_request_runs() {
-    assert!(CI_WORKFLOW.contains("      - dev\n      - main"));
-    assert!(!CI_WORKFLOW.contains("pull_request:"));
+    let workflow = CI_WORKFLOW.replace("\r\n", "\n");
+    assert!(workflow.contains("      - dev\n      - main"));
+    assert!(!workflow.contains("pull_request:"));
 }
 
 /// 校验标签发布复用 main 成功 CI，只执行多平台打包。
