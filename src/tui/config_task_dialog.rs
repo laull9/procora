@@ -1,7 +1,7 @@
 use super::{
     config_form::{FormConfig, FormTask},
     config_form_dialog::{
-        DialogField, args_text, dependencies_text, field, map_text, optional, parse_args,
+        DialogField, args_text, dependencies_text, field, map_field, optional, parse_args,
         parse_dependencies, parse_duration, parse_i32_list, parse_map, parse_u32, replace_entry,
         required_value,
     },
@@ -36,11 +36,7 @@ pub(super) fn fields(original: Option<&str>, task: &FormTask) -> Vec<DialogField
             task.env_file.as_deref().unwrap_or(""),
             &[],
         ),
-        field(
-            "环境变量（JSON 对象或 KEY=VALUE）",
-            &map_text(&task.env),
-            &[],
-        ),
+        map_field("环境变量（按 F4 编辑键值表）", &task.env),
         field(
             "依赖（task:条件，逗号分隔）",
             &dependencies_text(&task.depends_on),

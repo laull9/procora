@@ -10,14 +10,19 @@ mod config_form_defaults;
 mod config_form_dialog;
 mod config_form_serialize;
 mod config_form_state;
+mod config_form_value;
 mod config_form_yaml;
 mod config_health_dialog;
 mod config_highlight;
+mod config_map_dialog;
 mod config_profile;
 mod config_task_defaults;
 mod config_task_dialog;
 mod config_ui;
+mod config_ui_support;
+mod text_view;
 mod ui;
+mod ui_support;
 
 use std::{
     io,

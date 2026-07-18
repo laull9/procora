@@ -7,8 +7,12 @@ use ratatui::{
 };
 
 use super::{
-    ConfigEditor, config_dialog_ui, config_form::FormPane, config_form_state::FormState,
+    ConfigEditor, config_dialog_ui,
+    config_form::FormPane,
+    config_form_state::FormState,
     config_highlight,
+    config_ui_support::{centered_rect, focus_style},
+    text_view,
 };
 
 /// 绘制配置编辑器，并按当前模式选择结构化表单或高级文本界面。
@@ -26,9 +30,11 @@ pub(crate) fn render(frame: &mut Frame<'_>, editor: &ConfigEditor) {
     } else {
         "高级文本"
     };
-    let title = Paragraph::new(format!(
-        "Procora 配置编辑器 · {mode} · {}",
-        editor.path().display()
+    let title_text = format!("Procora 配置编辑器 · {mode} · {}", editor.path().display());
+    let title = Paragraph::new(text_view::clipped(
+        &title_text,
+        0,
+        usize::from(outer[0].width.saturating_sub(2)),
     ))
     .style(
         Style::default()
@@ -43,9 +49,13 @@ pub(crate) fn render(frame: &mut Frame<'_>, editor: &ConfigEditor) {
     } else {
         render_text_mode(frame, outer[1], editor);
     }
-    let footer = Paragraph::new(editor.message())
-        .block(Block::default().title("状态").borders(Borders::ALL))
-        .style(message_style(editor.message()));
+    let footer = Paragraph::new(text_view::clipped(
+        editor.message(),
+        0,
+        usize::from(outer[2].width.saturating_sub(2)),
+    ))
+    .block(Block::default().title("状态").borders(Borders::ALL))
+    .style(message_style(editor.message()));
     frame.render_widget(footer, outer[2]);
 }
 
@@ -93,7 +103,11 @@ fn render_project(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         Paragraph::new(vec![
             Line::from(vec![
                 Span::styled("名称：", Style::default().fg(Color::DarkGray)),
-                Span::raw(form.config().project()),
+                Span::raw(text_view::clipped(
+                    form.config().project(),
+                    if focused { form.horizontal_offset() } else { 0 },
+                    usize::from(area.width.saturating_sub(8)),
+                )),
             ]),
             Line::from(vec![
                 Span::styled("默认环境：", Style::default().fg(Color::DarkGray)),
@@ -119,7 +133,18 @@ fn render_profiles(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let items = form
         .config()
         .profiles()
-        .map(|(name, profile)| ListItem::new(format!("{name}  ·  {}", profile.summary())))
+        .enumerate()
+        .map(|(index, (name, profile))| {
+            ListItem::new(text_view::clipped(
+                &format!("{name}  ·  {}", profile.summary()),
+                if index == form.selected() {
+                    form.horizontal_offset()
+                } else {
+                    0
+                },
+                usize::from(area.width.saturating_sub(2)),
+            ))
+        })
         .collect();
     render_named_list(
         frame,
@@ -138,7 +163,18 @@ fn render_tasks(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let items = form
         .config()
         .tasks()
-        .map(|(name, task)| ListItem::new(format!("{name}  ·  {}", task.command)))
+        .enumerate()
+        .map(|(index, (name, task))| {
+            ListItem::new(text_view::clipped(
+                &format!("{name}  ·  {}", task.command),
+                if index == form.selected() {
+                    form.horizontal_offset()
+                } else {
+                    0
+                },
+                usize::from(area.width.saturating_sub(2)),
+            ))
+        })
         .collect();
     render_named_list(
         frame,
@@ -157,7 +193,18 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     let items = form
         .config()
         .dependencies()
-        .map(|(name, dependency)| ListItem::new(format!("{name}  ·  {}", dependency.source)))
+        .enumerate()
+        .map(|(index, (name, dependency))| {
+            ListItem::new(text_view::clipped(
+                &format!("{name}  ·  {}", dependency.source),
+                if index == form.selected() {
+                    form.horizontal_offset()
+                } else {
+                    0
+                },
+                usize::from(area.width.saturating_sub(2)),
+            ))
+        })
         .collect();
     render_named_list(
         frame,
@@ -290,7 +337,8 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         Line::raw(detail),
         Line::raw(""),
         Line::styled("按键", Style::default().add_modifier(Modifier::BOLD)),
-        Line::raw("Tab / ← → 切换区域；↑ ↓ 选择条目"),
+        Line::raw("Tab / Shift-Tab 切换区域；↑ ↓ 在边界自动跨区"),
+        Line::raw("← → 水平移动当前高亮文本"),
         Line::raw("Enter 编辑；Task 按 h 健康检查；依赖按 a 高级策略"),
         Line::raw("n 新建；d 删除（需二次确认）"),
         Line::raw("Ctrl-S 校验并保存；F2 高级文本"),
@@ -298,7 +346,7 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         Line::raw(""),
         Line::styled("字段提示", Style::default().add_modifier(Modifier::BOLD)),
         Line::raw("命令可直接带参数；精确参数仍优先使用 JSON 数组。"),
-        Line::raw("环境变量/请求头优先使用 JSON 对象。"),
+        Line::raw("环境变量/请求头字段按 F4 打开键值表。"),
         Line::raw("依赖用 task:started,task2:healthy。"),
     ];
     frame.render_widget(
@@ -342,39 +390,57 @@ fn render_text_mode(frame: &mut Frame<'_>, area: Rect, editor: &ConfigEditor) {
 /// 绘制带行号的文本缓冲区并设置终端光标。
 fn render_editor(frame: &mut Frame<'_>, area: Rect, editor: &ConfigEditor) {
     let inner_height = area.height.saturating_sub(2) as usize;
+    let content_width = usize::from(area.width.saturating_sub(7));
     let mut editor = editor.clone();
     editor.ensure_visible(inner_height);
+    editor.ensure_horizontal_visible(content_width);
     let scroll = editor.scroll();
-    let lines = config_highlight::highlighted_lines(editor.format(), editor.lines())
+    let highlighted = config_highlight::highlighted_lines(editor.format(), editor.lines())
         .into_iter()
         .enumerate()
         .skip(scroll)
         .take(inner_height)
-        .map(|(index, highlighted)| {
-            let mut spans = vec![Span::styled(
+        .collect::<Vec<_>>();
+    let numbers = highlighted
+        .iter()
+        .map(|(index, _)| {
+            Line::styled(
                 format!("{:>4} ", index + 1),
                 Style::default().fg(Color::DarkGray),
-            )];
-            spans.extend(highlighted);
-            Line::from(spans)
+            )
         })
         .collect::<Vec<_>>();
+    let lines = highlighted
+        .into_iter()
+        .map(|(_, spans)| Line::from(spans))
+        .collect::<Vec<_>>();
+    let block = Block::default()
+        .title("高级文本配置 · F1 表单")
+        .borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(5), Constraint::Min(1)])
+        .split(inner);
+    frame.render_widget(Paragraph::new(numbers), columns[0]);
     frame.render_widget(
-        Paragraph::new(lines).block(
-            Block::default()
-                .title("高级文本配置 · F1 表单")
-                .borders(Borders::ALL),
-        ),
-        area,
+        Paragraph::new(lines).scroll((
+            0,
+            u16::try_from(editor.horizontal_scroll()).unwrap_or(u16::MAX),
+        )),
+        columns[1],
     );
     let (row, column) = editor.cursor();
     if row >= scroll && row < scroll + inner_height {
         let display_column = editor.lines().nth(row).map_or(column, |line| {
             Line::from(line.chars().take(column).collect::<String>()).width()
         });
-        let x = area.x + 1 + 5 + u16::try_from(display_column).unwrap_or(u16::MAX);
+        let x = columns[1].x
+            + u16::try_from(display_column.saturating_sub(editor.horizontal_scroll()))
+                .unwrap_or(u16::MAX);
         let y = area.y + 1 + u16::try_from(row - scroll).unwrap_or(u16::MAX);
-        frame.set_cursor_position((x.min(area.right().saturating_sub(1)), y));
+        frame.set_cursor_position((x.min(columns[1].right().saturating_sub(1)), y));
     }
 }
 
@@ -404,33 +470,6 @@ fn render_guide(frame: &mut Frame<'_>, area: Rect) {
             .block(Block::default().title("配置引导").borders(Borders::ALL)),
         area,
     );
-}
-
-/// 返回当前焦点边框和选中行的样式。
-pub(super) fn focus_style() -> Style {
-    Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD)
-}
-
-/// 将百分比宽度和固定高度居中为弹窗区域。
-pub(super) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - width.min(100)) / 2),
-            Constraint::Percentage(width.min(100)),
-            Constraint::Percentage((100 - width.min(100)) / 2),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(area.height.saturating_sub(height) / 2),
-            Constraint::Length(height),
-            Constraint::Min(0),
-        ])
-        .split(horizontal[1])[1]
 }
 
 /// 根据反馈文本选择状态颜色。

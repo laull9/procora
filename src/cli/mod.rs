@@ -12,7 +12,7 @@ mod source;
 mod suggestion;
 mod template;
 
-use std::path::PathBuf;
+use std::{io, io::Write, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
@@ -65,7 +65,8 @@ pub enum Command {
     List,
     /// 打开指定名称或路径服务的 TUI。
     Show {
-        /// 配置中的服务名称、服务目录或显式配置文件。
+        /// 配置中的服务名称、服务目录或显式配置文件；省略时使用当前目录。
+        #[arg(default_value = ".")]
         target: String,
     },
     /// 同步或离线验证项目管理依赖。
@@ -340,5 +341,33 @@ pub const fn elevation_script_for_test() -> &'static str {
 /// 初始化遵循 `RUST_LOG` 的结构化诊断输出。
 fn initialize_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
-    let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(TuiSafeWriter::new)
+        .try_init();
+}
+
+/// 在终端原始模式下丢弃诊断，避免异步日志越过 Ratatui 破坏屏幕。
+struct TuiSafeWriter(Option<io::Stderr>);
+
+impl TuiSafeWriter {
+    /// 根据当前终端模式创建一次事件写入器。
+    fn new() -> Self {
+        let tui_active = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
+        Self((!tui_active).then(io::stderr))
+    }
+}
+
+impl Write for TuiSafeWriter {
+    /// 仅在普通终端模式下写出诊断内容。
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.0
+            .as_mut()
+            .map_or(Ok(buffer.len()), |writer| writer.write(buffer))
+    }
+
+    /// 刷新普通终端模式下的标准错误流。
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.as_mut().map_or(Ok(()), Write::flush)
+    }
 }

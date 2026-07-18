@@ -187,7 +187,7 @@ fn env_file_entry_is_editable_without_expanding_file_values() {
     let mut editor = ConfigEditor::open(&path).unwrap();
 
     assert!(editor.message().contains("表单模式"));
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     for _ in 0..4 {
         press(&mut editor, KeyCode::Tab);
@@ -229,7 +229,7 @@ fn form_can_create_and_save_task_from_valid_config() {
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    editor.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     editor.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
     for character in "worker".chars() {
         editor.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
@@ -257,7 +257,7 @@ fn form_shows_task_and_dependency_dialog_entries() {
     let path = temporary_config();
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
-    editor.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     editor.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
     let backend = TestBackend::new(110, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -283,7 +283,7 @@ fn form_text_field_shows_cursor_at_input_end() {
     let path = temporary_config();
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('n'));
     let backend = TestBackend::new(110, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -310,6 +310,105 @@ fn form_text_field_shows_cursor_at_input_end() {
         .collect::<String>();
     assert!(text.contains('…'));
     assert!(long_cursor.x < 109 && long_cursor.y < 30);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 表单上下键在列表边界自动跨区，左右键不会改变当前区域。
+fn form_navigation_uses_vertical_boundaries_and_keeps_horizontal_focus() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Down);
+    press(&mut editor, KeyCode::Char('h'));
+    press(&mut editor, KeyCode::Esc);
+    press(&mut editor, KeyCode::Up);
+    press(&mut editor, KeyCode::Char('h'));
+    assert!(editor.message().contains("Task 区域"));
+
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Char('n'));
+    let backend = TestBackend::new(100, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("新建Task"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 环境变量字段可用键值表编辑并保留包含分隔符的精确值。
+fn task_environment_supports_key_value_table_editor() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Enter);
+    for _ in 0..5 {
+        press(&mut editor, KeyCode::Tab);
+    }
+    press(&mut editor, KeyCode::F(4));
+    type_text(&mut editor, "TOKEN");
+    press(&mut editor, KeyCode::Tab);
+    type_text(&mut editor, "a=b,c");
+    editor.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+    type_text(&mut editor, "SECOND");
+    press(&mut editor, KeyCode::Tab);
+    type_text(&mut editor, "two");
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let compiled = procora::config::load_path(&path).unwrap();
+    assert_eq!(
+        compiled.spec.tasks.values().next().unwrap().env["TOKEN"],
+        "a=b,c"
+    );
+    assert_eq!(
+        compiled.spec.tasks.values().next().unwrap().env["SECOND"],
+        "two"
+    );
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 普通字段的左右键移动真实光标，输入不再只能追加到末尾。
+fn form_text_cursor_allows_mid_string_insertion() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Left);
+    press(&mut editor, KeyCode::Char('x'));
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let compiled = procora::config::load_path(&path).unwrap();
+    assert!(compiled.spec.tasks.contains_key(&"apxi".parse().unwrap()));
     fs::remove_file(path).unwrap();
 }
 
@@ -410,7 +509,7 @@ fn task_dialog_preserves_precise_args_and_environment_values() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     press(&mut editor, KeyCode::Enter);
     editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
@@ -437,7 +536,7 @@ fn task_dialog_edits_success_exit_codes() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     for _ in 0..7 {
         press(&mut editor, KeyCode::Tab);
@@ -470,7 +569,7 @@ fn health_dialog_creates_http_probe() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('h'));
     press(&mut editor, KeyCode::Right);
     press(&mut editor, KeyCode::Right);
@@ -517,7 +616,7 @@ fn health_dialog_scrolls_selected_field_in_small_terminal() {
     )
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('h'));
     for _ in 0..14 {
         press(&mut editor, KeyCode::Down);
@@ -549,7 +648,7 @@ fn escape_cancels_form_delete_without_exiting() {
     )
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
-    editor.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+    editor.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     editor.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
     editor.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 

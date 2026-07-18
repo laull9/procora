@@ -96,7 +96,7 @@ fn new_task_inherits_defaults_without_copying_them() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('n'));
     type_text(&mut editor, "worker");
     press(&mut editor, KeyCode::Tab);
@@ -159,7 +159,7 @@ fn task_dialog_can_restore_inherited_defaults() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     for _ in 0..3 {
         press(&mut editor, KeyCode::Tab);

@@ -26,6 +26,19 @@ fn task_selection_and_tabs_wrap_around() {
 }
 
 #[test]
+// 左右键只移动当前文本视口，不再切换主页面。
+fn horizontal_keys_do_not_change_tabs() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_key(KeyCode::Right);
+    assert_eq!(app.active_tab(), ActiveTab::Tasks);
+    assert_eq!(app.horizontal_offset(), 1);
+    app.handle_key(KeyCode::Left);
+    assert_eq!(app.active_tab(), ActiveTab::Tasks);
+    assert_eq!(app.horizontal_offset(), 0);
+}
+
+#[test]
 // 服务控制键会形成一次可消费动作。
 fn service_control_key_creates_single_consumable_action() {
     let mut app = App::new(support::snapshot());

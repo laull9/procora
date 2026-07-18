@@ -77,6 +77,7 @@ pub struct App {
     log_buffers: BTreeMap<TaskId, Vec<u8>>,
     log_gaps: BTreeSet<TaskId>,
     log_scrolls: BTreeMap<TaskId, usize>,
+    horizontal_offset: usize,
 }
 
 impl App {
@@ -99,6 +100,7 @@ impl App {
             log_buffers: BTreeMap::new(),
             log_gaps: BTreeSet::new(),
             log_scrolls: BTreeMap::new(),
+            horizontal_offset: 0,
         }
     }
 
@@ -120,16 +122,19 @@ impl App {
             self.should_quit,
             self.pending_action,
             self.current_log_scroll(),
+            self.horizontal_offset,
         );
         match key {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
-            KeyCode::Tab | KeyCode::Right => self.active_tab = self.active_tab.next(),
-            KeyCode::BackTab | KeyCode::Left => self.active_tab = self.active_tab.previous(),
-            KeyCode::Char('1') => self.active_tab = ActiveTab::Tasks,
-            KeyCode::Char('2') => self.active_tab = ActiveTab::Dependencies,
-            KeyCode::Char('3') => self.active_tab = ActiveTab::Logs,
+            KeyCode::Tab => self.switch_tab(self.active_tab.next()),
+            KeyCode::BackTab => self.switch_tab(self.active_tab.previous()),
+            KeyCode::Left => self.scroll_horizontal(false),
+            KeyCode::Right => self.scroll_horizontal(true),
+            KeyCode::Char('1') => self.switch_tab(ActiveTab::Tasks),
+            KeyCode::Char('2') => self.switch_tab(ActiveTab::Dependencies),
+            KeyCode::Char('3') => self.switch_tab(ActiveTab::Logs),
             KeyCode::PageUp if self.active_tab == ActiveTab::Logs => self.scroll_log_up(page_lines),
             KeyCode::PageDown if self.active_tab == ActiveTab::Logs => {
                 self.scroll_log_down(page_lines);
@@ -154,6 +159,7 @@ impl App {
                 self.should_quit,
                 self.pending_action,
                 self.current_log_scroll(),
+                self.horizontal_offset,
             )
     }
 
@@ -234,6 +240,11 @@ impl App {
     /// 返回当前中心会话是否允许提交控制动作。
     pub const fn control_allowed(&self) -> bool {
         self.control_allowed
+    }
+
+    /// 返回当前页面选中文本的水平字符偏移。
+    pub const fn horizontal_offset(&self) -> usize {
+        self.horizontal_offset
     }
 
     /// 设置是否使用适合低能力终端的纯文本显示。
@@ -341,6 +352,7 @@ impl App {
     fn select_next(&mut self) {
         if !self.snapshot.tasks.is_empty() {
             self.selected = (self.selected + 1) % self.snapshot.tasks.len();
+            self.horizontal_offset = 0;
         }
     }
 
@@ -351,7 +363,70 @@ impl App {
                 .selected
                 .checked_sub(1)
                 .unwrap_or(self.snapshot.tasks.len() - 1);
+            self.horizontal_offset = 0;
         }
+    }
+
+    /// 切换页签并让新页面从文本起点开始显示。
+    fn switch_tab(&mut self, tab: ActiveTab) {
+        self.active_tab = tab;
+        self.horizontal_offset = 0;
+    }
+
+    /// 在当前页面最长的相关文本范围内移动水平视口。
+    fn scroll_horizontal(&mut self, forward: bool) {
+        let maximum = match self.active_tab {
+            ActiveTab::Tasks => self.selected_task().map_or(0, |task| {
+                let dependencies = task
+                    .dependencies
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                [
+                    task.task_id.as_str().chars().count(),
+                    task.command.chars().count(),
+                    dependencies.chars().count(),
+                    task.message
+                        .as_deref()
+                        .map_or(0, |value| value.chars().count()),
+                ]
+                .into_iter()
+                .max()
+                .unwrap_or(0)
+            }),
+            ActiveTab::Dependencies => self
+                .snapshot
+                .tasks
+                .iter()
+                .map(|task| {
+                    let dependency = task
+                        .dependencies
+                        .iter()
+                        .map(ToString::to_string)
+                        .map(|value| value.chars().count())
+                        .max()
+                        .unwrap_or(0);
+                    dependency.saturating_add(task.task_id.as_str().chars().count() + 4)
+                })
+                .max()
+                .unwrap_or(0),
+            ActiveTab::Logs => self
+                .selected_task()
+                .and_then(|task| self.log_text(&task.task_id))
+                .map_or(0, |text| {
+                    text.lines()
+                        .map(|line| line.chars().count())
+                        .max()
+                        .unwrap_or(0)
+                }),
+        }
+        .saturating_sub(1);
+        self.horizontal_offset = if forward {
+            self.horizontal_offset.saturating_add(1).min(maximum)
+        } else {
+            self.horizontal_offset.saturating_sub(1)
+        };
     }
 
     /// 返回当前任务的日志滚动距离。

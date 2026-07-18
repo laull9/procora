@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
+
 use super::{
     config_form::{FormConfig, FormHealthCheck, FormHttpHealthCheck, FormTask},
     config_form_dialog::{
-        DialogField, field, map_text, optional, parse_args, parse_duration, parse_map, parse_u32,
+        DialogField, field, map_field, optional, parse_args, parse_duration, parse_map, parse_u32,
         required_value,
     },
 };
@@ -110,10 +112,9 @@ pub(super) fn fields(task: &FormTask) -> Vec<DialogField> {
             &[],
         ),
         field("HTTP 路径", http.map_or("/", |http| &http.path), &[]),
-        field(
-            "HTTP 请求头（JSON 对象或 KEY=VALUE）",
-            &http.map_or_else(|| "{}".to_owned(), |http| map_text(&http.headers)),
-            &[],
+        map_field(
+            "HTTP 请求头（按 F4 编辑键值表）",
+            &http.map_or_else(BTreeMap::new, |http| http.headers.clone()),
         ),
         field(
             "HTTP 预期状态码",

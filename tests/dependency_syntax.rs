@@ -124,7 +124,7 @@ fn tui_normalizes_dependency_condition_aliases() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     for _ in 0..6 {
         press(&mut editor, KeyCode::Tab);

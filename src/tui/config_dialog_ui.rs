@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
@@ -8,7 +8,9 @@ use ratatui::{
 
 use super::{
     config_form_dialog::Dialog,
-    config_ui::{centered_rect, focus_style},
+    config_map_dialog::{MapColumn, MapEditor},
+    config_ui_support::{centered_rect, focus_style},
+    text_view,
 };
 
 /// 绘制字段输入和选择器弹窗，并为普通文本字段设置终端光标。
@@ -34,12 +36,19 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
             };
             let prefix_width = Line::from(format!("{marker}{label}：")).width();
             let value = if selected && !selected_is_choice {
-                trailing_text(
+                let cursor = dialog.selected_input().map_or(0, |(_, _, cursor)| cursor);
+                text_view::input_view(
                     value,
+                    cursor,
                     inner_width.saturating_sub(prefix_width).saturating_sub(1),
                 )
+                .text
             } else {
-                value.to_owned()
+                text_view::clipped(
+                    value,
+                    0,
+                    inner_width.saturating_sub(prefix_width).saturating_sub(1),
+                )
             };
             Line::from(vec![
                 Span::styled(marker, style),
@@ -53,10 +62,12 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
     let scroll = selected
         .saturating_sub(visible_lines.saturating_sub(1))
         .min(field_count.saturating_sub(visible_lines));
-    let hint = if selected_is_choice {
+    let hint = if dialog.selected_is_map() {
+        "F4 键值表；←→ 移动光标，↑↓ 切换字段，Enter 确认"
+    } else if selected_is_choice {
         "↑↓ 切换字段，←→ 选择选项，Enter 确认，Esc 取消"
     } else {
-        "直接输入；↑↓ 切换字段，Enter 确认，Esc 取消"
+        "直接输入；←→ 移动光标，↑↓ 切换字段，Enter 确认"
     };
     frame.render_widget(
         Paragraph::new(lines)
@@ -75,9 +86,12 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
         area,
     );
     render_input_cursor(frame, area, dialog, selected, scroll, inner_width);
+    if let Some(editor) = dialog.map_editor() {
+        render_map_editor(frame, editor);
+    }
 }
 
-/// 把光标放在可编辑字段的可见文本末尾。
+/// 把光标放在可编辑字段的真实字符位置。
 fn render_input_cursor(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -86,40 +100,89 @@ fn render_input_cursor(
     scroll: usize,
     inner_width: usize,
 ) {
-    let Some((label, value)) = dialog.selected_input() else {
+    let Some((label, value, cursor)) = dialog.selected_input() else {
         return;
     };
     let prefix_width = Line::from(format!("› {label}：")).width();
-    let value = trailing_text(
+    let view = text_view::input_view(
         value,
+        cursor,
         inner_width.saturating_sub(prefix_width).saturating_sub(1),
     );
-    let x = area.x
-        + 1
-        + u16::try_from(prefix_width.saturating_add(Line::from(value).width())).unwrap_or(u16::MAX);
+    let x =
+        area.x + 1 + u16::try_from(prefix_width.saturating_add(view.cursor_x)).unwrap_or(u16::MAX);
     let y = area.y + 1 + u16::try_from(selected - scroll).unwrap_or(u16::MAX);
     frame.set_cursor_position((x.min(area.right().saturating_sub(2)), y));
 }
 
-/// 截取文本末尾以保证当前输入位置始终留在弹窗可见区域。
-fn trailing_text(value: &str, max_width: usize) -> String {
-    if Line::from(value).width() <= max_width {
-        return value.to_owned();
-    }
-    if max_width == 0 {
-        return String::new();
-    }
-    let suffix_width = max_width.saturating_sub(1);
-    let mut width: usize = 0;
-    let mut suffix = Vec::new();
-    for character in value.chars().rev() {
-        let character_width = Line::from(character.to_string()).width();
-        if width.saturating_add(character_width) > suffix_width {
-            break;
-        }
-        width += character_width;
-        suffix.push(character);
-    }
-    suffix.reverse();
-    format!("…{}", suffix.into_iter().collect::<String>())
+/// 绘制映射字段的键值表子弹窗。
+fn render_map_editor(frame: &mut Frame<'_>, editor: &MapEditor) {
+    let height = u16::try_from(editor.rows().len().saturating_add(5))
+        .unwrap_or(u16::MAX)
+        .min(frame.area().height.saturating_sub(4));
+    let area = centered_rect(72, height.max(7), frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title("键值表编辑")
+        .title_bottom("Tab 切换键/值 · ↑↓ 换行 · Ctrl-N/D 增删 · Enter 应用 · Esc 取消")
+        .borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let rows_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+    let key_width = usize::from(inner.width.saturating_sub(7)) / 2;
+    let value_width = usize::from(inner.width.saturating_sub(7)).saturating_sub(key_width);
+    frame.render_widget(
+        Paragraph::new(format!(" #  {:key_width$} │ VALUE", "KEY"))
+            .style(Style::default().fg(Color::DarkGray)),
+        rows_area[0],
+    );
+    let (selected, column, cursor) = editor.position();
+    let visible = usize::from(rows_area[1].height).max(1);
+    let scroll = selected
+        .saturating_sub(visible.saturating_sub(1))
+        .min(editor.rows().len().saturating_sub(visible));
+    let lines = editor
+        .rows()
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let row_style = if index == selected {
+                focus_style()
+            } else {
+                Style::default()
+            };
+            let key = if index == selected && column == MapColumn::Key {
+                text_view::input_view(&row.key, cursor, key_width).text
+            } else {
+                text_view::clipped(&row.key, 0, key_width)
+            };
+            let value = if index == selected && column == MapColumn::Value {
+                text_view::input_view(&row.value, cursor, value_width).text
+            } else {
+                text_view::clipped(&row.value, 0, value_width)
+            };
+            Line::from(vec![
+                Span::styled(format!("{:>2}  ", index + 1), row_style),
+                Span::styled(format!("{key:key_width$}"), row_style),
+                Span::raw(" │ "),
+                Span::styled(value, row_style),
+            ])
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(lines).scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0)),
+        rows_area[1],
+    );
+    let row = &editor.rows()[selected];
+    let (text, cell_width, base_x) = match column {
+        MapColumn::Key => (&row.key, key_width, 4),
+        MapColumn::Value => (&row.value, value_width, 4 + key_width + 3),
+    };
+    let view = text_view::input_view(text, cursor, cell_width);
+    let x = inner.x + u16::try_from(base_x + view.cursor_x).unwrap_or(u16::MAX);
+    let y = rows_area[1].y + u16::try_from(selected - scroll).unwrap_or(u16::MAX);
+    frame.set_cursor_position((x.min(inner.right().saturating_sub(1)), y));
 }

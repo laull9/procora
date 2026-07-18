@@ -23,6 +23,17 @@ fn top_level_path_opens_service_tui() {
 }
 
 #[test]
+// show省略目标时默认使用当前目录。
+fn show_without_target_uses_current_directory() {
+    let cli = Cli::try_parse_from(["procora", "show"]).unwrap();
+
+    assert!(matches!(
+        cli.command,
+        Some(Command::Show { target }) if target == "."
+    ));
+}
+
+#[test]
 // 唯一命令前缀可以直接推断。
 fn unique_command_prefixes_are_inferred() {
     let status = Cli::try_parse_from(["procora", "stat"]).unwrap();

@@ -58,7 +58,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
 | `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
 | `procora history <name/path>` | 从 SQLite 查询指定服务的状态变更历史。 |
-| `procora show <name/path>` | 按名称、服务目录或配置文件打开已注册服务的 TUI。 |
+| `procora show [name/path]` | 按名称、服务目录或配置文件打开 TUI；省略目标时使用当前目录，路径尚未注册时自动发现。 |
 | `procora start <name/path>` | 重新加载已注册配置并启动服务宿主。 |
 | `procora restart <name/path>` | 重新加载配置并重启服务宿主。 |
 | `procora preview <name/path>` | 编译当前文件并输出 SHA-256 修订及新增、删除、重启、原地更新和无影响 Task。 |
