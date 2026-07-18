@@ -59,7 +59,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Span::styled(
             text_view::clipped(
                 &format!(" Procora{separator}{} ", app.snapshot().project),
-                0,
+                app.automatic_text_offset(),
                 usize::from(area.width.saturating_sub(12)),
             ),
             Style::default()
@@ -105,11 +105,7 @@ fn render_task_list(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .map(|(index, task)| {
             let (symbol, color) = status_visual(task.status, app.plain_mode());
             let available = usize::from(area.width.saturating_sub(8));
-            let offset = if index == app.selected_index() {
-                app.horizontal_offset()
-            } else {
-                0
-            };
+            let offset = app.text_offset(index == app.selected_index());
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!(" {symbol} "),
@@ -251,12 +247,15 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
         } else {
             format!("已上翻 {distance} 行")
         };
-        let logs = Paragraph::new(format!("{prefix}{content}"))
+        let visible_width = usize::from(area.width.saturating_sub(2));
+        let visible_content = text_view::clipped_lines(
+            &format!("{prefix}{content}"),
+            app.text_offset(true),
+            visible_width,
+        );
+        let logs = Paragraph::new(visible_content)
             .block(bordered(app).title(log_title(area.width, &task, Some(&position), app)))
-            .scroll((
-                u16::try_from(scroll_top).unwrap_or(u16::MAX),
-                u16::try_from(app.horizontal_offset()).unwrap_or(u16::MAX),
-            ));
+            .scroll((u16::try_from(scroll_top).unwrap_or(u16::MAX), 0));
         frame.render_widget(logs, area);
         return;
     }
@@ -289,10 +288,22 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         "↑↓/jk 选择任务  Tab 切页  ←→ 横移文本  1/2/3 直达  q/Esc 退出"
     };
+    let auto_scroll = if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
+        "开·高亮冻结"
+    } else if app.auto_scroll_enabled() {
+        "开"
+    } else {
+        "关"
+    };
+    let controls = format!("{controls}  F3 自动横移:{auto_scroll}");
     let width = usize::from(area.width);
-    let mut lines = vec![Line::from(text_view::clipped(controls, 0, width))];
+    let mut lines = vec![Line::from(text_view::clipped(&controls, 0, width))];
     if let Some(feedback) = app.feedback() {
-        lines.push(Line::from(text_view::clipped(feedback, 0, width)));
+        lines.push(Line::from(text_view::clipped(
+            feedback,
+            app.automatic_text_offset(),
+            width,
+        )));
     }
     let footer =
         Paragraph::new(lines).style(Style::default().fg(display_color(app, Color::DarkGray)));
@@ -306,7 +317,7 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
         Line::from(Span::styled(
             text_view::clipped(
                 &format!("Procora · {}", app.snapshot().project),
-                0,
+                app.automatic_text_offset(),
                 usize::from(area.width),
             ),
             Style::default()
@@ -326,7 +337,7 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
         {
             lines.push(Line::from(text_view::clipped(
                 message,
-                app.horizontal_offset(),
+                app.text_offset(true),
                 usize::from(area.width),
             )));
         }
@@ -391,11 +402,7 @@ fn detail_line(label: &str, value: impl Into<String>, area_width: u16, app: &App
             format!("{label}  "),
             Style::default().fg(display_color(app, Color::DarkGray)),
         ),
-        Span::raw(text_view::clipped(
-            &value,
-            app.horizontal_offset(),
-            available,
-        )),
+        Span::raw(text_view::clipped(&value, app.text_offset(true), available)),
     ])
 }
 
@@ -411,7 +418,7 @@ fn graph_line(content: &str, selected: bool, area_width: u16, app: &App) -> Line
     Line::styled(
         text_view::clipped(
             content,
-            if selected { app.horizontal_offset() } else { 0 },
+            app.text_offset(selected),
             usize::from(area_width.saturating_sub(2)),
         ),
         style,

@@ -10,7 +10,7 @@ use super::{
     ConfigEditor, config_dialog_ui,
     config_form::FormPane,
     config_form_state::FormState,
-    config_highlight,
+    config_help_ui, config_highlight,
     config_ui_support::{centered_rect, focus_style},
     text_view,
 };
@@ -105,7 +105,7 @@ fn render_project(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
                 Span::styled("名称：", Style::default().fg(Color::DarkGray)),
                 Span::raw(text_view::clipped(
                     form.config().project(),
-                    if focused { form.horizontal_offset() } else { 0 },
+                    form.text_offset(focused),
                     usize::from(area.width.saturating_sub(8)),
                 )),
             ]),
@@ -130,6 +130,7 @@ fn render_project(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
 
 /// 绘制可选择的命名 profile 列表。
 fn render_profiles(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
+    let focused = form.pane() == FormPane::Profiles;
     let items = form
         .config()
         .profiles()
@@ -137,11 +138,7 @@ fn render_profiles(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         .map(|(index, (name, profile))| {
             ListItem::new(text_view::clipped(
                 &format!("{name}  ·  {}", profile.summary()),
-                if index == form.selected() {
-                    form.horizontal_offset()
-                } else {
-                    0
-                },
+                form.text_offset(focused && index == form.selected()),
                 usize::from(area.width.saturating_sub(2)),
             ))
         })
@@ -160,6 +157,7 @@ fn render_profiles(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
 
 /// 绘制可选择的 Task 列表。
 fn render_tasks(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
+    let focused = form.pane() == FormPane::Tasks;
     let items = form
         .config()
         .tasks()
@@ -167,11 +165,7 @@ fn render_tasks(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         .map(|(index, (name, task))| {
             ListItem::new(text_view::clipped(
                 &format!("{name}  ·  {}", task.command),
-                if index == form.selected() {
-                    form.horizontal_offset()
-                } else {
-                    0
-                },
+                form.text_offset(focused && index == form.selected()),
                 usize::from(area.width.saturating_sub(2)),
             ))
         })
@@ -190,6 +184,7 @@ fn render_tasks(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
 
 /// 绘制可选择的管理依赖列表。
 fn render_dependencies(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
+    let focused = form.pane() == FormPane::Dependencies;
     let items = form
         .config()
         .dependencies()
@@ -197,11 +192,7 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         .map(|(index, (name, dependency))| {
             ListItem::new(text_view::clipped(
                 &format!("{name}  ·  {}", dependency.source),
-                if index == form.selected() {
-                    form.horizontal_offset()
-                } else {
-                    0
-                },
+                form.text_offset(focused && index == form.selected()),
                 usize::from(area.width.saturating_sub(2)),
             ))
         })
@@ -327,7 +318,7 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
                 },
             ),
     };
-    let lines = vec![
+    let mut lines = vec![
         Line::styled(
             section,
             Style::default()
@@ -336,19 +327,15 @@ fn render_form_detail(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
         ),
         Line::raw(detail),
         Line::raw(""),
-        Line::styled("按键", Style::default().add_modifier(Modifier::BOLD)),
-        Line::raw("Tab / Shift-Tab 切换区域；↑ ↓ 在边界自动跨区"),
-        Line::raw("← → 水平移动当前高亮文本"),
-        Line::raw("Enter 编辑；Task 按 h 健康检查；依赖按 a 高级策略"),
-        Line::raw("n 新建；d 删除（需二次确认）"),
-        Line::raw("Ctrl-S 校验并保存；F2 高级文本"),
-        Line::raw("Esc 退出（未保存内容会请求确认）"),
+    ];
+    lines.extend(config_help_ui::form_key_hints(form));
+    lines.extend([
         Line::raw(""),
         Line::styled("字段提示", Style::default().add_modifier(Modifier::BOLD)),
         Line::raw("命令可直接带参数；精确参数仍优先使用 JSON 数组。"),
         Line::raw("环境变量/请求头字段按 F4 打开键值表。"),
         Line::raw("依赖用 task:started,task2:healthy。"),
-    ];
+    ]);
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })

@@ -1,4 +1,4 @@
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf, time::Duration};
 
 use crate::config::{ConfigFormat, load_path_capture, load_path_text, load_str};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -225,6 +225,14 @@ impl ConfigEditor {
         self.horizontal_scroll
     }
 
+    /// 推进一次结构化表单的全局折叠文本自动滚动。
+    pub fn advance_auto_scroll(&mut self, elapsed: Duration) -> bool {
+        self.form
+            .as_mut()
+            .filter(|_| self.mode == EditorMode::Form)
+            .is_some_and(|form| form.advance_auto_scroll(elapsed))
+    }
+
     /// 更新首个可见行以保持光标在编辑区域内。
     pub fn ensure_visible(&mut self, height: usize) {
         if self.row < self.scroll {
@@ -408,7 +416,7 @@ impl ConfigEditor {
                     self.path.parent(),
                 )));
                 self.mode = EditorMode::Form;
-                "表单模式：Enter 编辑，h 健康检查，n 新建，d 删除，F2 高级文本"
+                "表单模式：Enter 编辑，h 健康检查，n 新建，d 删除，F3 自动滚动，F2 高级文本"
                     .clone_into(&mut self.message);
             }
             Err(error) => {

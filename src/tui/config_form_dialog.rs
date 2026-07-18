@@ -232,12 +232,23 @@ impl Dialog {
         self.fields
             .iter()
             .enumerate()
+            .filter(|(index, _)| self.field_visible(*index))
             .map(|(index, field)| (field.label, field.value.as_str(), index == self.selected))
     }
 
     /// 返回字段数量与当前选择，供窄终端滚动显示。
-    pub(crate) const fn field_position(&self) -> (usize, usize) {
-        (self.fields.len(), self.selected)
+    pub(crate) fn field_position(&self) -> (usize, usize) {
+        let mut count = 0;
+        let mut selected = 0;
+        for index in 0..self.fields.len() {
+            if self.field_visible(index) {
+                if index == self.selected {
+                    selected = count;
+                }
+                count += 1;
+            }
+        }
+        (count, selected)
     }
 
     /// 返回当前字段是否为选择器。
@@ -314,13 +325,18 @@ impl Dialog {
 
     /// 移动弹窗字段选择。
     pub(crate) fn next_field(&mut self, forward: bool) {
-        self.selected = if forward {
-            (self.selected + 1) % self.fields.len()
-        } else {
-            self.selected
-                .checked_sub(1)
-                .unwrap_or(self.fields.len() - 1)
-        };
+        let mut next = self.selected;
+        loop {
+            next = if forward {
+                (next + 1) % self.fields.len()
+            } else {
+                next.checked_sub(1).unwrap_or(self.fields.len() - 1)
+            };
+            if self.field_visible(next) {
+                self.selected = next;
+                break;
+            }
+        }
     }
 
     /// 循环当前字段的可选值。
@@ -413,6 +429,17 @@ impl Dialog {
             }
         }
         Ok(false)
+    }
+
+    /// 返回字段在当前弹窗模式下是否应该显示和参与导航。
+    fn field_visible(&self, index: usize) -> bool {
+        if !matches!(&self.kind, DialogKind::Health(_)) {
+            return true;
+        }
+        matches!(
+            (self.fields[0].value.as_str(), index),
+            (_, 0 | 10..=14) | ("exec", 1..=3) | ("http", 4..=9)
+        )
     }
 }
 

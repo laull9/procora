@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::config_form::{FormConfig, FormPane};
 use super::config_form_dialog::Dialog;
+use super::text_view;
 
 /// 表单模式的选择状态与弹窗状态。
 #[derive(Clone, Debug)]
@@ -9,7 +12,7 @@ pub(crate) struct FormState {
     config: FormConfig,
     pane: FormPane,
     selected: usize,
-    horizontal_offset: usize,
+    horizontal_scroll: text_view::HorizontalScroll,
     dialog: Option<Dialog>,
     pending_delete: Option<DeleteTarget>,
 }
@@ -42,7 +45,7 @@ impl FormState {
             config,
             pane: FormPane::Project,
             selected: 0,
-            horizontal_offset: 0,
+            horizontal_scroll: text_view::HorizontalScroll::default(),
             dialog: None,
             pending_delete: None,
         }
@@ -63,9 +66,28 @@ impl FormState {
         self.selected
     }
 
-    /// 返回当前高亮条目的水平字符偏移。
-    pub(crate) const fn horizontal_offset(&self) -> usize {
-        self.horizontal_offset
+    /// 返回折叠文本全局自动滚动是否开启。
+    pub(crate) const fn auto_scroll_enabled(&self) -> bool {
+        self.horizontal_scroll.auto_enabled()
+    }
+
+    /// 返回一段摘要应使用的偏移；自动模式覆盖全部条目。
+    pub(crate) const fn text_offset(&self, selected: bool) -> usize {
+        self.horizontal_scroll.offset(selected)
+    }
+
+    /// 推进一次全局折叠文本自动滚动。
+    pub(crate) fn advance_auto_scroll(&mut self, elapsed: Duration) -> bool {
+        if self.dialog.is_some() || self.pending_delete.is_some() {
+            return false;
+        }
+        let maximum = self.global_text_len().saturating_sub(1);
+        self.horizontal_scroll.advance(elapsed, maximum)
+    }
+
+    /// 返回当前高亮摘要是否处于手动滚动冻结期。
+    pub(crate) const fn manual_scroll_frozen(&self) -> bool {
+        self.horizontal_scroll.manual_frozen()
     }
 
     /// 返回当前弹窗，供界面绘制。
@@ -104,15 +126,25 @@ impl FormState {
             KeyCode::BackTab => self.move_pane(false),
             KeyCode::Tab => self.move_pane(true),
             KeyCode::Left => {
-                self.horizontal_offset = self.horizontal_offset.saturating_sub(1);
+                let maximum = self.selected_text_len().saturating_sub(1);
+                self.horizontal_scroll.scroll_manual(false, maximum);
                 FormEvent::None
             }
             KeyCode::Right => {
-                self.horizontal_offset = self
-                    .horizontal_offset
-                    .saturating_add(1)
-                    .min(self.selected_text_len().saturating_sub(1));
+                let maximum = self.selected_text_len().saturating_sub(1);
+                self.horizontal_scroll.scroll_manual(true, maximum);
                 FormEvent::None
+            }
+            KeyCode::F(3) => {
+                self.horizontal_scroll.toggle_auto();
+                FormEvent::Message(format!(
+                    "折叠文本全局自动滚动：{}",
+                    if self.horizontal_scroll.auto_enabled() {
+                        "已开启"
+                    } else {
+                        "已关闭"
+                    }
+                ))
             }
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
@@ -170,7 +202,7 @@ impl FormState {
             (FormPane::Profiles, true) | (FormPane::Tasks, false) => FormPane::Project,
         };
         self.selected = 0;
-        self.horizontal_offset = 0;
+        self.horizontal_scroll.reset_position();
         FormEvent::None
     }
 
@@ -185,10 +217,10 @@ impl FormState {
             }
         } else if forward {
             self.selected += 1;
-            self.horizontal_offset = 0;
+            self.horizontal_scroll.reset_position();
         } else {
             self.selected -= 1;
-            self.horizontal_offset = 0;
+            self.horizontal_scroll.reset_position();
         }
         FormEvent::None
     }
@@ -416,9 +448,32 @@ impl FormState {
         }
     }
 
+    /// 返回结构化表单所有可横移摘要中的最长字符数。
+    fn global_text_len(&self) -> usize {
+        let projects = std::iter::once(self.config.project().chars().count());
+        let profiles = self
+            .config
+            .profiles()
+            .map(|(name, profile)| name.chars().count() + profile.summary().chars().count() + 5);
+        let tasks = self
+            .config
+            .tasks()
+            .map(|(name, task)| name.chars().count() + task.command.chars().count() + 5);
+        let dependencies = self
+            .config
+            .dependencies()
+            .map(|(name, dependency)| name.chars().count() + dependency.source.chars().count() + 5);
+        projects
+            .chain(profiles)
+            .chain(tasks)
+            .chain(dependencies)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// 使列表选择序号保持在有效范围内。
     fn clamp_selection(&mut self) {
         self.selected = self.selected.min(self.item_count().saturating_sub(1));
-        self.horizontal_offset = 0;
+        self.horizontal_scroll.reset_position();
     }
 }
