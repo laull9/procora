@@ -1,29 +1,19 @@
-use crate::protocol::{SnapshotSourceDto, TaskStatusDto, TaskView};
+use crate::protocol::{SnapshotSourceDto, TaskView};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    symbols::border,
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Tabs, Wrap},
 };
 
-use super::{ActiveTab, App};
+use super::ui_support::{
+    bordered, display_color, resource_labels, source_label, status_label, status_visual,
+};
+use super::{ActiveTab, App, text_view};
 
 /// TUI 的强调色。
 const ACCENT: Color = Color::Cyan;
-
-/// 低能力终端使用的 ASCII 边框。
-const ASCII_BORDER: border::Set<'static> = border::Set {
-    top_left: "+",
-    top_right: "+",
-    bottom_left: "+",
-    bottom_right: "+",
-    vertical_left: "|",
-    vertical_right: "|",
-    horizontal_top: "-",
-    horizontal_bottom: "-",
-};
 
 /// 绘制完整的 TUI 页面。
 pub fn render(frame: &mut Frame<'_>, app: &App) {
@@ -67,7 +57,11 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let separator = if app.plain_mode() { " | " } else { " · " };
     let title = Line::from(vec![
         Span::styled(
-            format!(" Procora{separator}{} ", app.snapshot().project),
+            text_view::clipped(
+                &format!(" Procora{separator}{} ", app.snapshot().project),
+                0,
+                usize::from(area.width.saturating_sub(12)),
+            ),
             Style::default()
                 .fg(display_color(app, ACCENT))
                 .add_modifier(Modifier::BOLD),
@@ -107,14 +101,21 @@ fn render_task_list(frame: &mut Frame<'_>, area: Rect, app: &App) {
         .snapshot()
         .tasks
         .iter()
-        .map(|task| {
+        .enumerate()
+        .map(|(index, task)| {
             let (symbol, color) = status_visual(task.status, app.plain_mode());
+            let available = usize::from(area.width.saturating_sub(8));
+            let offset = if index == app.selected_index() {
+                app.horizontal_offset()
+            } else {
+                0
+            };
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!(" {symbol} "),
                     Style::default().fg(display_color(app, color)),
                 ),
-                Span::raw(task.task_id.to_string()),
+                Span::raw(text_view::clipped(task.task_id.as_str(), offset, available)),
             ]))
         })
         .collect::<Vec<_>>();
@@ -148,8 +149,8 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
             };
             let (cpu, memory) = resource_labels(task, app.plain_mode());
             let mut lines = vec![
-                detail_line("任务", task.task_id.as_str(), app),
-                detail_line("命令", &task.command, app),
+                detail_line("任务", task.task_id.as_str(), area.width, app),
+                detail_line("命令", &task.command, area.width, app),
                 Line::from(vec![
                     Span::styled(
                         "状态  ",
@@ -160,21 +161,19 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
                         Style::default().fg(display_color(app, status_color)),
                     ),
                 ]),
-                detail_line("依赖", &dependencies, app),
-                detail_line("健康", health_label(task.health), app),
-                detail_line("CPU", &cpu, app),
-                detail_line("内存", &memory, app),
+                detail_line("依赖", &dependencies, area.width, app),
+                detail_line("健康", health_label(task.health), area.width, app),
+                detail_line("CPU", &cpu, area.width, app),
+                detail_line("内存", &memory, area.width, app),
             ];
             if let Some(message) = &task.message {
                 lines.push(Line::default());
-                lines.push(detail_line("说明", message, app));
+                lines.push(detail_line("说明", message, area.width, app));
             }
             Text::from(lines)
         },
     );
-    let details = Paragraph::new(content)
-        .block(bordered(app).title("详情"))
-        .wrap(Wrap { trim: false });
+    let details = Paragraph::new(content).block(bordered(app).title("详情"));
     frame.render_widget(details, area);
 }
 
@@ -196,24 +195,26 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, app: &App) {
     for task in &app.snapshot().tasks {
         if task.dependencies.is_empty() {
             lines.push(graph_line(
-                format!(
+                &format!(
                     "{} {}",
                     if app.plain_mode() { "*" } else { "●" },
                     task.task_id
                 ),
                 selected == Some(&task.task_id),
+                area.width,
                 app,
             ));
         } else {
             for dependency in &task.dependencies {
                 lines.push(graph_line(
-                    format!(
+                    &format!(
                         "{} {} {}",
                         dependency,
                         if app.plain_mode() { "->" } else { "──▶" },
                         task.task_id
                     ),
                     selected == Some(&task.task_id),
+                    area.width,
                     app,
                 ));
             }
@@ -222,9 +223,7 @@ fn render_dependencies(frame: &mut Frame<'_>, area: Rect, app: &App) {
     if lines.is_empty() {
         lines.push(Line::from("配置中没有可显示的任务依赖。"));
     }
-    let graph = Paragraph::new(lines)
-        .block(bordered(app).title("直接依赖"))
-        .wrap(Wrap { trim: false });
+    let graph = Paragraph::new(lines).block(bordered(app).title("直接依赖"));
     frame.render_widget(graph, area);
 }
 
@@ -254,7 +253,10 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
         };
         let logs = Paragraph::new(format!("{prefix}{content}"))
             .block(bordered(app).title(log_title(area.width, &task, Some(&position), app)))
-            .scroll((u16::try_from(scroll_top).unwrap_or(u16::MAX), 0));
+            .scroll((
+                u16::try_from(scroll_top).unwrap_or(u16::MAX),
+                u16::try_from(app.horizontal_offset()).unwrap_or(u16::MAX),
+            ));
         frame.render_widget(logs, area);
         return;
     }
@@ -283,13 +285,14 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else if area.width < 64 {
         "j/k 选择  Tab 切页  1/2/3 直达  q 退出"
     } else if live && app.control_allowed() {
-        "↑↓/jk 选择  Tab/←→ 切页  s 启动  x 停止  r 重启  q/Esc 退出"
+        "↑↓/jk 选择  Tab 切页  ←→ 横移文本  s 启动  x 停止  r 重启  q/Esc 退出"
     } else {
-        "↑↓/jk 选择任务  Tab/←→ 切换页面  1/2/3 直达  q/Esc 退出"
+        "↑↓/jk 选择任务  Tab 切页  ←→ 横移文本  1/2/3 直达  q/Esc 退出"
     };
-    let mut lines = vec![Line::from(controls)];
+    let width = usize::from(area.width);
+    let mut lines = vec![Line::from(text_view::clipped(controls, 0, width))];
     if let Some(feedback) = app.feedback() {
-        lines.push(Line::from(feedback));
+        lines.push(Line::from(text_view::clipped(feedback, 0, width)));
     }
     let footer =
         Paragraph::new(lines).style(Style::default().fg(display_color(app, Color::DarkGray)));
@@ -301,7 +304,11 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let (source, source_color) = source_label(app.snapshot().source, app.plain_mode());
     let mut lines = vec![
         Line::from(Span::styled(
-            format!("Procora · {}", app.snapshot().project),
+            text_view::clipped(
+                &format!("Procora · {}", app.snapshot().project),
+                0,
+                usize::from(area.width),
+            ),
             Style::default()
                 .fg(display_color(app, ACCENT))
                 .add_modifier(Modifier::BOLD),
@@ -317,7 +324,11 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
         if area.height >= 6
             && let Some(message) = app.feedback().or(task.message.as_deref())
         {
-            lines.push(Line::from(message.to_owned()));
+            lines.push(Line::from(text_view::clipped(
+                message,
+                app.horizontal_offset(),
+                usize::from(area.width),
+            )));
         }
     } else {
         lines.push(Line::from("无 Task"));
@@ -353,11 +364,11 @@ fn log_controls(app: &App, width: u16) -> &'static str {
     match (app.mac_key_hints(), width < 76) {
         (true, true) => "Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  q 退出",
         (true, false) => {
-            "↑↓/jk 换任务  Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  Tab/←→ 切页  q/Esc 退出"
+            "↑↓/jk 换任务  ←→ 横移  Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  Tab 切页  q/Esc 退出"
         }
         (false, true) => "PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  q 退出",
         (false, false) => {
-            "↑↓/jk 换任务  PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  Tab/←→ 切页  q/Esc 退出"
+            "↑↓/jk 换任务  ←→ 横移  PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  Tab 切页  q/Esc 退出"
         }
     }
 }
@@ -371,18 +382,25 @@ fn render_too_small(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 /// 创建统一的详情字段行。
-fn detail_line(label: &str, value: impl Into<String>, app: &App) -> Line<'static> {
+fn detail_line(label: &str, value: impl Into<String>, area_width: u16, app: &App) -> Line<'static> {
+    let value = value.into();
+    let label_width = text_view::width(&format!("{label}  "));
+    let available = usize::from(area_width.saturating_sub(2)).saturating_sub(label_width);
     Line::from(vec![
         Span::styled(
             format!("{label}  "),
             Style::default().fg(display_color(app, Color::DarkGray)),
         ),
-        Span::raw(value.into()),
+        Span::raw(text_view::clipped(
+            &value,
+            app.horizontal_offset(),
+            available,
+        )),
     ])
 }
 
 /// 创建依赖图中的一行并按选择状态着色。
-fn graph_line(content: String, selected: bool, app: &App) -> Line<'static> {
+fn graph_line(content: &str, selected: bool, area_width: u16, app: &App) -> Line<'static> {
     let style = if selected {
         Style::default()
             .fg(display_color(app, ACCENT))
@@ -390,107 +408,12 @@ fn graph_line(content: String, selected: bool, app: &App) -> Line<'static> {
     } else {
         Style::default()
     };
-    Line::styled(content, style)
-}
-
-/// 返回快照来源标签及颜色。
-const fn source_label(source: SnapshotSourceDto, plain: bool) -> (&'static str, Color) {
-    let (label, color) = match source {
-        SnapshotSourceDto::ConfigPreview => ("预览", Color::Yellow),
-        SnapshotSourceDto::EmbeddedLive => ("临时服务", Color::Green),
-        SnapshotSourceDto::CenterLive => ("全局服务", Color::Green),
-        SnapshotSourceDto::CenterStale => ("连接中断", Color::Red),
-    };
-    (label, if plain { Color::Reset } else { color })
-}
-
-/// 返回任务状态的符号与颜色。
-const fn status_visual(status: TaskStatusDto, plain: bool) -> (&'static str, Color) {
-    if plain {
-        return match status {
-            TaskStatusDto::Pending => ("o", Color::Reset),
-            TaskStatusDto::Blocked => ("?", Color::Reset),
-            TaskStatusDto::Running => ("*", Color::Reset),
-            TaskStatusDto::Stopped => ("-", Color::Reset),
-            TaskStatusDto::Failed => ("x", Color::Reset),
-        };
-    }
-    match status {
-        TaskStatusDto::Pending => ("○", Color::Yellow),
-        TaskStatusDto::Blocked => ("◆", Color::Magenta),
-        TaskStatusDto::Running => ("●", Color::Green),
-        TaskStatusDto::Stopped => ("■", Color::DarkGray),
-        TaskStatusDto::Failed => ("×", Color::Red),
-    }
-}
-
-/// 返回任务状态的中文标签。
-const fn status_label(status: TaskStatusDto) -> &'static str {
-    match status {
-        TaskStatusDto::Pending => "等待调度",
-        TaskStatusDto::Blocked => "依赖阻断",
-        TaskStatusDto::Running => "运行中",
-        TaskStatusDto::Stopped => "已停止",
-        TaskStatusDto::Failed => "失败",
-    }
-}
-
-/// 返回任务资源的可读标签。
-fn resource_labels(task: &TaskView, plain: bool) -> (String, String) {
-    let unavailable = if plain { "-" } else { "—" };
-    task.resources.map_or_else(
-        || (unavailable.to_owned(), unavailable.to_owned()),
-        |resources| {
-            let cpu = resources.cpu_tenths_percent.map_or_else(
-                || unavailable.to_owned(),
-                |value| format!("{}.{:01}%", value / 10, value % 10),
-            );
-            let memory = resources
-                .memory_bytes
-                .map_or_else(|| unavailable.to_owned(), format_bytes);
-            (cpu, memory)
-        },
+    Line::styled(
+        text_view::clipped(
+            content,
+            if selected { app.horizontal_offset() } else { 0 },
+            usize::from(area_width.saturating_sub(2)),
+        ),
+        style,
     )
-}
-
-/// 创建适配当前终端能力的边框块。
-fn bordered<'a>(app: &App) -> Block<'a> {
-    let block = Block::default().borders(Borders::ALL);
-    if app.plain_mode() {
-        block.border_set(ASCII_BORDER)
-    } else {
-        block
-    }
-}
-
-/// 在纯文本模式下关闭显式颜色。
-const fn display_color(app: &App, color: Color) -> Color {
-    if app.plain_mode() {
-        Color::Reset
-    } else {
-        color
-    }
-}
-
-/// 将字节数格式化为适合终端详情面板的短文本。
-fn format_bytes(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = KIB * 1024;
-    const GIB: u64 = MIB * 1024;
-    if bytes >= GIB {
-        format_unit(bytes, GIB, "GiB")
-    } else if bytes >= MIB {
-        format_unit(bytes, MIB, "MiB")
-    } else if bytes >= KIB {
-        format_unit(bytes, KIB, "KiB")
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-/// 使用整数运算生成保留一位小数的容量文本。
-fn format_unit(bytes: u64, unit: u64, suffix: &str) -> String {
-    let whole = bytes / unit;
-    let decimal = (bytes % unit) * 10 / unit;
-    format!("{whole}.{decimal} {suffix}")
 }

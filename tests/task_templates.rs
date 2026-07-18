@@ -175,7 +175,7 @@ fn task_dialog_selects_template_without_expanding_it() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     press(&mut editor, KeyCode::Tab);
     for _ in 0..3 {

@@ -9,6 +9,7 @@ pub(crate) struct FormState {
     config: FormConfig,
     pane: FormPane,
     selected: usize,
+    horizontal_offset: usize,
     dialog: Option<Dialog>,
     pending_delete: Option<DeleteTarget>,
 }
@@ -41,6 +42,7 @@ impl FormState {
             config,
             pane: FormPane::Project,
             selected: 0,
+            horizontal_offset: 0,
             dialog: None,
             pending_delete: None,
         }
@@ -59,6 +61,11 @@ impl FormState {
     /// 返回当前列表选中序号。
     pub(crate) const fn selected(&self) -> usize {
         self.selected
+    }
+
+    /// 返回当前高亮条目的水平字符偏移。
+    pub(crate) const fn horizontal_offset(&self) -> usize {
+        self.horizontal_offset
     }
 
     /// 返回当前弹窗，供界面绘制。
@@ -80,6 +87,11 @@ impl FormState {
         self.pending_delete.is_some()
     }
 
+    /// 返回当前字段弹窗是否又打开了键值表。
+    pub(crate) fn has_map_editor(&self) -> bool {
+        self.dialog.as_ref().is_some_and(Dialog::has_map_editor)
+    }
+
     /// 处理结构化页面中的一次按键。
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> FormEvent {
         if self.dialog.is_some() {
@@ -89,8 +101,19 @@ impl FormState {
             return self.handle_delete(key);
         }
         match key.code {
-            KeyCode::Left | KeyCode::BackTab => self.move_pane(false),
-            KeyCode::Right | KeyCode::Tab => self.move_pane(true),
+            KeyCode::BackTab => self.move_pane(false),
+            KeyCode::Tab => self.move_pane(true),
+            KeyCode::Left => {
+                self.horizontal_offset = self.horizontal_offset.saturating_sub(1);
+                FormEvent::None
+            }
+            KeyCode::Right => {
+                self.horizontal_offset = self
+                    .horizontal_offset
+                    .saturating_add(1)
+                    .min(self.selected_text_len().saturating_sub(1));
+                FormEvent::None
+            }
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(false),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(true),
             KeyCode::Enter => self.open_current(),
@@ -147,18 +170,25 @@ impl FormState {
             (FormPane::Profiles, true) | (FormPane::Tasks, false) => FormPane::Project,
         };
         self.selected = 0;
+        self.horizontal_offset = 0;
         FormEvent::None
     }
 
     /// 移动当前列表项选择。
     fn move_selection(&mut self, forward: bool) -> FormEvent {
         let count = self.item_count();
-        if count > 0 {
-            self.selected = if forward {
-                (self.selected + 1) % count
-            } else {
-                self.selected.checked_sub(1).unwrap_or(count - 1)
-            };
+        if count == 0 || (forward && self.selected + 1 >= count) || (!forward && self.selected == 0)
+        {
+            self.move_pane(forward);
+            if !forward {
+                self.selected = self.item_count().saturating_sub(1);
+            }
+        } else if forward {
+            self.selected += 1;
+            self.horizontal_offset = 0;
+        } else {
+            self.selected -= 1;
+            self.horizontal_offset = 0;
         }
         FormEvent::None
     }
@@ -263,6 +293,9 @@ impl FormState {
     /// 处理弹窗内的输入、选项切换、确认和取消。
     fn handle_dialog(&mut self, key: KeyEvent) -> FormEvent {
         let dialog = self.dialog.as_mut().expect("弹窗状态存在");
+        if let Some(result) = dialog.handle_map_key(key) {
+            return result.map_or_else(FormEvent::Message, |()| FormEvent::None);
+        }
         match key.code {
             KeyCode::Esc => {
                 self.dialog = None;
@@ -277,15 +310,29 @@ impl FormState {
                 FormEvent::None
             }
             KeyCode::Left => {
-                dialog.cycle_choice(false);
+                dialog.move_cursor(false);
                 FormEvent::None
             }
             KeyCode::Right => {
-                dialog.cycle_choice(true);
+                dialog.move_cursor(true);
+                FormEvent::None
+            }
+            KeyCode::Home => {
+                dialog.move_cursor_edge(false);
+                FormEvent::None
+            }
+            KeyCode::End => {
+                dialog.move_cursor_edge(true);
                 FormEvent::None
             }
             KeyCode::Backspace => {
                 dialog.backspace();
+                FormEvent::None
+            }
+            KeyCode::F(4) if dialog.selected_is_map() => {
+                if let Err(message) = dialog.open_map_editor() {
+                    return FormEvent::Message(message);
+                }
                 FormEvent::None
             }
             KeyCode::Char(character) => {
@@ -341,8 +388,37 @@ impl FormState {
         }
     }
 
+    /// 返回当前高亮摘要的字符长度，用于限制水平视口。
+    fn selected_text_len(&self) -> usize {
+        match self.pane {
+            FormPane::Project => self.config.project().chars().count(),
+            FormPane::Profiles => self
+                .config
+                .profiles()
+                .nth(self.selected)
+                .map_or(0, |(name, profile)| {
+                    name.chars().count() + profile.summary().chars().count() + 5
+                }),
+            FormPane::Tasks => self
+                .config
+                .tasks()
+                .nth(self.selected)
+                .map_or(0, |(name, task)| {
+                    name.chars().count() + task.command.chars().count() + 5
+                }),
+            FormPane::Dependencies => self
+                .config
+                .dependencies()
+                .nth(self.selected)
+                .map_or(0, |(name, dependency)| {
+                    name.chars().count() + dependency.source.chars().count() + 5
+                }),
+        }
+    }
+
     /// 使列表选择序号保持在有效范围内。
     fn clamp_selection(&mut self) {
         self.selected = self.selected.min(self.item_count().saturating_sub(1));
+        self.horizontal_offset = 0;
     }
 }

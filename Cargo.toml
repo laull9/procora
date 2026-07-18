@@ -1,6 +1,6 @@
 [package]
 name = "procora"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.95"
 publish = false
@@ -30,6 +30,7 @@ serde_json = "1.0"
 serde_path_to_error = "0.1.20"
 sha2 = "0.10"
 strsim = "0.11"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy", "yaml-load"] }
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 tar = "0.4"
 thiserror = "2.0"

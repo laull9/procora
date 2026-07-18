@@ -49,7 +49,7 @@ fn task_dialog_accepts_command_text_with_embedded_args() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     press(&mut editor, KeyCode::Tab);
     for _ in 0..3 {

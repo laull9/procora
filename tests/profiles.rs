@@ -340,7 +340,7 @@ fn tui_edits_profile_inheritance_across_formats() {
 
         // 保留既有 Project → Tasks → Dependencies 导航，再进入新增的 Profiles 区域。
         for _ in 0..3 {
-            press(&mut editor, KeyCode::Right);
+            press(&mut editor, KeyCode::Tab);
         }
         press(&mut editor, KeyCode::Down);
         press(&mut editor, KeyCode::Enter);
@@ -383,7 +383,7 @@ fn tui_creates_and_deletes_profile() {
     let mut editor = ConfigEditor::open(&path).unwrap();
 
     for _ in 0..3 {
-        press(&mut editor, KeyCode::Right);
+        press(&mut editor, KeyCode::Tab);
     }
     press(&mut editor, KeyCode::Char('n'));
     for character in "empty".chars() {
@@ -401,7 +401,7 @@ fn tui_creates_and_deletes_profile() {
     assert!(fs::read_to_string(&path).unwrap().contains("\"tasks\":[]"));
 
     for _ in 0..3 {
-        press(&mut editor, KeyCode::Right);
+        press(&mut editor, KeyCode::Tab);
     }
     press(&mut editor, KeyCode::Char('d'));
     press(&mut editor, KeyCode::Char('d'));
@@ -423,7 +423,7 @@ fn tui_refuses_to_delete_referenced_profile() {
     let mut editor = ConfigEditor::open(&path).unwrap();
 
     for _ in 0..3 {
-        press(&mut editor, KeyCode::Right);
+        press(&mut editor, KeyCode::Tab);
     }
     press(&mut editor, KeyCode::Char('d'));
     press(&mut editor, KeyCode::Char('d'));

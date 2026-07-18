@@ -333,6 +333,7 @@ impl Center {
     fn check_registration_conflicts(&self, name: &str, root: &Path) -> Result<(), CenterError> {
         if let Some(existing) = self.services.get(name)
             && existing.root != root
+            && !registration_can_relocate(existing)
         {
             return Err(CenterError::DuplicateName {
                 name: name.to_owned(),
@@ -367,7 +368,10 @@ impl Center {
                     })?;
                 self.services
                     .values()
-                    .find(|service| service.root == canonical || service.config_path == canonical)
+                    .filter(|service| {
+                        service.config_path == canonical || canonical.starts_with(&service.root)
+                    })
+                    .max_by_key(|service| service.root.components().count())
                     .map(|service| service.name.clone())
                     .ok_or_else(|| CenterError::NotFound(path.display().to_string()))
             }
@@ -437,4 +441,9 @@ impl Center {
             tracing::warn!(service = name, %error, "服务状态日志写入失败");
         }
     }
+}
+
+/// 仅允许配置入口已经消失的注册记录迁移到新目录。
+fn registration_can_relocate(service: &ManagedService) -> bool {
+    !service.config_path.exists()
 }

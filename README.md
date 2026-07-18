@@ -58,7 +58,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
 | `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
 | `procora history <name/path>` | 从 SQLite 查询指定服务的状态变更历史。 |
-| `procora show <name/path>` | 按名称、服务目录或配置文件打开已注册服务的 TUI。 |
+| `procora show [name/path]` | 按名称、服务目录或配置文件打开 TUI；省略目标时使用当前目录，路径尚未注册时自动发现。 |
 | `procora start <name/path>` | 重新加载已注册配置并启动服务宿主。 |
 | `procora restart <name/path>` | 重新加载配置并重启服务宿主。 |
 | `procora preview <name/path>` | 编译当前文件并输出 SHA-256 修订及新增、删除、重启、原地更新和无影响 Task。 |
@@ -108,6 +108,10 @@ Task 的 `healthcheck` 支持不经过 shell 的 `command + args`，也支持带
 可信项目也可显式传入 `procora.py`，由受控 Python 3 辅助进程输出单个 JSON 配置。目录扫描不会自动执行它；CLI 会提示当前用户权限代码执行。辅助进程有 5 秒、脚本/stdout/stderr 大小、最小环境和整树回收边界，但不是安全沙箱。生成 JSON 仍经过完整配置校验并参与 preview/apply 修订确认。
 
 `procora source git preview/confirm` 和库接口 `GitSource` 可从受限 HTTPS/SSH/SCP 或显式本地仓库获取定义，把引用固定为完整 commit，并在资源有界的无 hooks checkout 中复用同一配置校验。两条 CLI 命令都不注册或启动服务，confirm 会重新获取并拒绝过期修订。Center 尚不持久注册远端来源，也不提供私有仓库凭据代理。
+
+## 完整配置示例
+
+完整的配置写法、规则和一份可校验的综合配置集中在[配置示例](docs/example.md)。文档中的制品地址仅作结构展示，执行 `procora deps` 前需要替换为真实来源。
 
 ## 配置发现
 

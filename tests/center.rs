@@ -183,6 +183,94 @@ fn service_can_be_managed_by_name_and_path() {
 }
 
 #[test]
+// 服务根目录内的任意当前目录都能解析到已注册服务。
+fn nested_current_directory_resolves_registered_service() {
+    let directory = temporary_directory();
+    let service_root = directory.join("demo");
+    let nested = service_root.join("workspace/deep");
+    write_service(&service_root, "demo");
+    fs::create_dir_all(&nested).unwrap();
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open { path: service_root });
+    let response = center.handle(CenterRequest::Snapshot {
+        selector: ServiceSelectorDto::Path(nested),
+    });
+    assert!(matches!(
+        response,
+        CenterResponse::Snapshot(snapshot) if snapshot.project == "demo"
+    ));
+    center.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 嵌套服务同时注册时优先选择路径最接近的服务根目录。
+fn nested_services_use_longest_matching_root() {
+    let directory = temporary_directory();
+    let parent = directory.join("parent");
+    let child = parent.join("child");
+    let child_work = child.join("workspace");
+    let parent_work = parent.join("other");
+    write_service(&parent, "parent");
+    write_service(&child, "child");
+    fs::create_dir_all(&child_work).unwrap();
+    fs::create_dir_all(&parent_work).unwrap();
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open { path: parent });
+    center.handle(CenterRequest::Open { path: child });
+    let child_response = center.handle(CenterRequest::Snapshot {
+        selector: ServiceSelectorDto::Path(child_work),
+    });
+    let parent_response = center.handle(CenterRequest::Snapshot {
+        selector: ServiceSelectorDto::Path(parent_work),
+    });
+    assert!(matches!(
+        child_response,
+        CenterResponse::Snapshot(snapshot) if snapshot.project == "child"
+    ));
+    assert!(matches!(
+        parent_response,
+        CenterResponse::Snapshot(snapshot) if snapshot.project == "parent"
+    ));
+    center.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+// macOS等Unix平台通过符号链接进入子目录时仍使用规范化服务路径。
+fn symlinked_nested_path_resolves_registered_service() {
+    use std::os::unix::fs::symlink;
+
+    let directory = temporary_directory();
+    let service_root = directory.join("demo");
+    let nested = service_root.join("workspace");
+    let alias = directory.join("demo-alias");
+    write_service(&service_root, "demo");
+    fs::create_dir_all(&nested).unwrap();
+    symlink(&service_root, &alias).unwrap();
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open { path: service_root });
+
+    let response = center.handle(CenterRequest::Snapshot {
+        selector: ServiceSelectorDto::Path(alias.join("workspace")),
+    });
+
+    assert!(matches!(
+        response,
+        CenterResponse::Snapshot(snapshot) if snapshot.project == "demo"
+    ));
+    center.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 // remove停止宿主并彻底删除注册记录。
 fn remove_stops_host_and_deletes_registry() {
     let directory = temporary_directory();
@@ -230,6 +318,84 @@ fn center_restart_restores_registry_and_desired_state() {
     assert_eq!(services[0].name, "demo");
     assert_eq!(services[0].status, ServiceStatusDto::Running);
     drop(restored);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 旧配置入口消失后，同名服务可从新目录接管陈旧注册记录。
+fn missing_config_registration_can_relocate() {
+    let directory = temporary_directory();
+    let old_root = directory.join("downloads");
+    let new_root = old_root.join("Test");
+    let state_path = directory.join("procora.sqlite3");
+    write_service(&old_root, "downloads");
+    let mut center = Center::empty(SqliteCenterRepository::new(&state_path));
+    center.handle(CenterRequest::Open {
+        path: old_root.clone(),
+    });
+    center.handle(CenterRequest::Manage {
+        action: ServiceActionDto::Stop,
+        selector: ServiceSelectorDto::Name("downloads".to_owned()),
+    });
+    drop(center);
+    fs::remove_file(old_root.join("procora.yaml")).unwrap();
+    write_service(&new_root, "downloads");
+
+    let mut restored = Center::load(SqliteCenterRepository::new(&state_path)).unwrap();
+    assert!(matches!(
+        restored.handle(CenterRequest::Snapshot {
+            selector: ServiceSelectorDto::Name("downloads".to_owned()),
+        }),
+        CenterResponse::Error { .. }
+    ));
+    let reopened = restored.handle(CenterRequest::Open {
+        path: new_root.clone(),
+    });
+
+    assert!(matches!(
+        reopened,
+        CenterResponse::Service(service)
+            if service.name == "downloads"
+                && service.root == procora::platform::canonicalize(&new_root).unwrap()
+    ));
+    let stored = SqliteCenterRepository::new(state_path)
+        .load_services()
+        .unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(
+        stored[0].root,
+        procora::platform::canonicalize(&new_root).unwrap()
+    );
+    restored.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 中心仍在运行时移动配置，也可在显式打开新目录时停止旧宿主并迁移。
+fn live_service_with_missing_config_can_relocate() {
+    let directory = temporary_directory();
+    let old_root = directory.join("downloads");
+    let new_root = old_root.join("Test");
+    write_service(&old_root, "downloads");
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open {
+        path: old_root.clone(),
+    });
+    fs::remove_file(old_root.join("procora.yaml")).unwrap();
+    write_service(&new_root, "downloads");
+
+    let reopened = center.handle(CenterRequest::Open {
+        path: new_root.clone(),
+    });
+
+    assert!(matches!(
+        reopened,
+        CenterResponse::Service(service)
+            if service.root == procora::platform::canonicalize(&new_root).unwrap()
+    ));
+    center.handle(CenterRequest::Shutdown);
     fs::remove_dir_all(directory).unwrap();
 }
 

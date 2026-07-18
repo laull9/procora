@@ -11,7 +11,7 @@ use super::{
     config_form::{FormConfig, FormTask},
     config_form_defaults::form_path,
     config_form_dialog::{
-        DialogField, choice_field, field, map_text, optional, parse_duration, parse_i32_list,
+        DialogField, choice_field, field, map_field, optional, parse_duration, parse_i32_list,
         parse_map, parse_u32, required_value,
     },
 };
@@ -227,20 +227,15 @@ impl FormConfig {
 pub(super) fn project_fields(config: &FormConfig) -> Vec<DialogField> {
     let mut fields = vec![
         field("项目名称", &config.project, &[]),
-        field(
-            "默认环境变量（JSON 对象或 KEY=VALUE）",
-            &map_text(&config.env),
-            &[],
-        ),
+        map_field("默认环境变量（按 F4 编辑键值表）", &config.env),
         field(
             "Task 默认工作目录（可空）",
             config.task_defaults.cwd.as_deref().unwrap_or(""),
             &[],
         ),
-        field(
-            "Task 默认环境（JSON 对象或 KEY=VALUE）",
-            &map_text(&config.task_defaults.env),
-            &[],
+        map_field(
+            "Task 默认环境（按 F4 编辑键值表）",
+            &config.task_defaults.env,
         ),
         field(
             "Task 默认成功退出码（可空）",
@@ -285,11 +280,7 @@ pub(super) fn project_fields(config: &FormConfig) -> Vec<DialogField> {
         config.active_profile().unwrap_or("none"),
         profiles,
     ));
-    fields.push(field(
-        "项目变量（JSON 对象或 KEY=VALUE）",
-        &map_text(&config.vars),
-        &[],
-    ));
+    fields.push(map_field("项目变量（按 F4 编辑键值表）", &config.vars));
     fields
 }
 

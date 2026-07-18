@@ -1,9 +1,16 @@
 use std::collections::BTreeMap;
 
+use crossterm::event::{KeyCode, KeyEvent};
+
+pub(super) use super::config_form_value::{
+    args_text, dependencies_text, map_text, optional, parse_args, parse_dependencies,
+    parse_duration, parse_i32_list, parse_map, parse_u32, replace_entry, required_value,
+};
 use super::{
     config_dependency_dialog,
-    config_form::{FormConfig, FormDependency, FormTask, FormTaskDependency},
+    config_form::{FormConfig, FormDependency, FormTask},
     config_health_dialog,
+    config_map_dialog::MapEditor,
     config_profile::{self, FormProfile},
     config_task_defaults, config_task_dialog,
 };
@@ -25,6 +32,16 @@ pub(super) struct DialogField {
     pub(super) label: &'static str,
     pub(super) value: String,
     pub(super) choices: Vec<String>,
+    cursor: usize,
+    kind: DialogFieldKind,
+}
+
+/// 弹窗字段采用的输入控件类型。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DialogFieldKind {
+    Text,
+    Choice,
+    Map,
 }
 
 /// 表单输入弹窗。
@@ -33,6 +50,7 @@ pub(crate) struct Dialog {
     kind: DialogKind,
     fields: Vec<DialogField>,
     selected: usize,
+    map_editor: Option<MapEditor>,
 }
 
 impl Dialog {
@@ -42,6 +60,7 @@ impl Dialog {
             kind: DialogKind::Project,
             fields: config_task_defaults::project_fields(config),
             selected: 0,
+            map_editor: None,
         }
     }
 
@@ -66,6 +85,7 @@ impl Dialog {
             kind: DialogKind::Task(original.map(str::to_owned), Box::new(task.clone())),
             fields: config_task_dialog::fields(original, task),
             selected: 0,
+            map_editor: None,
         }
     }
 
@@ -79,6 +99,7 @@ impl Dialog {
             kind: DialogKind::Profile(original.map(str::to_owned)),
             fields: config_profile::fields(original, profile, config),
             selected: 0,
+            map_editor: None,
         }
     }
 
@@ -88,6 +109,7 @@ impl Dialog {
             kind: DialogKind::Health(task_name.to_owned()),
             fields: config_health_dialog::fields(task),
             selected: 0,
+            map_editor: None,
         }
     }
 
@@ -124,6 +146,7 @@ impl Dialog {
                 ),
             ],
             selected: 0,
+            map_editor: None,
         }
     }
 
@@ -150,10 +173,9 @@ impl Dialog {
                     &dependency.download.max_bytes.to_string(),
                     &[],
                 ),
-                field(
-                    "HTTP 请求头（KEY=VALUE）",
-                    &map_text(&dependency.download.headers),
-                    &[],
+                map_field(
+                    "HTTP 请求头（按 F4 编辑键值表）",
+                    &dependency.download.headers,
                 ),
                 field(
                     "SSH 私钥（可空）",
@@ -186,6 +208,7 @@ impl Dialog {
                 ),
             ],
             selected: 0,
+            map_editor: None,
         }
     }
 
@@ -219,7 +242,74 @@ impl Dialog {
 
     /// 返回当前字段是否为选择器。
     pub(crate) fn selected_is_choice(&self) -> bool {
-        !self.fields[self.selected].choices.is_empty()
+        self.fields[self.selected].kind == DialogFieldKind::Choice
+    }
+
+    /// 返回当前字段是否支持打开键值表。
+    pub(crate) fn selected_is_map(&self) -> bool {
+        self.fields[self.selected].kind == DialogFieldKind::Map
+    }
+
+    /// 返回当前可直接输入的字段，选择器和子弹窗不显示文本光标。
+    pub(crate) fn selected_input(&self) -> Option<(&str, &str, usize)> {
+        if self.map_editor.is_some() {
+            return None;
+        }
+        let field = &self.fields[self.selected];
+        (field.kind != DialogFieldKind::Choice).then_some((
+            field.label,
+            field.value.as_str(),
+            field.cursor,
+        ))
+    }
+
+    /// 返回当前打开的键值表。
+    pub(super) const fn map_editor(&self) -> Option<&MapEditor> {
+        self.map_editor.as_ref()
+    }
+
+    /// 返回当前是否正在编辑键值表。
+    pub(crate) const fn has_map_editor(&self) -> bool {
+        self.map_editor.is_some()
+    }
+
+    /// 为当前映射字段打开键值表。
+    pub(crate) fn open_map_editor(&mut self) -> Result<(), String> {
+        if !self.selected_is_map() {
+            return Err("当前字段不是键值表".to_owned());
+        }
+        let values = parse_map(
+            &self.fields[self.selected].value,
+            self.fields[self.selected].label,
+        )?;
+        self.map_editor = Some(MapEditor::new(self.selected, values));
+        Ok(())
+    }
+
+    /// 处理键值表输入；返回空表示当前没有打开子弹窗。
+    pub(crate) fn handle_map_key(&mut self, key: KeyEvent) -> Option<Result<(), String>> {
+        let editor = self.map_editor.as_mut()?;
+        match key.code {
+            KeyCode::Esc => {
+                self.map_editor = None;
+                Some(Ok(()))
+            }
+            KeyCode::Enter => {
+                let values = match editor.values() {
+                    Ok(values) => values,
+                    Err(error) => return Some(Err(error)),
+                };
+                let field = editor.field();
+                self.fields[field].value = map_text(&values);
+                self.fields[field].cursor = self.fields[field].value.chars().count();
+                self.map_editor = None;
+                Some(Ok(()))
+            }
+            _ => {
+                editor.handle_key(key);
+                Some(Ok(()))
+            }
+        }
     }
 
     /// 移动弹窗字段选择。
@@ -245,21 +335,49 @@ impl Dialog {
             position.checked_sub(1).unwrap_or(field.choices.len() - 1)
         };
         field.value = field.choices[next].clone();
+        field.cursor = field.value.chars().count();
     }
 
-    /// 删除当前普通文本字段的最后一个字符。
-    pub(crate) fn backspace(&mut self) {
+    /// 左右移动普通文本字段的字符光标。
+    pub(crate) fn move_cursor(&mut self, forward: bool) {
         let field = &mut self.fields[self.selected];
-        if field.choices.is_empty() {
-            field.value.pop();
+        if field.kind == DialogFieldKind::Choice {
+            self.cycle_choice(forward);
+            return;
+        }
+        field.cursor = if forward {
+            (field.cursor + 1).min(field.value.chars().count())
+        } else {
+            field.cursor.saturating_sub(1)
+        };
+    }
+
+    /// 将普通文本字段光标移动到行首或行尾。
+    pub(crate) fn move_cursor_edge(&mut self, end: bool) {
+        let field = &mut self.fields[self.selected];
+        if field.kind != DialogFieldKind::Choice {
+            field.cursor = if end { field.value.chars().count() } else { 0 };
         }
     }
 
-    /// 向当前普通文本字段追加字符。
+    /// 删除当前普通文本字段光标前的字符。
+    pub(crate) fn backspace(&mut self) {
+        let field = &mut self.fields[self.selected];
+        if field.kind != DialogFieldKind::Choice && field.cursor > 0 {
+            let start = char_to_byte(&field.value, field.cursor - 1);
+            let end = char_to_byte(&field.value, field.cursor);
+            field.value.replace_range(start..end, "");
+            field.cursor -= 1;
+        }
+    }
+
+    /// 向当前普通文本字段光标处插入字符。
     pub(crate) fn insert(&mut self, character: char) {
         let field = &mut self.fields[self.selected];
-        if field.choices.is_empty() {
-            field.value.push(character);
+        if field.kind != DialogFieldKind::Choice {
+            let byte = char_to_byte(&field.value, field.cursor);
+            field.value.insert(byte, character);
+            field.cursor += 1;
         }
     }
 
@@ -308,6 +426,12 @@ pub(super) fn field(
         label,
         value: value.to_owned(),
         choices: choices.iter().map(|value| (*value).to_owned()).collect(),
+        cursor: value.chars().count(),
+        kind: if choices.is_empty() {
+            DialogFieldKind::Text
+        } else {
+            DialogFieldKind::Choice
+        },
     }
 }
 
@@ -317,158 +441,27 @@ pub(super) fn choice_field(label: &'static str, value: &str, choices: Vec<String
         label,
         value: value.to_owned(),
         choices,
+        cursor: value.chars().count(),
+        kind: DialogFieldKind::Choice,
     }
 }
 
-/// 将环境变量映射转换为弹窗文本。
-pub(super) fn map_text(values: &BTreeMap<String, String>) -> String {
-    serde_json::to_string(values).expect("字符串映射序列化不会失败")
-}
-
-/// 将依赖映射转换为弹窗文本。
-pub(super) fn dependencies_text(values: &BTreeMap<String, FormTaskDependency>) -> String {
-    values
-        .iter()
-        .map(|(name, dependency)| format!("{name}:{}", dependency.condition))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-/// 解析逗号分隔的环境变量集合。
-pub(super) fn parse_map(value: &str, label: &str) -> Result<BTreeMap<String, String>, String> {
-    let value = value.trim();
-    if value.starts_with('{') {
-        return serde_json::from_str(value).map_err(|error| format!("{label} JSON 无效：{error}"));
+/// 创建使用键值表子弹窗编辑的映射字段。
+pub(super) fn map_field(label: &'static str, values: &BTreeMap<String, String>) -> DialogField {
+    let value = map_text(values);
+    DialogField {
+        label,
+        cursor: value.chars().count(),
+        value,
+        choices: Vec::new(),
+        kind: DialogFieldKind::Map,
     }
+}
+
+/// 把字符序号转换为 UTF-8 字节位置。
+fn char_to_byte(value: &str, index: usize) -> usize {
     value
-        .split(',')
-        .filter(|item| !item.trim().is_empty())
-        .map(|item| {
-            let Some((key, value)) = item.split_once('=') else {
-                return Err(format!("{label} 必须使用 KEY=VALUE 格式"));
-            };
-            let key = key.trim();
-            require(key, label)?;
-            Ok((key.to_owned(), value.trim().to_owned()))
-        })
-        .collect()
-}
-
-/// 解析逗号分隔的 Task 依赖集合。
-pub(super) fn parse_dependencies(
-    value: &str,
-) -> Result<BTreeMap<String, FormTaskDependency>, String> {
-    let mut dependencies = BTreeMap::new();
-    for item in value.split(',').filter(|item| !item.trim().is_empty()) {
-        let (name, condition) = item.split_once(':').unwrap_or((item, "started"));
-        let name = name.trim();
-        require(name, "依赖 Task")?;
-        let condition = match condition.trim() {
-            "started" | "process_started" => "started",
-            "healthy" | "process_healthy" => "healthy",
-            "completed_successfully" | "process_completed_successfully" => "completed_successfully",
-            _ => {
-                return Err("依赖条件只能是 started、healthy 或 completed_successfully".to_owned());
-            }
-        };
-        if dependencies
-            .insert(
-                name.to_owned(),
-                FormTaskDependency {
-                    condition: condition.to_owned(),
-                },
-            )
-            .is_some()
-        {
-            return Err(format!("依赖 Task `{name}` 重复出现"));
-        }
-    }
-    Ok(dependencies)
-}
-
-/// 替换或新增一个带名称的配置条目，并防止意外覆盖。
-pub(super) fn replace_entry<T>(
-    entries: &mut BTreeMap<String, T>,
-    original: Option<&str>,
-    name: &str,
-    value: T,
-    label: &str,
-) -> Result<(), String> {
-    if original != Some(name) && entries.contains_key(name) {
-        return Err(format!("{label} 名称 `{name}` 已存在"));
-    }
-    if let Some(original) = original {
-        entries.remove(original);
-    }
-    entries.insert(name.to_owned(), value);
-    Ok(())
-}
-
-/// 确保必填字段包含非空文本。
-fn require(value: &str, label: &str) -> Result<(), String> {
-    if value.trim().is_empty() {
-        Err(format!("{label} 不能为空"))
-    } else {
-        Ok(())
-    }
-}
-
-/// 读取必填字段，并移除首尾空白。
-pub(super) fn required_value(value: &str, label: &str) -> Result<String, String> {
-    require(value, label)?;
-    Ok(value.trim().to_owned())
-}
-
-/// 把可空文本转为可选字段。
-pub(super) fn optional(value: &str) -> Option<String> {
-    (!value.trim().is_empty()).then(|| value.trim().to_owned())
-}
-
-/// 将空白分隔的参数文本转换为参数数组。
-pub(super) fn args_text(values: &[String]) -> String {
-    serde_json::to_string(values).expect("字符串数组序列化不会失败")
-}
-
-/// 解析精确 JSON 参数数组，并兼容旧版空格分隔输入。
-pub(super) fn parse_args(value: &str, label: &str) -> Result<Vec<String>, String> {
-    let value = value.trim();
-    if value.starts_with('[') {
-        return serde_json::from_str(value).map_err(|error| format!("{label} JSON 无效：{error}"));
-    }
-    Ok(value.split_whitespace().map(str::to_owned).collect())
-}
-
-/// 解析一个带单位的紧凑时长字段。
-pub(super) fn parse_duration(value: &str, label: &str) -> Result<u64, String> {
-    crate::config::parse_duration(value).map_err(|error| format!("{label}无效：{error}"))
-}
-
-/// 解析表单中的非负 32 位整数。
-pub(super) fn parse_u32(value: &str, label: &str) -> Result<u32, String> {
-    value
-        .trim()
-        .parse()
-        .map_err(|_| format!("{label} 必须是非负整数"))
-}
-
-/// 解析精确 JSON 整数数组，并兼容逗号或空白分隔输入。
-pub(super) fn parse_i32_list(value: &str, label: &str) -> Result<Vec<i32>, String> {
-    let value = value.trim();
-    let values = if value.starts_with('[') {
-        serde_json::from_str(value).map_err(|error| format!("{label} JSON 无效：{error}"))?
-    } else {
-        value
-            .split([',', ' '])
-            .filter(|item| !item.trim().is_empty())
-            .map(|item| {
-                item.trim()
-                    .parse()
-                    .map_err(|_| format!("{label} 必须是整数数组"))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    if values.iter().any(|value| *value < 0) {
-        return Err(format!("{label}不能包含负数"));
-    }
-    Ok(values)
+        .char_indices()
+        .nth(index)
+        .map_or(value.len(), |(byte, _)| byte)
 }

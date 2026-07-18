@@ -44,14 +44,14 @@ fn artifact_upload_retries_once_with_overwrite() {
     assert!(RELEASE_WORKFLOW.contains("overwrite: true"));
 }
 
-/// 校验发布和安全审计动作都显式固定到 Node 24 实现。
+/// 校验常规 CI 和安全工作流的审计动作显式固定到 Node 24 实现。
 #[test]
-// 发布与审计动作固定node24实现。
+// CI与安全审计动作固定node24实现。
 fn release_and_audit_actions_use_node24() {
     let audit = "rustsec/audit-check@858dc40f52ca2b8570b7a997c1c4e35c6fc9a432";
-    assert!(RELEASE_WORKFLOW.contains(audit));
     assert!(CI_WORKFLOW.contains(audit));
     assert!(SECURITY_WORKFLOW.contains(audit));
+    assert!(!RELEASE_WORKFLOW.contains(audit));
     assert!(
         RELEASE_WORKFLOW
             .contains("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
@@ -60,4 +60,25 @@ fn release_and_audit_actions_use_node24() {
         RELEASE_WORKFLOW
             .contains("softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228")
     );
+}
+
+/// 校验常规 CI 只在 dev 和 main 提交时运行，PR 不重复执行。
+#[test]
+// CI只在dev和main提交时运行。
+fn ci_avoids_duplicate_pull_request_runs() {
+    assert!(CI_WORKFLOW.contains("      - dev\n      - main"));
+    assert!(!CI_WORKFLOW.contains("pull_request:"));
+}
+
+/// 校验标签发布复用 main 成功 CI，只执行多平台打包。
+#[test]
+// 标签发布不重复运行源码测试。
+fn release_reuses_successful_main_ci() {
+    assert!(RELEASE_WORKFLOW.contains("actions: read"));
+    assert!(RELEASE_WORKFLOW.contains("--workflow ci.yml"));
+    assert!(RELEASE_WORKFLOW.contains("--branch main"));
+    assert!(RELEASE_WORKFLOW.contains("--status success"));
+    assert!(RELEASE_WORKFLOW.contains("needs: prepare"));
+    assert!(!RELEASE_WORKFLOW.contains("cargo test"));
+    assert!(!RELEASE_WORKFLOW.contains("cargo clippy"));
 }

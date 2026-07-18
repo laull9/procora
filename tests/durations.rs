@@ -170,7 +170,7 @@ fn form_edits_and_saves_readable_durations() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Enter);
     for _ in 0..9 {
         press(&mut editor, KeyCode::Tab);

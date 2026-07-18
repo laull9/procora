@@ -37,6 +37,7 @@ pub struct ConfigEditor {
     row: usize,
     column: usize,
     scroll: usize,
+    horizontal_scroll: usize,
     dirty: bool,
     should_quit: bool,
     confirm_discard: bool,
@@ -89,6 +90,7 @@ impl ConfigEditor {
             row: 0,
             column: 0,
             scroll: 0,
+            horizontal_scroll: 0,
             dirty: false,
             should_quit: false,
             confirm_discard: false,
@@ -108,11 +110,19 @@ impl ConfigEditor {
     pub fn handle_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
-                KeyCode::Char('s') => self.save(),
-                KeyCode::Char('c') => self.request_quit(),
-                _ => {}
+                KeyCode::Char('s') => {
+                    self.save();
+                    return;
+                }
+                KeyCode::Char('c') => {
+                    self.request_quit();
+                    return;
+                }
+                KeyCode::Char('n' | 'd')
+                    if self.mode == EditorMode::Form
+                        && self.form.as_ref().is_some_and(FormState::has_map_editor) => {}
+                _ => return,
             }
-            return;
         }
         if key.code == KeyCode::F(1) {
             self.activate_form();
@@ -195,6 +205,11 @@ impl ConfigEditor {
         &self.path
     }
 
+    /// 返回高级文本模式当前使用的配置格式。
+    pub(crate) const fn format(&self) -> ConfigFormat {
+        self.format
+    }
+
     /// 返回当前光标位置。
     pub const fn cursor(&self) -> (usize, usize) {
         (self.row, self.column)
@@ -205,12 +220,31 @@ impl ConfigEditor {
         self.scroll
     }
 
+    /// 返回高级文本模式首个可见显示列。
+    pub const fn horizontal_scroll(&self) -> usize {
+        self.horizontal_scroll
+    }
+
     /// 更新首个可见行以保持光标在编辑区域内。
     pub fn ensure_visible(&mut self, height: usize) {
         if self.row < self.scroll {
             self.scroll = self.row;
         } else if self.row >= self.scroll + height.max(1) {
             self.scroll = self.row + 1 - height.max(1);
+        }
+    }
+
+    /// 更新首个可见显示列以保持文本光标始终可见。
+    pub fn ensure_horizontal_visible(&mut self, width: usize) {
+        let display_column = self.lines[self.row]
+            .iter()
+            .take(self.column)
+            .map(|character| super::text_view::width(&character.to_string()))
+            .sum::<usize>();
+        if display_column < self.horizontal_scroll {
+            self.horizontal_scroll = display_column;
+        } else if display_column >= self.horizontal_scroll + width.max(1) {
+            self.horizontal_scroll = display_column + 1 - width.max(1);
         }
     }
 
@@ -415,6 +449,7 @@ impl ConfigEditor {
                 self.row = 0;
                 self.column = 0;
                 self.scroll = 0;
+                self.horizontal_scroll = 0;
                 self.changed();
                 if reload {
                     let profile = compiled.active_profile.clone();

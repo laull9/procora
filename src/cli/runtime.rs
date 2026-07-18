@@ -226,10 +226,27 @@ fn history(target: &str) -> anyhow::Result<()> {
 fn show(target: &str) -> anyhow::Result<()> {
     let client = center_runtime::ensure_center()?;
     let hello = client.hello("procora-tui")?;
-    let selector = selector(target);
-    let snapshot = expect_snapshot(client.request(&CenterRequest::Snapshot {
+    let mut selector = selector(target);
+    let snapshot = match client.request(&CenterRequest::Snapshot {
         selector: selector.clone(),
-    })?)?;
+    })? {
+        CenterResponse::Snapshot(snapshot) => snapshot,
+        CenterResponse::Error { message } => {
+            let recovery_path = match &selector {
+                ServiceSelectorDto::Path(path) => Some(path.clone()),
+                ServiceSelectorDto::Name(name) => current_service_path(name),
+            };
+            let Some(path) = recovery_path else {
+                bail!(message);
+            };
+            let service = expect_service(client.request(&CenterRequest::Open { path })?)?;
+            selector = ServiceSelectorDto::Name(service.name);
+            expect_snapshot(client.request(&CenterRequest::Snapshot {
+                selector: selector.clone(),
+            })?)?
+        }
+        response => unexpected_response(&response)?,
+    };
     session::run_center_tui(
         client,
         selector,
@@ -238,6 +255,13 @@ fn show(target: &str) -> anyhow::Result<()> {
         hello.control_allowed,
     )?;
     Ok(())
+}
+
+/// 仅当当前目录项目与名称选择器一致时返回可安全自愈的服务根目录。
+fn current_service_path(name: &str) -> Option<std::path::PathBuf> {
+    let current = env::current_dir().ok()?;
+    let discovered = crate::config::discover_path(current).ok()?;
+    (discovered.compiled.spec.project == name).then_some(discovered.root)
 }
 
 /// 对指定服务执行生命周期动作并输出结果。

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     config_form::FormConfig,
     config_form_dialog::{
-        DialogField, choice_field, field, map_text, optional, parse_args, parse_duration,
+        DialogField, choice_field, field, map_field, optional, parse_args, parse_duration,
         parse_i32_list, parse_map, parse_u32, required_value,
     },
     config_task_defaults::FormTaskDefaults,
@@ -154,20 +154,15 @@ pub(super) fn fields(
                 .unwrap_or_default(),
             &[],
         ),
-        field(
-            "环境覆盖（JSON 对象或 KEY=VALUE）",
-            &map_text(&profile.env),
-            &[],
-        ),
+        map_field("环境覆盖（按 F4 编辑键值表）", &profile.env),
         field(
             "Task 默认工作目录（可空）",
             profile.task_defaults.cwd.as_deref().unwrap_or(""),
             &[],
         ),
-        field(
-            "Task 默认环境（JSON 对象或 KEY=VALUE）",
-            &map_text(&profile.task_defaults.env),
-            &[],
+        map_field(
+            "Task 默认环境（按 F4 编辑键值表）",
+            &profile.task_defaults.env,
         ),
         field(
             "Task 默认成功退出码（可空）",

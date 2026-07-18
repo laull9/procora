@@ -58,8 +58,8 @@ fn tui_creates_one_line_dependency_with_two_inputs() {
     fs::write(&path, "version: 1\nproject: demo\ntasks: {}\n").unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('n'));
     type_text(&mut editor, "tool");
     press(&mut editor, KeyCode::Tab);
@@ -87,8 +87,8 @@ fn tui_advanced_policy_is_separate_and_preserved() {
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
 
-    press(&mut editor, KeyCode::Right);
-    press(&mut editor, KeyCode::Right);
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Char('a'));
     press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Tab);
