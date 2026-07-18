@@ -247,15 +247,12 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
         } else {
             format!("已上翻 {distance} 行")
         };
-        let visible_width = usize::from(area.width.saturating_sub(2));
-        let visible_content = text_view::clipped_lines(
-            &format!("{prefix}{content}"),
-            app.text_offset(true),
-            visible_width,
-        );
-        let logs = Paragraph::new(visible_content)
+        let logs = Paragraph::new(format!("{prefix}{content}"))
             .block(bordered(app).title(log_title(area.width, &task, Some(&position), app)))
-            .scroll((u16::try_from(scroll_top).unwrap_or(u16::MAX), 0));
+            .scroll((
+                u16::try_from(scroll_top).unwrap_or(u16::MAX),
+                u16::try_from(app.text_offset(true)).unwrap_or(u16::MAX),
+            ));
         frame.render_widget(logs, area);
         return;
     }

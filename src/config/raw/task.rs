@@ -24,7 +24,7 @@ pub(crate) struct RawTask {
     pub(super) command: Option<RawCommand>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) args: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "dir", skip_serializing_if = "Option::is_none")]
     pub(super) cwd: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(super) env: BTreeMap<String, String>,

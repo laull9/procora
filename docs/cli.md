@@ -22,7 +22,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 
 这个默认入口不会仅因打开 TUI 而留下新的后台进程。需要持久托管时使用 `procora add <path>`。
 
-连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。超出区域宽度的文本才响应左右方向键；`F3` 开关当前页面全部溢出文本的自动横移，速度固定为每秒 4 个字符。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
+连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。Task、依赖和表单等字段型文本只有超出区域宽度时才响应左右方向键；日志是统一的大块纯文本视口，任一日志行需要横移时全部行使用同一偏移。`F3` 开关当前页面的自动横移，速度固定为每秒 4 个字符；字段型文本在自动模式下仍只移动实际溢出的行。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
 
 已知命令优先于同名路径；同名路径使用 `./status` 这类显式路径。命令和子命令支持唯一前缀推断，接近但不唯一或拼写错误的输入会显示最相近命令；运行期错误统一提示通过 `procora --help` 查看完整用法。
 
@@ -40,6 +40,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 - `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。
 - `procora mcp`：通过 stdio 运行本地 MCP 服务，向可信客户端提供配置查询、服务生命周期工具和内嵌文档 Prompts；不监听网络端口。完整接口见 [MCP 本地服务](mcp.md)。
 - `procora config <path>`：输出原始/解析变量及逐字段引用、活动 profile、可选 profile/模板列表、`profile_extends` 直接继承映射、项目环境、`task_defaults`、命令文本/argv 简写、其他默认值和目录规范化全部展开后的稳定有效配置 JSON，并在 `origins` 中说明各 Task 字段、依赖边及最终环境变量来自内建默认、项目 env、Task 默认层、profile、具体命名模板、env_file 还是 Task；不会下载依赖、注册服务或启动 Task。
+- 结构化配置编辑页中，Task 的“工作目录覆盖”字段可按 F5 打开跨平台目录浏览器；选定结果优先保存为相对配置目录的 `cwd`。
 - `procora source git preview <repository> [--reference REF] [--config PATH]`：受限获取 Git 引用，输出完整 commit、组合修订和配置校验结果；`--local` 才允许显式本地仓库。不会启动 Center、注册服务或运行 Task。
 - `procora source git confirm <repository> <revision> [...]`：按相同来源参数重新获取，只有仓库、commit 与配置闭包修订仍匹配时成功；仍不自动应用。默认缓存位于当前用户 Procora 数据目录，也可用 `--cache` 覆盖。
 

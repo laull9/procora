@@ -304,6 +304,57 @@ fn form_shows_task_and_dependency_dialog_entries() {
 }
 
 #[test]
+// Task工作目录字段可在TUI中浏览子目录并保存为相对配置路径。
+fn task_dialog_selects_working_directory() {
+    let root = temporary_config().with_extension("");
+    let work = root.join("work");
+    let path = root.join("procora.yaml");
+    fs::create_dir_all(&work).unwrap();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Enter);
+    for _ in 0..3 {
+        press(&mut editor, KeyCode::Down);
+    }
+    press(&mut editor, KeyCode::F(5));
+
+    let backend = TestBackend::new(110, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("选择运行目录"));
+    assert!(text.contains("work/"));
+
+    press(&mut editor, KeyCode::Down);
+    press(&mut editor, KeyCode::Down);
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Enter);
+    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_path(&path).unwrap();
+    let task = compiled.spec.tasks.values().next().unwrap();
+    let canonical_work = fs::canonicalize(&work).unwrap();
+    assert_eq!(task.cwd.as_deref(), Some(canonical_work.as_path()));
+    assert!(saved.contains("cwd: \"work\""));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 // 普通表单的单行文本字段会在当前输入末尾显示终端光标。
 fn form_text_field_shows_cursor_at_input_end() {
     let path = temporary_config();

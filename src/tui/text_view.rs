@@ -145,7 +145,9 @@ pub(crate) fn clipped(text: &str, offset: usize, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
-    if width(text) <= max_width {
+    let text_width = width(text);
+    let offset = overflowing_offset(text_width, offset, max_width);
+    if text_width <= max_width {
         return text.to_owned();
     }
     let characters = text.chars().collect::<Vec<_>>();
@@ -180,12 +182,9 @@ pub(crate) fn clipped(text: &str, offset: usize, max_width: usize) -> String {
     result
 }
 
-/// 逐行折叠多行文本，仅对超过可见宽度的行应用水平偏移。
-pub(crate) fn clipped_lines(text: &str, offset: usize, max_width: usize) -> String {
-    text.split('\n')
-        .map(|line| clipped(line, offset, max_width))
-        .collect::<Vec<_>>()
-        .join("\n")
+/// 只有文本真实超过可见宽度时才允许手动或自动偏移生效。
+const fn overflowing_offset(text_width: usize, offset: usize, max_width: usize) -> usize {
+    if text_width > max_width { offset } else { 0 }
 }
 
 /// 按真实经过时间换算自动滚动字符数，并保留不足一个字符的时间余量。
@@ -237,20 +236,12 @@ pub(crate) fn input_view(text: &str, cursor: usize, max_width: usize) -> InputVi
 mod tests {
     use std::time::Duration;
 
-    use super::{auto_scroll_steps, clipped, clipped_lines};
+    use super::{auto_scroll_steps, clipped};
 
     #[test]
     // 未溢出的文本不受水平偏移影响。
     fn short_text_ignores_horizontal_offset() {
         assert_eq!(clipped("short", 3, 10), "short");
-    }
-
-    #[test]
-    // 多行内容只平移实际发生折叠的行。
-    fn multiline_text_only_scrolls_overflowing_lines() {
-        let rendered = clipped_lines("short\n0123456789", 3, 6);
-
-        assert_eq!(rendered, "short\n…3456…");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -13,6 +13,7 @@ pub(crate) struct FormState {
     pane: FormPane,
     selected: usize,
     horizontal_scroll: text_view::HorizontalScroll,
+    base_directory: PathBuf,
     dialog: Option<Dialog>,
     pending_delete: Option<DeleteTarget>,
 }
@@ -40,12 +41,13 @@ enum DeleteTarget {
 
 impl FormState {
     /// 从已校验配置创建默认聚焦项目区的表单状态。
-    pub(crate) fn new(config: FormConfig) -> Self {
+    pub(crate) fn new(config: FormConfig, base_directory: PathBuf) -> Self {
         Self {
             config,
             pane: FormPane::Project,
             selected: 0,
             horizontal_scroll: text_view::HorizontalScroll::default(),
+            base_directory,
             dialog: None,
             pending_delete: None,
         }
@@ -325,6 +327,9 @@ impl FormState {
     /// 处理弹窗内的输入、选项切换、确认和取消。
     fn handle_dialog(&mut self, key: KeyEvent) -> FormEvent {
         let dialog = self.dialog.as_mut().expect("弹窗状态存在");
+        if dialog.handle_directory_key(key).is_some() {
+            return FormEvent::None;
+        }
         if let Some(result) = dialog.handle_map_key(key) {
             return result.map_or_else(FormEvent::Message, |()| FormEvent::None);
         }
@@ -363,6 +368,12 @@ impl FormState {
             }
             KeyCode::F(4) if dialog.selected_is_map() => {
                 if let Err(message) = dialog.open_map_editor() {
+                    return FormEvent::Message(message);
+                }
+                FormEvent::None
+            }
+            KeyCode::F(5) if dialog.selected_is_directory() => {
+                if let Err(message) = dialog.open_directory_picker(&self.base_directory) {
                     return FormEvent::Message(message);
                 }
                 FormEvent::None

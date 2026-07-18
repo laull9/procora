@@ -1,9 +1,9 @@
 use super::{
     config_form::{FormConfig, FormTask},
     config_form_dialog::{
-        DialogField, args_text, dependencies_text, field, map_field, optional, parse_args,
-        parse_dependencies, parse_duration, parse_i32_list, parse_map, parse_u32, replace_entry,
-        required_value,
+        DialogField, args_text, dependencies_text, directory_field, field, map_field, optional,
+        parse_args, parse_dependencies, parse_duration, parse_i32_list, parse_map, parse_u32,
+        replace_entry, required_value,
     },
 };
 use crate::config::{ValueOrigin, split_command_text};
@@ -26,10 +26,9 @@ pub(super) fn fields(original: Option<&str>, task: &FormTask) -> Vec<DialogField
             },
             &[],
         ),
-        field(
+        directory_field(
             "工作目录覆盖（空=继承）",
             explicit_text(task, "cwd", task.cwd.as_deref()),
-            &[],
         ),
         field(
             "环境文件（可空）",

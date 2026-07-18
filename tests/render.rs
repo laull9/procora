@@ -77,6 +77,23 @@ fn automatic_horizontal_scroll_moves_non_selected_overflowing_text() {
 }
 
 #[test]
+// 开启自动横移后，未溢出的短字段仍保持原位。
+fn automatic_horizontal_scroll_keeps_non_overflowing_fields_fixed() {
+    let mut snapshot = support::snapshot();
+    snapshot.tasks[0].command = format!("BEGIN-{}-END", "x".repeat(100));
+    snapshot.tasks[0].message = Some("SHORT-STABLE".to_owned());
+    let mut app = App::new(snapshot);
+
+    app.handle_key(KeyCode::F(3));
+    assert!(app.advance_auto_scroll(Duration::from_secs(2)));
+    let shifted = render_text(&app, 80, 20);
+
+    assert!(!shifted.contains("BEGIN-"));
+    assert!(shifted.contains("说明SHORT-STABLE"));
+    assert!(shifted.contains("任务database"));
+}
+
+#[test]
 // 紧凑终端仍显示任务列表和详情。
 fn compact_terminal_shows_task_list_and_details() {
     let app = App::new(support::snapshot());
@@ -148,8 +165,8 @@ fn log_tab_follows_tail_and_pages_to_history() {
 }
 
 #[test]
-// 日志水平移动按行判断溢出，短日志行不会随长行一起消失。
-fn log_horizontal_scroll_only_moves_overflowing_lines() {
+// 日志是统一的大文本视口，短行会与长行使用相同的水平偏移。
+fn log_horizontal_scroll_moves_the_whole_text_viewport() {
     let mut app = App::new(support::snapshot());
     let task_id = TaskId::from_str("database").unwrap();
     let content = format!("short-line\nBEGIN-{}-END\n", "x".repeat(100));
@@ -161,7 +178,24 @@ fn log_horizontal_scroll_only_moves_overflowing_lines() {
     }
     let shifted = render_text(&app, 50, 16);
 
-    assert!(shifted.contains("short-line"));
+    assert!(!shifted.contains("short-line"));
+    assert!(!shifted.contains("BEGIN-"));
+}
+
+#[test]
+// 日志自动横移与手动横移保持相同的整块文本视口语义。
+fn automatic_log_horizontal_scroll_moves_the_whole_text_viewport() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    let content = format!("short-line\nBEGIN-{}-END\n", "x".repeat(100));
+    app.append_log(task_id, content.as_bytes(), false);
+    app.handle_key(KeyCode::Char('3'));
+
+    app.handle_key(KeyCode::F(3));
+    assert!(app.advance_auto_scroll(Duration::from_secs(2)));
+    let shifted = render_text(&app, 50, 16);
+
+    assert!(!shifted.contains("short-line"));
     assert!(!shifted.contains("BEGIN-"));
 }
 

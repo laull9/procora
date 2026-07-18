@@ -411,10 +411,10 @@ impl ConfigEditor {
         };
         match compiled {
             Ok(compiled) => {
-                self.form = Some(FormState::new(FormConfig::from_compiled(
-                    compiled,
-                    self.path.parent(),
-                )));
+                self.form = Some(FormState::new(
+                    FormConfig::from_compiled(compiled, self.path.parent()),
+                    self.config_directory(),
+                ));
                 self.mode = EditorMode::Form;
                 "表单模式：Enter 编辑，h 健康检查，n 新建，d 删除，F3 自动滚动，F2 高级文本"
                     .clone_into(&mut self.message);
@@ -461,10 +461,10 @@ impl ConfigEditor {
                 self.changed();
                 if reload {
                     let profile = compiled.active_profile.clone();
-                    self.form = Some(FormState::new(FormConfig::from_compiled(
-                        compiled,
-                        self.path.parent(),
-                    )));
+                    self.form = Some(FormState::new(
+                        FormConfig::from_compiled(compiled, self.path.parent()),
+                        self.config_directory(),
+                    ));
                     self.message = profile.map_or_else(
                         || "已切换到基础配置预览；Ctrl-S 保存".to_owned(),
                         |name| format!("已切换到 profile `{name}` 预览；Ctrl-S 保存"),
@@ -473,5 +473,15 @@ impl ConfigEditor {
             }
             Err(error) => self.message = format!("配置无效：{error}"),
         }
+    }
+
+    /// 返回配置入口所在目录，优先使用可跨进程稳定传递的规范路径。
+    fn config_directory(&self) -> PathBuf {
+        let parent = self
+            .path
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
     }
 }

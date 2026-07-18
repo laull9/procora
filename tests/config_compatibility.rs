@@ -112,3 +112,38 @@ fn invalid_fixture_keeps_task_default_diagnostics() {
             .any(|item| item.path == "task_defaults.success_exit_codes")
     );
 }
+
+#[test]
+// Task运行目录接受直观的dir输入别名，并统一进入cwd领域字段。
+fn task_dir_alias_normalizes_to_cwd() {
+    for (format, input) in [
+        (
+            ConfigFormat::Yaml,
+            "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    dir: work\n",
+        ),
+        (
+            ConfigFormat::Toml,
+            "version = 1\nproject = 'demo'\n[tasks.api]\ncommand = 'api'\ndir = 'work'\n",
+        ),
+        (
+            ConfigFormat::Json,
+            r#"{"version":1,"project":"demo","tasks":{"api":{"command":"api","dir":"work"}}}"#,
+        ),
+    ] {
+        let compiled = load_str(input, format).unwrap();
+        let task = compiled.spec.tasks.values().next().unwrap();
+        assert_eq!(task.cwd.as_deref(), Some(std::path::Path::new("work")));
+    }
+}
+
+#[test]
+// 同时声明dir和cwd会被当成重复字段拒绝，避免运行目录含糊。
+fn task_rejects_dir_and_cwd_together() {
+    let error = load_str(
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n    dir: one\n    cwd: two\n",
+        ConfigFormat::Yaml,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("duplicate field"));
+}
