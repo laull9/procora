@@ -38,6 +38,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
 - `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。
+- `procora mcp`：通过 stdio 运行本地 MCP 服务，向可信客户端提供配置查询、服务生命周期工具和内嵌文档 Prompts；不监听网络端口。完整接口见 [MCP 本地服务](mcp.md)。
 - `procora config <path>`：输出原始/解析变量及逐字段引用、活动 profile、可选 profile/模板列表、`profile_extends` 直接继承映射、项目环境、`task_defaults`、命令文本/argv 简写、其他默认值和目录规范化全部展开后的稳定有效配置 JSON，并在 `origins` 中说明各 Task 字段、依赖边及最终环境变量来自内建默认、项目 env、Task 默认层、profile、具体命名模板、env_file 还是 Task；不会下载依赖、注册服务或启动 Task。
 - `procora source git preview <repository> [--reference REF] [--config PATH]`：受限获取 Git 引用，输出完整 commit、组合修订和配置校验结果；`--local` 才允许显式本地仓库。不会启动 Center、注册服务或运行 Task。
 - `procora source git confirm <repository> <revision> [...]`：按相同来源参数重新获取，只有仓库、commit 与配置闭包修订仍匹配时成功；仍不自动应用。默认缓存位于当前用户 Procora 数据目录，也可用 `--cache` 覆盖。

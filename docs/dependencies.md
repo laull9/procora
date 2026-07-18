@@ -2,7 +2,7 @@
 
 ## 1. 调研范围
 
-本次选型于 2026-07-15 核对 crates.io、docs.rs、上游仓库和 systemd 官方接口文档，重点考察三平台支持、维护状态、Rust 版本、异步模型、依赖体积和平台降级方式。
+本次选型于 2026-07-18 核对 crates.io、docs.rs、上游仓库和 systemd 官方接口文档，重点考察三平台支持、维护状态、Rust 版本、异步模型、依赖体积和平台降级方式。
 
 骨架的最低 Rust 版本定为 1.95，原因是当前 `sysinfo 0.39` 的最低版本要求。仓库开发工具链可以更新，但提升最低版本需要在变更说明中明确记录。
 
@@ -12,6 +12,7 @@
 | --- | --- | --- | --- |
 | 异步运行时 | [`tokio`](https://docs.rs/tokio/latest/tokio/) | process、daemon | 进程、信号、网络与有界 channel 能力完整；根 manifest 只打开当前模块所需 feature |
 | CLI | [`clap`](https://docs.rs/clap/latest/clap/) | cli | derive API、子命令、帮助和错误输出成熟 |
+| MCP | [`rmcp`](https://docs.rs/rmcp/latest/rmcp/) | mcp | MCP 官方 Rust SDK；只启用 server、macros 与 stdio 所需 feature，不引入网络监听 |
 | TUI | [`ratatui`](https://docs.rs/ratatui/latest/ratatui/) + [`crossterm`](https://docs.rs/crossterm/latest/crossterm/) | tui | Ratatui 默认推荐 Crossterm，覆盖 Linux、macOS、Windows 终端 |
 | 语法高亮 | [`syntect`](https://docs.rs/syntect/latest/syntect/) | tui | 复用 Sublime Text 语法定义覆盖 YAML、JSON，并补充内嵌 TOML grammar；使用纯 Rust `fancy-regex`，避免三平台构建依赖 Oniguruma C 库 |
 | 领域序列化 | [`serde`](https://docs.rs/serde/latest/serde/) | core、protocol 等 | 配置前端与协议 DTO 共用稳定数据模型接口，但不共用结构体 |

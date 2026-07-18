@@ -4,16 +4,15 @@ use crate::daemon::{CenterClient, ServiceHost, run_center_server};
 use crate::platform::capabilities;
 use crate::protocol::{
     CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ServiceActionDto,
-    ServiceSelectorDto, ServiceStatusDto, ServiceStatusRecordDto, ServiceViewDto,
-    SnapshotSourceDto,
+    ServiceSelectorDto, ServiceStatusDto, ServiceViewDto, SnapshotSourceDto,
 };
 use anyhow::{Context, bail};
 use clap::CommandFactory;
 use clap_complete::generate;
 
 use super::{
-    Cli, Command, ServerArgs, ServerCommand, autostart_command, center_runtime, project, session,
-    source, suggestion, template,
+    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, project,
+    session, source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -64,6 +63,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             completions(shell);
             Ok(())
         }
+        Some(Command::Mcp) => crate::mcp::run_stdio(),
         Some(Command::Daemon { endpoint, database }) => {
             run_center_server(&endpoint, &database).context("全局 Procora 服务器退出")
         }
@@ -156,19 +156,17 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
 /// 注册并启动一个持久托管服务。
 fn add(path: std::path::PathBuf) -> anyhow::Result<()> {
     project::warn_python_execution(&path);
-    let client = center_runtime::ensure_center()?;
-    let service = expect_service(client.request(&CenterRequest::Open { path })?)?;
+    let service = api::add_service(path)?;
     print_service(&service);
     Ok(())
 }
 
 /// 列出全部持久托管服务且不隐式启动全局服务器。
 fn list() -> anyhow::Result<()> {
-    let Some(client) = center_runtime::running_center()? else {
+    let Some(services) = api::list_services()? else {
         print_global_offline();
         return Ok(());
     };
-    let services = expect_services(client.request(&CenterRequest::List)?)?;
     print_services(&services);
     Ok(())
 }
@@ -196,20 +194,17 @@ fn down() -> anyhow::Result<()> {
 
 /// 查询全局 Procora 服务器状态但不隐式启动后台进程。
 fn status() -> anyhow::Result<()> {
-    let Some(client) = center_runtime::running_center()? else {
+    let Some(hello) = api::center_status()? else {
         print_global_offline();
         return Ok(());
     };
-    print_center_status(&client.hello("procora-cli")?);
+    print_center_status(&hello);
     Ok(())
 }
 
 /// 查询并输出指定服务的状态历史。
 fn history(target: &str) -> anyhow::Result<()> {
-    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
-    let records = expect_history(client.request(&CenterRequest::History {
-        selector: selector(target),
-    })?)?;
+    let records = api::service_history(target)?;
     println!("时间戳(ms)\t状态\t说明");
     for record in records {
         println!(
@@ -226,7 +221,7 @@ fn history(target: &str) -> anyhow::Result<()> {
 fn show(target: &str) -> anyhow::Result<()> {
     let client = center_runtime::ensure_center()?;
     let hello = client.hello("procora-tui")?;
-    let mut selector = selector(target);
+    let mut selector = api::selector(target);
     let snapshot = match client.request(&CenterRequest::Snapshot {
         selector: selector.clone(),
     })? {
@@ -266,25 +261,14 @@ fn current_service_path(name: &str) -> Option<std::path::PathBuf> {
 
 /// 对指定服务执行生命周期动作并输出结果。
 fn manage(action: ServiceActionDto, target: &str) -> anyhow::Result<()> {
-    let client = center_runtime::ensure_center()?;
-    let service = expect_service(client.request(&CenterRequest::Manage {
-        action,
-        selector: selector(target),
-    })?)?;
+    let service = api::manage_service(action, target)?;
     print_service(&service);
     Ok(())
 }
 
 /// 预览配置候选并输出稳定修订与确定性 Task 影响集合。
 fn preview_config(target: &str) -> anyhow::Result<()> {
-    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
-    let candidate = match client.request(&CenterRequest::PreviewConfig {
-        selector: selector(target),
-    })? {
-        CenterResponse::ConfigCandidate(candidate) => candidate,
-        CenterResponse::Error { message } => bail!(message),
-        response => return unexpected_response(&response),
-    };
+    let candidate = api::preview_config(target)?;
     print_candidate(&candidate);
     if !candidate.valid {
         bail!("候选配置无效，当前有效修订保持不变");
@@ -294,25 +278,14 @@ fn preview_config(target: &str) -> anyhow::Result<()> {
 
 /// 应用用户已经预览的精确配置修订。
 fn apply_config(target: &str, revision: &str) -> anyhow::Result<()> {
-    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
-    let service = expect_service(client.request(&CenterRequest::ApplyConfig {
-        selector: selector(target),
-        revision: revision.to_owned(),
-    })?)?;
+    let service = api::apply_config(target, revision)?;
     print_service(&service);
     Ok(())
 }
 
 /// 停止并从中心注册表删除指定服务，但保留用户服务目录。
 fn remove(target: &str) -> anyhow::Result<()> {
-    let client = center_runtime::ensure_center()?;
-    let service = match client.request(&CenterRequest::Remove {
-        selector: selector(target),
-    })? {
-        CenterResponse::Removed(service) => service,
-        CenterResponse::Error { message } => bail!(message),
-        response => return unexpected_response(&response),
-    };
+    let service = api::remove_service(target)?;
     println!("已删除服务：{}\t{}", service.name, service.root.display());
     Ok(())
 }
@@ -325,22 +298,6 @@ fn doctor() {
     println!("systemd: {}", capabilities.systemd);
 }
 
-/// 根据用户输入区分稳定名称和文件系统路径。
-fn selector(target: &str) -> ServiceSelectorDto {
-    let path = Path::new(target);
-    if path.exists()
-        || path.is_absolute()
-        || target == "."
-        || target == ".."
-        || target.contains('/')
-        || target.contains('\\')
-    {
-        ServiceSelectorDto::Path(path.to_path_buf())
-    } else {
-        ServiceSelectorDto::Name(target.to_owned())
-    }
-}
-
 /// 从响应中提取单个服务或转成命令错误。
 fn expect_service(response: CenterResponse) -> anyhow::Result<ServiceViewDto> {
     match response {
@@ -350,28 +307,10 @@ fn expect_service(response: CenterResponse) -> anyhow::Result<ServiceViewDto> {
     }
 }
 
-/// 从响应中提取服务列表或转成命令错误。
-fn expect_services(response: CenterResponse) -> anyhow::Result<Vec<ServiceViewDto>> {
-    match response {
-        CenterResponse::Services(services) => Ok(services),
-        CenterResponse::Error { message } => bail!(message),
-        response => unexpected_response(&response),
-    }
-}
-
 /// 从响应中提取项目快照或转成命令错误。
 fn expect_snapshot(response: CenterResponse) -> anyhow::Result<crate::protocol::ProjectSnapshot> {
     match response {
         CenterResponse::Snapshot(snapshot) => Ok(snapshot),
-        CenterResponse::Error { message } => bail!(message),
-        response => unexpected_response(&response),
-    }
-}
-
-/// 从响应中提取服务状态历史或转成命令错误。
-fn expect_history(response: CenterResponse) -> anyhow::Result<Vec<ServiceStatusRecordDto>> {
-    match response {
-        CenterResponse::History(records) => Ok(records),
         CenterResponse::Error { message } => bail!(message),
         response => unexpected_response(&response),
     }

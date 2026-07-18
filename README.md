@@ -54,6 +54,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora enable` | 注册并立即启动用户级开机自启动；Windows 会显式请求 UAC 提权。 |
 | `procora disable` | 停止并移除开机自启动；Windows 会显式请求 UAC 提权，并保留状态和日志。 |
 | `procora completions <shell>` | 输出 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本。 |
+| `procora mcp` | 通过 stdio 运行本地 MCP 服务，提供结构化工具和内嵌文档 Prompts。 |
 | `procora [path/config]` | 在当前目录、指定服务目录或配置文件打开 TUI。全局服务器未运行时使用与 TUI 同生命周期的临时服务。 |
 | `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
 | `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
@@ -158,6 +159,7 @@ tasks:
 - `procora::source`：配置监听，以及项目依赖下载、SSH 获取、解包、缓存和版本验证。
 - `procora::protocol`：CLI/TUI 与中心服务器之间的稳定 DTO。
 - `procora::cli`：命令解析、中心进程拉起和 TUI 连接生命周期。
+- `procora::mcp`：复用 CLI 程序化接口的 stdio 工具与内嵌文档 Prompts。
 - `procora::tui`：服务及其 Task 的终端视图。
 
 完整设计从[文档索引](docs/README.md)开始；近期实现事项见 [TODO](TODO.md)。
