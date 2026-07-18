@@ -17,6 +17,9 @@ use crate::{
 use anyhow::{Context, bail};
 use directories::ProjectDirs;
 
+/// 全新安装或版本替换后等待中心服务就绪的最长时间。
+const CENTER_START_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// 当前用户中心服务器使用的稳定 IPC、数据库和可执行文件位置。
 #[derive(Clone, Debug)]
 pub(super) struct CenterPaths {
@@ -47,7 +50,7 @@ pub(super) fn ensure_center() -> anyhow::Result<CenterClient> {
     }
     install_current_executable(&paths.executable)?;
     spawn_center_process(&paths.executable, &paths).context("无法启动全局 Procora 服务器")?;
-    wait_until_ready(&client, Duration::from_secs(2))?;
+    wait_until_ready(&client, CENTER_START_TIMEOUT)?;
     client.hello("procora-cli")?;
     Ok(client)
 }
@@ -69,7 +72,7 @@ fn reconcile_running_center(
     spawn_center_process(&paths.executable, paths)
         .context("启动更新后的全局 Procora 服务器失败")?;
     let updated = CenterClient::new(paths.endpoint.clone());
-    wait_until_ready(&updated, Duration::from_secs(5))?;
+    wait_until_ready(&updated, CENTER_START_TIMEOUT)?;
     let hello = updated.hello("procora-cli")?;
     if !hello.uses_current_version() {
         bail!("全局 Procora 服务器更新后仍未运行当前版本")

@@ -2,7 +2,7 @@
 
 ## 发布目标
 
-Procora 不制作 deb、rpm、pkg、dmg、msi 等平台原生安装包。每个 `v*` 标签只触发 `.github/workflows/release.yml`；格式、Clippy、测试、文档、MSRV、依赖安全和平台测试全部通过后，流水线才会为下列六个目标构建并发布 `procora`：
+Procora 不制作 deb、rpm、pkg、dmg、msi 等平台原生安装包。`dev` 和 `main` 的每次 push 各执行一轮完整 CI，`dev → main` PR 不重复运行；发布标签只能指向已通过 CI 的 `main` 最新提交。每个 `v*` 标签只触发 `.github/workflows/release.yml`，复用该 `main` CI 结果并为下列六个目标构建、打包和发布 `procora`，不再重复执行源码测试：
 
 | 系统 | x86_64 | ARM64 |
 | --- | --- | --- |
@@ -38,8 +38,10 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 ## 发布操作
 
-1. 确认版本号、`Cargo.lock` 和文档已经提交。
-2. 本地运行格式、Clippy、测试和文档检查。
-3. 创建并单独推送 `v*` 标签（普通 `git push` 不会推送标签），或在 Actions 中手动运行 release workflow 并输入已存在的标签。
-4. 确认六组构建产物和校验文件全部进入同一个 GitHub Release。
-5. 至少在每个平台各验证一次脚本安装、`procora --help`、`procora up/status/down`。
+1. 在 `dev` 提交源码并确认该 push 的完整 CI 成功。
+2. 在 `dev` 更新 `Cargo.toml` 和 `Cargo.lock` 版本，推送并确认这一次 CI 成功。
+3. 通过 `dev → main` PR 以 merge commit 合入；PR 本身不再触发重复 CI。
+4. 确认 `main` merge commit 的唯一一轮 CI 成功。
+5. 仅在 `main` 最新提交创建并单独推送与 `Cargo.toml` 版本一致的 `v*` 标签；发布工作流校验已成功的 `main` CI 后直接打包。
+6. 确认六组构建产物和校验文件全部进入同一个 GitHub Release。
+7. 至少在每个平台各验证一次脚本安装、`procora --help`、`procora up/status/down`。
