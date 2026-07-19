@@ -11,10 +11,37 @@ use ratatui::Frame;
 use super::text_view;
 use super::ui;
 
+mod logs;
+
 /// 单次日志翻页移动的逻辑行数。
 const LOG_PAGE_LINES: usize = 20;
 /// 单次鼠标滚轮移动的日志逻辑行数。
 const LOG_WHEEL_LINES: usize = 3;
+
+/// 日志正文是否只保留匹配搜索词的行。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum LogFilterMode {
+    /// 展示全部日志行。
+    #[default]
+    All,
+    /// 只展示匹配行。
+    Matches,
+}
+
+impl LogFilterMode {
+    /// 返回当前是否启用匹配行过滤。
+    const fn enabled(self) -> bool {
+        matches!(self, Self::Matches)
+    }
+
+    /// 切换全部行与匹配行模式。
+    const fn toggle(&mut self) {
+        *self = match self {
+            Self::All => Self::Matches,
+            Self::Matches => Self::All,
+        };
+    }
+}
 
 /// TUI 主区域当前显示的页面。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -81,6 +108,12 @@ pub struct App {
     log_buffers: BTreeMap<TaskId, Vec<u8>>,
     log_gaps: BTreeSet<TaskId>,
     log_scrolls: BTreeMap<TaskId, usize>,
+    log_query: String,
+    log_search_input: Option<String>,
+    log_filter_mode: LogFilterMode,
+    log_match_indices: BTreeMap<TaskId, usize>,
+    log_clear_confirmation: Option<TaskId>,
+    pending_log_clear: Option<TaskId>,
     horizontal_scroll: text_view::HorizontalScroll,
 }
 
@@ -104,6 +137,12 @@ impl App {
             log_buffers: BTreeMap::new(),
             log_gaps: BTreeSet::new(),
             log_scrolls: BTreeMap::new(),
+            log_query: String::new(),
+            log_search_input: None,
+            log_filter_mode: LogFilterMode::default(),
+            log_match_indices: BTreeMap::new(),
+            log_clear_confirmation: None,
+            pending_log_clear: None,
             horizontal_scroll: text_view::HorizontalScroll::default(),
         }
     }
@@ -120,6 +159,9 @@ impl App {
 
     /// 使用当前终端的实际日志页高处理一次按键输入。
     pub(crate) fn handle_key_with_log_page(&mut self, key: KeyCode, page_lines: usize) -> bool {
+        if self.log_search_input.is_some() {
+            return self.handle_log_search_input(key);
+        }
         let previous = (
             self.selected,
             self.active_tab,
@@ -127,7 +169,16 @@ impl App {
             self.pending_action,
             self.current_log_scroll(),
             self.horizontal_scroll,
+            self.log_query.clone(),
+            self.log_search_input.clone(),
+            self.log_filter_mode,
+            self.log_clear_confirmation.clone(),
+            self.pending_log_clear.clone(),
+            self.current_log_match_index(),
         );
+        if key != KeyCode::Char('C') {
+            self.cancel_log_clear_confirmation();
+        }
         match key {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
@@ -146,6 +197,26 @@ impl App {
             }
             KeyCode::Home if self.active_tab == ActiveTab::Logs => self.scroll_log_to_start(),
             KeyCode::End if self.active_tab == ActiveTab::Logs => self.scroll_log_to_end(),
+            KeyCode::Char('/') if self.active_tab == ActiveTab::Logs => {
+                self.log_search_input = Some(self.log_query.clone());
+            }
+            KeyCode::Char('f') if self.active_tab == ActiveTab::Logs => self.toggle_log_filter(),
+            KeyCode::Char('n') if self.active_tab == ActiveTab::Logs => self.select_log_match(true),
+            KeyCode::Char('N') if self.active_tab == ActiveTab::Logs => {
+                self.select_log_match(false);
+            }
+            KeyCode::Char('C') if self.active_tab == ActiveTab::Logs => {
+                if let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) {
+                    if self.log_clear_confirmation.as_ref() == Some(&task_id) {
+                        self.log_clear_confirmation = None;
+                        self.pending_log_clear = Some(task_id);
+                    } else {
+                        self.feedback =
+                            Some(format!("再次按 C 确认清空 Task `{task_id}` 的全部日志"));
+                        self.log_clear_confirmation = Some(task_id);
+                    }
+                }
+            }
             KeyCode::Char('s') if self.control_allowed => {
                 self.pending_action = Some(ServiceActionDto::Start);
             }
@@ -165,6 +236,12 @@ impl App {
                 self.pending_action,
                 self.current_log_scroll(),
                 self.horizontal_scroll,
+                self.log_query.clone(),
+                self.log_search_input.clone(),
+                self.log_filter_mode,
+                self.log_clear_confirmation.clone(),
+                self.pending_log_clear.clone(),
+                self.current_log_match_index(),
             )
     }
 
@@ -190,7 +267,13 @@ impl App {
 
     /// 处理鼠标滚轮；日志页滚动正文，其他页面保持 Task 选择行为。
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> bool {
-        let previous = (self.selected, self.current_log_scroll());
+        let confirmation_cancelled = self.log_clear_confirmation.is_some();
+        self.cancel_log_clear_confirmation();
+        let previous = (
+            self.selected,
+            self.current_log_scroll(),
+            self.horizontal_scroll,
+        );
         match (self.active_tab, mouse.kind) {
             (ActiveTab::Logs, MouseEventKind::ScrollUp) => {
                 self.scroll_log_up(LOG_WHEEL_LINES);
@@ -200,9 +283,17 @@ impl App {
             }
             (_, MouseEventKind::ScrollUp) => self.select_previous(),
             (_, MouseEventKind::ScrollDown) => self.select_next(),
+            (_, MouseEventKind::ScrollLeft) => self.scroll_horizontal(false),
+            (_, MouseEventKind::ScrollRight) => self.scroll_horizontal(true),
             _ => {}
         }
-        previous != (self.selected, self.current_log_scroll())
+        confirmation_cancelled
+            || previous
+                != (
+                    self.selected,
+                    self.current_log_scroll(),
+                    self.horizontal_scroll,
+                )
     }
 
     /// 使用服务器新快照替换内容并保持合理的任务选择位置。
@@ -302,58 +393,6 @@ impl App {
         matches!(self.key_hint_platform, KeyHintPlatform::MacOs)
     }
 
-    /// 追加一批 Task 日志，并把内存展示限制在最后 64 KiB。
-    pub fn append_log(&mut self, task_id: TaskId, bytes: &[u8], gap: bool) -> bool {
-        const DISPLAY_LIMIT: usize = 64 * 1024;
-        let gap_changed = gap && !self.log_gaps.contains(&task_id);
-        if bytes.is_empty() && !gap_changed {
-            return false;
-        }
-        let previous_lines = self.log_total_lines(&task_id);
-        let has_gap = gap || self.has_log_gap(&task_id);
-        let buffer = self.log_buffers.entry(task_id.clone()).or_default();
-        buffer.extend_from_slice(bytes);
-        if buffer.len() > DISPLAY_LIMIT {
-            buffer.drain(..buffer.len() - DISPLAY_LIMIT);
-        }
-        let content_lines = display_line_count(buffer);
-        let current_lines = content_lines + usize::from(has_gap) * 2;
-        if let Some(distance) = self.log_scrolls.get_mut(&task_id)
-            && *distance > 0
-        {
-            let added_lines = current_lines.saturating_sub(previous_lines);
-            *distance = distance.saturating_add(added_lines);
-        }
-        if gap {
-            self.log_gaps.insert(task_id);
-        }
-        true
-    }
-
-    /// 返回指定 Task 当前缓存的有损 UTF-8 日志文本。
-    pub fn log_text(&self, task_id: &TaskId) -> Option<String> {
-        self.log_buffers
-            .get(task_id)
-            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-    }
-
-    /// 返回指定 Task 是否曾跨越不可恢复的日志间隙。
-    pub fn has_log_gap(&self, task_id: &TaskId) -> bool {
-        self.log_gaps.contains(task_id)
-    }
-
-    /// 返回指定 Task 距离日志尾部的逻辑行数，零表示自动跟随。
-    pub fn log_scroll_distance(&self, task_id: &TaskId) -> usize {
-        self.log_scrolls.get(task_id).copied().unwrap_or(0)
-    }
-
-    /// 根据内容与可见高度计算 `Paragraph` 使用的顶部滚动行。
-    pub fn log_scroll_top(&self, task_id: &TaskId, viewport_lines: usize) -> usize {
-        let total_lines = self.log_total_lines(task_id);
-        let maximum = total_lines.saturating_sub(viewport_lines.max(1));
-        maximum.saturating_sub(self.log_scroll_distance(task_id).min(maximum))
-    }
-
     /// 返回当前项目快照。
     pub const fn snapshot(&self) -> &ProjectSnapshot {
         &self.snapshot
@@ -381,6 +420,7 @@ impl App {
 
     /// 选择下一个任务并在末尾回到开头。
     fn select_next(&mut self) {
+        self.cancel_log_clear_confirmation();
         if !self.snapshot.tasks.is_empty() {
             self.selected = (self.selected + 1) % self.snapshot.tasks.len();
             self.horizontal_scroll.reset_position();
@@ -389,6 +429,7 @@ impl App {
 
     /// 选择上一个任务并在开头回到末尾。
     fn select_previous(&mut self) {
+        self.cancel_log_clear_confirmation();
         if !self.snapshot.tasks.is_empty() {
             self.selected = self
                 .selected
@@ -400,6 +441,7 @@ impl App {
 
     /// 切换页签并让新页面从文本起点开始显示。
     fn switch_tab(&mut self, tab: ActiveTab) {
+        self.cancel_log_clear_confirmation();
         self.active_tab = tab;
         self.horizontal_scroll.reset_position();
     }
@@ -415,64 +457,11 @@ impl App {
         self.horizontal_scroll.toggle_auto();
     }
 
-    /// 返回当前任务的日志滚动距离。
-    fn current_log_scroll(&self) -> Option<usize> {
-        self.selected_task()
-            .map(|task| self.log_scroll_distance(&task.task_id))
-    }
-
-    /// 把当前日志向历史方向移动一页。
-    fn scroll_log_up(&mut self, page_lines: usize) {
-        let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
-            return;
-        };
-        let maximum = self.log_total_lines(&task_id);
-        let distance = self.log_scrolls.entry(task_id).or_default();
-        *distance = distance.saturating_add(page_lines.max(1)).min(maximum);
-    }
-
-    /// 把当前日志向尾部方向移动一页。
-    fn scroll_log_down(&mut self, page_lines: usize) {
-        let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
-            return;
-        };
-        let distance = self.log_scrolls.entry(task_id).or_default();
-        *distance = distance.saturating_sub(page_lines.max(1));
-    }
-
-    /// 跳到当前日志的第一行。
-    fn scroll_log_to_start(&mut self) {
-        let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
-            return;
-        };
-        let maximum = self.log_total_lines(&task_id);
-        self.log_scrolls.insert(task_id, maximum);
-    }
-
-    /// 回到当前日志尾部并恢复自动跟随。
-    fn scroll_log_to_end(&mut self) {
-        let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
-            return;
-        };
-        self.log_scrolls.insert(task_id, 0);
-    }
-
-    /// 返回日志正文和间隙提示合计占用的逻辑行数。
-    fn log_total_lines(&self, task_id: &TaskId) -> usize {
-        let content_lines = self
-            .log_buffers
-            .get(task_id)
-            .map_or(0, |buffer| display_line_count(buffer));
-        content_lines + usize::from(self.has_log_gap(task_id)) * 2
-    }
-}
-
-/// 计算原始日志缓冲在不折行时占用的逻辑行数。
-fn display_line_count(buffer: &[u8]) -> usize {
-    if buffer.is_empty() {
-        0
-    } else {
-        buffer.split(|byte| *byte == b'\n').count() - usize::from(buffer.last() == Some(&b'\n'))
+    /// 取消尚未二次确认的日志清空操作和对应反馈。
+    fn cancel_log_clear_confirmation(&mut self) {
+        if self.log_clear_confirmation.take().is_some() {
+            self.feedback = None;
+        }
     }
 }
 

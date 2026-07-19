@@ -1,4 +1,9 @@
-use std::{env, path::Path};
+use std::{
+    env,
+    io::{self, Write},
+    path::Path,
+    str::FromStr,
+};
 
 use crate::daemon::{CenterClient, ServiceHost, run_center_server};
 use crate::platform::capabilities;
@@ -52,6 +57,13 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         Some(Command::Server(arguments)) => server(arguments),
         Some(Command::Source(arguments)) => source::run(arguments.command),
         Some(Command::Show { target }) => show(&target),
+        Some(Command::Logs {
+            target,
+            task,
+            search,
+            filter,
+            clear,
+        }) => logs(&target, &task, search.as_deref(), filter.as_deref(), clear),
         Some(Command::Validate { path }) => project::validate(&path),
         Some(Command::Graph { path }) => project::graph(&path),
         Some(Command::Config { path }) => project::effective_config(&path),
@@ -249,6 +261,77 @@ fn show(target: &str) -> anyhow::Result<()> {
         hello.event_sequence,
         hello.control_allowed,
     )?;
+    Ok(())
+}
+
+/// 读取、匹配或清空指定服务的 Task 文件日志。
+fn logs(
+    target: &str,
+    task: &str,
+    search: Option<&str>,
+    filter: Option<&str>,
+    clear: bool,
+) -> anyhow::Result<()> {
+    const BATCH_BYTES: u32 = 1024 * 1024;
+
+    let task_id =
+        crate::core::TaskId::from_str(task).with_context(|| format!("无效 Task 标识：{task}"))?;
+    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
+    let selector = api::selector(target);
+    if clear {
+        match client.request(&CenterRequest::ClearTaskLogs {
+            selector,
+            task_id: task_id.clone(),
+        })? {
+            CenterResponse::TaskLogsCleared(cleared) if cleared == task_id => {
+                println!("已清空 Task `{task_id}` 的日志");
+                return Ok(());
+            }
+            CenterResponse::Error { message } => bail!(message),
+            response => return unexpected_response(&response),
+        }
+    }
+
+    let mut cursor = None;
+    let mut content = Vec::new();
+    loop {
+        let response = client.request(&CenterRequest::TaskLogs {
+            selector: selector.clone(),
+            task_id: task_id.clone(),
+            cursor,
+            max_bytes: BATCH_BYTES,
+        })?;
+        let batch = match response {
+            CenterResponse::TaskLogs(batch) => batch,
+            CenterResponse::Error { message } => bail!(message),
+            response => return unexpected_response(&response),
+        };
+        if batch.gap {
+            eprintln!("警告：日志读取期间发生轮转，输出已从当前可用位置恢复");
+        }
+        let empty = batch.bytes.is_empty();
+        cursor = Some(batch.next_cursor);
+        content.extend_from_slice(&batch.bytes);
+        if empty || batch.bytes.len() < BATCH_BYTES as usize {
+            break;
+        }
+    }
+
+    if search.is_none() && filter.is_none() {
+        io::stdout().write_all(&content)?;
+        return Ok(());
+    }
+    let query = search.or(filter).unwrap_or_default().to_ascii_lowercase();
+    for (index, line) in String::from_utf8_lossy(&content).lines().enumerate() {
+        let searchable = crate::log::strip_ansi(line).to_ascii_lowercase();
+        if searchable.contains(&query) {
+            if search.is_some() {
+                println!("{}:{line}", index + 1);
+            } else {
+                println!("{line}");
+            }
+        }
+    }
     Ok(())
 }
 

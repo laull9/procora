@@ -485,15 +485,33 @@ fn task_logs_resume_from_service_directory_cursor() {
             .unwrap()
             .starts_with("rustc ")
     );
+    let cursor = batch.next_cursor;
     let CenterResponse::TaskLogs(next) = center.handle(CenterRequest::TaskLogs {
         selector: ServiceSelectorDto::Name("demo".to_owned()),
-        task_id,
-        cursor: Some(batch.next_cursor),
+        task_id: task_id.clone(),
+        cursor: Some(cursor),
         max_bytes: u32::MAX,
     }) else {
         panic!("应返回续读结果");
     };
     assert!(next.bytes.is_empty());
+    assert!(matches!(
+        center.handle(CenterRequest::ClearTaskLogs {
+            selector: ServiceSelectorDto::Name("demo".to_owned()),
+            task_id: task_id.clone(),
+        }),
+        CenterResponse::TaskLogsCleared(cleared) if cleared == task_id
+    ));
+    let CenterResponse::TaskLogs(cleared) = center.handle(CenterRequest::TaskLogs {
+        selector: ServiceSelectorDto::Name("demo".to_owned()),
+        task_id,
+        cursor: Some(cursor),
+        max_bytes: 1024,
+    }) else {
+        panic!("应返回清空后的 Task 日志");
+    };
+    assert!(cleared.gap);
+    assert!(cleared.bytes.is_empty());
     drop(center);
     fs::remove_dir_all(directory).unwrap();
 }

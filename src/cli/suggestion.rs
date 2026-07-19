@@ -23,6 +23,7 @@ pub(crate) const TOP_LEVEL: &[&str] = &[
     "stop",
     "remove",
     "show",
+    "logs",
     "validate",
     "graph",
     "config",

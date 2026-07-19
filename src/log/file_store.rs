@@ -152,6 +152,34 @@ impl FileLogStore {
         self.append(&self.task_log_path(task_id), bytes)
     }
 
+    /// 清空指定 Task 的活动日志和全部轮转归档，并推进文件代次。
+    ///
+    /// # Errors
+    ///
+    /// 当日志目录、活动文件、归档或游标索引无法更新时返回错误。
+    pub fn clear_task(&self, task_id: &TaskId) -> Result<(), FileLogError> {
+        let path = self.task_log_path(task_id);
+        let _guard = self.write_lock.lock().map_err(map_poisoned_lock)?;
+        let length = path.metadata().map_or(0, |metadata| metadata.len());
+        let index = load_index(&path, length)?;
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        remove_archives(&path)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        save_index(
+            &path,
+            FileLogIndex {
+                generation: index.generation.saturating_add(1),
+                length: 0,
+            },
+        )
+    }
+
     /// 从可选游标开始读取服务级活动日志。
     ///
     /// # Errors
@@ -362,6 +390,35 @@ fn archive_path(active_path: &Path) -> PathBuf {
         .and_then(|name| name.to_str())
         .unwrap_or("procora.log");
     active_path.with_file_name(format!("{name}.{timestamp}-{sequence}.gz"))
+}
+
+/// 删除一个活动日志对应的全部 gzip 轮转归档。
+fn remove_archives(active_path: &Path) -> Result<(), FileLogError> {
+    let Some(parent) = active_path.parent() else {
+        return Ok(());
+    };
+    let Some(active_name) = active_path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(());
+    };
+    let prefix = format!("{active_name}.");
+    let entries = match fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    for path in entries.filter_map(Result::ok).map(|entry| entry.path()) {
+        let is_archive = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(&prefix))
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("gz"));
+        if is_archive {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
 }
 
 /// 把互斥锁损坏映射为稳定日志错误。

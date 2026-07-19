@@ -54,13 +54,7 @@ pub(super) fn page_text_maximum(app: &App, global: bool) -> usize {
             .unwrap_or(0),
         ActiveTab::Logs => app
             .selected_task()
-            .and_then(|task| app.log_text(&task.task_id))
-            .map_or(0, |text| {
-                text.lines()
-                    .map(|line| line.chars().count())
-                    .max()
-                    .unwrap_or(0)
-            }),
+            .map_or(0, |task| app.log_maximum_width(&task.task_id)),
     };
     if global {
         content_maximum

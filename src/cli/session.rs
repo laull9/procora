@@ -91,7 +91,7 @@ impl LiveSession for EmbeddedTuiSession<'_> {
     fn poll_log(&mut self, task_id: &TaskId) -> io::Result<Option<LogUpdate>> {
         let batch = self
             .host
-            .read_task_log(task_id, self.log_cursors.get(task_id).copied(), 16 * 1024)
+            .read_task_log(task_id, self.log_cursors.get(task_id).copied(), 1024 * 1024)
             .map_err(io::Error::other)?;
         self.log_cursors.insert(task_id.clone(), batch.next_cursor);
         Ok((batch.gap || !batch.bytes.is_empty()).then_some(LogUpdate {
@@ -99,6 +99,14 @@ impl LiveSession for EmbeddedTuiSession<'_> {
             bytes: batch.bytes,
             gap: batch.gap,
         }))
+    }
+
+    fn clear_log(&mut self, task_id: &TaskId) -> io::Result<()> {
+        self.host
+            .clear_task_log(task_id)
+            .map_err(io::Error::other)?;
+        self.log_cursors.remove(task_id);
+        Ok(())
     }
 }
 
@@ -175,7 +183,7 @@ impl LiveSession for CenterTuiSession {
                 selector: self.selector.clone(),
                 task_id: task_id.clone(),
                 cursor: self.log_cursors.get(task_id).copied(),
-                max_bytes: 16 * 1024,
+                max_bytes: 1024 * 1024,
             })
             .map_err(io::Error::other)?;
         match response {
@@ -189,6 +197,24 @@ impl LiveSession for CenterTuiSession {
             }
             CenterResponse::Error { message } => Err(io::Error::other(message)),
             response => Err(io::Error::other(format!("意外日志响应: {response:?}"))),
+        }
+    }
+
+    fn clear_log(&mut self, task_id: &TaskId) -> io::Result<()> {
+        let response = self
+            .client
+            .request(&CenterRequest::ClearTaskLogs {
+                selector: self.selector.clone(),
+                task_id: task_id.clone(),
+            })
+            .map_err(io::Error::other)?;
+        match response {
+            CenterResponse::TaskLogsCleared(cleared) if cleared == *task_id => {
+                self.log_cursors.remove(task_id);
+                Ok(())
+            }
+            CenterResponse::Error { message } => Err(io::Error::other(message)),
+            response => Err(io::Error::other(format!("意外日志清空响应: {response:?}"))),
         }
     }
 }

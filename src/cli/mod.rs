@@ -71,6 +71,22 @@ pub enum Command {
         #[arg(default_value = ".")]
         target: String,
     },
+    /// 读取、搜索、过滤或清空指定 Task 的日志。
+    Logs {
+        /// 配置中的服务名称、服务目录或显式配置文件。
+        target: String,
+        /// 服务内的 Task 标识。
+        task: String,
+        /// 只输出匹配行并附加原始行号。
+        #[arg(long, conflicts_with = "filter")]
+        search: Option<String>,
+        /// 只输出包含指定文本的日志行。
+        #[arg(long, conflicts_with = "search")]
+        filter: Option<String>,
+        /// 清空该 Task 的活动日志与轮转归档。
+        #[arg(long, conflicts_with_all = ["search", "filter"])]
+        clear: bool,
+    },
     /// 同步或离线验证项目管理依赖。
     Deps {
         /// 配置文件或服务目录。

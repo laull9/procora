@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// 客户端连接中心服务器时发送的握手请求。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -230,6 +230,13 @@ pub enum CenterRequest {
         /// 单次响应允许返回的最大字节数。
         max_bytes: u32,
     },
+    /// 清空指定 Task 的活动日志和轮转归档。
+    ClearTaskLogs {
+        /// 要操作的服务。
+        selector: ServiceSelectorDto,
+        /// 服务内的 Task。
+        task_id: TaskId,
+    },
     /// 读取指定服务的任务快照。
     Snapshot {
         /// 要读取的服务。
@@ -279,6 +286,8 @@ pub enum CenterResponse {
     History(Vec<ServiceStatusRecordDto>),
     /// 返回一批 Task 文件日志。
     TaskLogs(LogBatchDto),
+    /// 指定 Task 的文件日志已经清空。
+    TaskLogsCleared(TaskId),
     /// 返回单个服务摘要。
     Service(ServiceViewDto),
     /// 返回刚从注册表删除的服务摘要。

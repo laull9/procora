@@ -34,6 +34,34 @@ fn show_without_target_uses_current_directory() {
 }
 
 #[test]
+// logs命令支持搜索、过滤和清空三种互斥操作。
+fn logs_command_parses_search_filter_and_clear() {
+    let search =
+        Cli::try_parse_from(["procora", "logs", "demo", "api", "--search", "error"]).unwrap();
+    assert!(matches!(
+        search.command,
+        Some(Command::Logs { search: Some(query), .. }) if query == "error"
+    ));
+
+    let filter =
+        Cli::try_parse_from(["procora", "logs", "demo", "api", "--filter", "warn"]).unwrap();
+    assert!(matches!(
+        filter.command,
+        Some(Command::Logs { filter: Some(query), .. }) if query == "warn"
+    ));
+
+    let clear = Cli::try_parse_from(["procora", "logs", "demo", "api", "--clear"]).unwrap();
+    assert!(matches!(
+        clear.command,
+        Some(Command::Logs { clear: true, .. })
+    ));
+    assert!(
+        Cli::try_parse_from(["procora", "logs", "demo", "api", "--clear", "--filter", "x"])
+            .is_err()
+    );
+}
+
+#[test]
 // 唯一命令前缀可以直接推断。
 fn unique_command_prefixes_are_inferred() {
     let status = Cli::try_parse_from(["procora", "stat"]).unwrap();

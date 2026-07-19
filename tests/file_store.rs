@@ -90,6 +90,42 @@ fn task_logs_rotate_independently_and_enforce_retention() {
 }
 
 #[test]
+// 清空task日志会删除活动文件和归档，并使旧游标失效。
+fn clearing_task_logs_removes_history_and_invalidates_cursor() {
+    let service = temporary_service();
+    let store = FileLogStore::new(
+        &service,
+        FileLogPolicy {
+            max_file_bytes: 3,
+            max_archives: 2,
+            ..FileLogPolicy::default()
+        },
+    )
+    .unwrap();
+    let task = TaskId::from_str("api").unwrap();
+    store.append_task(&task, b"123").unwrap();
+    let cursor = store.read_task(&task, None, 3).unwrap().next_cursor;
+    store.append_task(&task, b"456").unwrap();
+
+    store.clear_task(&task).unwrap();
+
+    assert!(!store.task_log_path(&task).exists());
+    let task_directory = service.join(".procora/logs/tasks");
+    assert_eq!(
+        fs::read_dir(task_directory)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|value| value == "gz"))
+            .count(),
+        0
+    );
+    let recovered = store.read_task(&task, Some(cursor), 16).unwrap();
+    assert!(recovered.gap);
+    assert!(recovered.bytes.is_empty());
+    fs::remove_dir_all(service).unwrap();
+}
+
+#[test]
 // 文件游标可以续读并在轮转后报告gap。
 fn file_cursor_resumes_and_reports_gap_after_rotation() {
     let service = temporary_service();

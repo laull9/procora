@@ -165,6 +165,9 @@ impl Center {
             } => self
                 .task_logs(&selector, &task_id, cursor, max_bytes)
                 .map(CenterResponse::TaskLogs),
+            CenterRequest::ClearTaskLogs { selector, task_id } => self
+                .clear_task_logs(&selector, &task_id)
+                .map(|()| CenterResponse::TaskLogsCleared(task_id)),
             CenterRequest::Snapshot { selector } => self.snapshot(&selector),
             CenterRequest::PreviewConfig { selector } => self
                 .preview_config(&selector)
@@ -290,6 +293,22 @@ impl Center {
             (max_bytes as usize).min(MAX_LOG_BATCH_BYTES),
         )
         .map_err(|error| CenterError::Unavailable(error.to_string()))
+    }
+
+    /// 清空指定服务中一个 Task 的活动日志和轮转归档。
+    fn clear_task_logs(
+        &mut self,
+        selector: &ServiceSelectorDto,
+        task_id: &crate::core::TaskId,
+    ) -> Result<(), CenterError> {
+        let name = self.resolve_name(selector)?;
+        let service = self.services.get_mut(&name).expect("名称已经解析");
+        let host = service
+            .host
+            .as_mut()
+            .ok_or_else(|| CenterError::Unavailable(name))?;
+        host.clear_task_log(task_id)
+            .map_err(|error| CenterError::Unavailable(error.to_string()))
     }
 
     /// 读取指定游标之后仍然保留的中心事件。

@@ -56,7 +56,9 @@ pub(crate) struct LogReaderContext {
 }
 
 /// 每个 Service 最多缓存的待落盘日志消息数量。
-const LOG_QUEUE_CAPACITY: usize = 1024;
+const LOG_QUEUE_CAPACITY: usize = 4096;
+/// 单次合并写入允许聚合的最大原始日志字节数。
+const LOG_WRITE_BATCH_BYTES: usize = 1024 * 1024;
 
 /// 进程退出后等待继承管道关闭的最长时间。
 const READER_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -70,9 +72,26 @@ impl LogWriter {
         let (sender, receiver) = mpsc::sync_channel(LOG_QUEUE_CAPACITY);
         let (done_sender, done) = mpsc::channel();
         let handle = thread::spawn(move || {
-            while let Ok(message) = receiver.recv() {
+            let mut pending = None;
+            loop {
+                let Ok(message) = pending.take().map_or_else(|| receiver.recv(), Ok) else {
+                    break;
+                };
                 match message {
-                    LogWrite::Append { task_id, bytes } => {
+                    LogWrite::Append { task_id, mut bytes } => {
+                        while bytes.len() < LOG_WRITE_BATCH_BYTES {
+                            match receiver.try_recv() {
+                                Ok(LogWrite::Append {
+                                    task_id: next_task,
+                                    bytes: next_bytes,
+                                }) if next_task == task_id => bytes.extend_from_slice(&next_bytes),
+                                Ok(message) => {
+                                    pending = Some(message);
+                                    break;
+                                }
+                                Err(_) => break,
+                            }
+                        }
                         if let Err(error) = files.append_task(&task_id, &bytes) {
                             tracing::warn!(task = %task_id, %error, "Task 文件日志写入失败");
                         }
@@ -134,7 +153,7 @@ pub(crate) fn spawn_log_reader<R: Read + Send + 'static>(
 ) -> OutputReader {
     let (done_sender, done) = mpsc::channel();
     let handle = thread::spawn(move || {
-        let mut buffer = vec![0; 8192];
+        let mut buffer = vec![0; 64 * 1024];
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,

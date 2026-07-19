@@ -165,6 +165,48 @@ fn log_tab_follows_tail_and_pages_to_history() {
 }
 
 #[test]
+// ANSI彩色日志会被解析为终端样式而不是显示原始转义字符。
+fn ansi_log_colors_render_as_terminal_styles() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id, b"plain \x1b[31mRED\x1b[0m\n", false);
+    app.set_plain_mode(false);
+    app.handle_key(KeyCode::Char('3'));
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    assert!(
+        buffer
+            .content
+            .iter()
+            .any(|cell| cell.symbol() == "R" && cell.fg == ratatui::style::Color::Red)
+    );
+    assert!(!render_text(&app, 80, 16).contains("[31m"));
+}
+
+#[test]
+// 搜索会标记匹配行，过滤模式会隐藏不匹配行。
+fn log_search_filter_hides_non_matching_lines() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id, b"keep error\nhide ok\n", false);
+    app.handle_key(KeyCode::Char('3'));
+    app.handle_key(KeyCode::Char('/'));
+    for character in "error".chars() {
+        app.handle_key(KeyCode::Char(character));
+    }
+    app.handle_key(KeyCode::Enter);
+    app.handle_key(KeyCode::Char('f'));
+
+    let text = render_text(&app, 100, 16);
+    assert!(text.contains("keeperror"));
+    assert!(!text.contains("hideok"));
+    assert!(text.contains("过滤`error`1/1"));
+}
+
+#[test]
 // 日志是统一的大文本视口，短行会与长行使用相同的水平偏移。
 fn log_horizontal_scroll_moves_the_whole_text_viewport() {
     let mut app = App::new(support::snapshot());
