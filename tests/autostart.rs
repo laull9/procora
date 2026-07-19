@@ -1,6 +1,117 @@
-//! 三平台自启动定义渲染与转义测试。
+//! 三平台自启动定义渲染、转义与注册服务恢复测试。
 
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use procora::daemon::{Center, CenterClient};
 use procora::platform::autostart::{AutostartBackend, DaemonAutostart};
+use procora::protocol::{
+    CenterRequest, CenterResponse, ServiceActionDto, ServiceSelectorDto, ServiceStatusDto,
+};
+use procora::storage::SqliteCenterRepository;
+
+/// 当前测试进程内的自启动运行时目录序号。
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// 创建自启动测试独占目录和本地 IPC 端点。
+fn isolated_runtime(label: &str) -> (PathBuf, String) {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let endpoint = format!(
+        "procora-autostart-{label}-{}-{nonce}-{sequence}",
+        std::process::id()
+    );
+    let directory = std::env::temp_dir().join(&endpoint);
+    fs::create_dir_all(&directory).unwrap();
+    (directory, endpoint)
+}
+
+/// 写入会在每次启动时输出版本号的跨平台服务配置。
+fn write_boot_service(root: &Path, project: &str) {
+    fs::create_dir_all(root).unwrap();
+    let config = serde_json::json!({
+        "version": 1,
+        "project": project,
+        "tasks": {
+            "boot": {
+                "command": env!("CARGO_BIN_EXE_procora"),
+                "args": ["--version"]
+            }
+        }
+    });
+    fs::write(
+        root.join("procora.json"),
+        serde_json::to_vec_pretty(&config).unwrap(),
+    )
+    .unwrap();
+}
+
+/// 预先注册服务并按测试需要保存运行或停止期望。
+fn register_service(database: &Path, root: &Path, project: &str, stopped: bool) {
+    let mut center = Center::empty(SqliteCenterRepository::new(database));
+    assert!(matches!(
+        center.handle(CenterRequest::Open {
+            path: root.to_path_buf()
+        }),
+        CenterResponse::Service(service) if service.status == ServiceStatusDto::Running
+    ));
+    if stopped {
+        assert!(matches!(
+            center.handle(CenterRequest::Manage {
+                action: ServiceActionDto::Stop,
+                selector: ServiceSelectorDto::Name(project.to_owned()),
+            }),
+            CenterResponse::Service(service) if service.status == ServiceStatusDto::Stopped
+        ));
+    }
+    center.handle(CenterRequest::Shutdown);
+}
+
+/// 以前台 daemon 入口模拟系统用户登录后的原生托管启动。
+fn spawn_daemon(endpoint: &str, database: &Path) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_procora"))
+        .arg("__daemon")
+        .arg("--endpoint")
+        .arg(endpoint)
+        .arg("--database")
+        .arg(database)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
+/// 在限定时间内等待中心服务器或 Task 启动证据出现。
+fn wait_until(mut ready: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if ready() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
+
+/// 正常关闭测试 daemon，并在通信失败时兜底回收子进程。
+fn stop_daemon(mut daemon: Child, client: &CenterClient, ready: bool) -> std::process::ExitStatus {
+    if ready {
+        let _ = client.request(&CenterRequest::Shutdown);
+    } else {
+        let _ = daemon.kill();
+    }
+    daemon.wait().unwrap()
+}
 
 /// 返回包含空格与保留字符的测试定义。
 fn definition() -> DaemonAutostart {
@@ -120,4 +231,71 @@ fn windows_task_escapes_quotes_and_trailing_backslashes() {
     assert!(action.starts_with("\"C:\\Program Files\\Procora\\\\\" __daemon"));
     assert!(action.contains("\"endpoint \\\"quoted\\\"\""));
     assert!(action.ends_with("\"C:\\Data Path\\state\\\\\""));
+}
+
+#[test]
+// 登录启动daemon后无需open请求即可拉起保存了运行期望的task。
+fn login_daemon_starts_registered_running_service_without_client_open() {
+    let (directory, endpoint) = isolated_runtime("running");
+    let service = directory.join("service");
+    let database = directory.join("procora.sqlite3");
+    write_boot_service(&service, "boot-running");
+    register_service(&database, &service, "boot-running", false);
+    let task_log = service.join(".procora/logs/tasks/boot.log");
+    let _ = fs::remove_file(&task_log);
+
+    let daemon = spawn_daemon(&endpoint, &database);
+    let client = CenterClient::new(endpoint);
+    let daemon_ready = wait_until(|| client.ping());
+    let task_started = daemon_ready
+        && wait_until(|| {
+            fs::read_to_string(&task_log)
+                .is_ok_and(|content| content.contains(env!("CARGO_PKG_VERSION")))
+        });
+    let services = daemon_ready
+        .then(|| client.request(&CenterRequest::List).ok())
+        .flatten();
+    let status = stop_daemon(daemon, &client, daemon_ready);
+
+    assert!(daemon_ready, "自启动 daemon 未在限定时间内就绪");
+    assert!(task_started, "已注册服务的 Task 没有在登录启动后自动执行");
+    assert!(matches!(
+        services,
+        Some(CenterResponse::Services(services))
+            if services.len() == 1 && services[0].status == ServiceStatusDto::Running
+    ));
+    assert!(status.success());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 登录启动daemon必须保留用户显式停止的服务状态。
+fn login_daemon_does_not_start_registered_stopped_service() {
+    let (directory, endpoint) = isolated_runtime("stopped");
+    let service = directory.join("service");
+    let database = directory.join("procora.sqlite3");
+    write_boot_service(&service, "boot-stopped");
+    register_service(&database, &service, "boot-stopped", true);
+    let task_log = service.join(".procora/logs/tasks/boot.log");
+    let _ = fs::remove_file(&task_log);
+
+    let daemon = spawn_daemon(&endpoint, &database);
+    let client = CenterClient::new(endpoint);
+    let daemon_ready = wait_until(|| client.ping());
+    thread::sleep(Duration::from_millis(300));
+    let services = daemon_ready
+        .then(|| client.request(&CenterRequest::List).ok())
+        .flatten();
+    let task_started = task_log.exists();
+    let status = stop_daemon(daemon, &client, daemon_ready);
+
+    assert!(daemon_ready, "自启动 daemon 未在限定时间内就绪");
+    assert!(!task_started, "已显式停止的服务不应在登录时自动执行 Task");
+    assert!(matches!(
+        services,
+        Some(CenterResponse::Services(services))
+            if services.len() == 1 && services[0].status == ServiceStatusDto::Stopped
+    ));
+    assert!(status.success());
+    fs::remove_dir_all(directory).unwrap();
 }

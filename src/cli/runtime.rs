@@ -94,6 +94,7 @@ fn open_tui(target: Option<&Path>) -> anyhow::Result<()> {
         || env::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
+    let target = api::absolute_user_path(target)?;
     project::warn_python_execution(&target);
     if let Some(client) = center_runtime::running_center()? {
         let hello = client.hello("procora-tui")?;
@@ -233,7 +234,7 @@ fn history(target: &str) -> anyhow::Result<()> {
 fn show(target: &str) -> anyhow::Result<()> {
     let client = center_runtime::ensure_center()?;
     let hello = client.hello("procora-tui")?;
-    let mut selector = api::selector(target);
+    let mut selector = api::selector(target)?;
     let snapshot = match client.request(&CenterRequest::Snapshot {
         selector: selector.clone(),
     })? {
@@ -277,7 +278,7 @@ fn logs(
     let task_id =
         crate::core::TaskId::from_str(task).with_context(|| format!("无效 Task 标识：{task}"))?;
     let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
-    let selector = api::selector(target);
+    let selector = api::selector(target)?;
     if clear {
         match client.request(&CenterRequest::ClearTaskLogs {
             selector,
