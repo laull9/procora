@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use crate::protocol::{SnapshotSourceDto, TaskView};
 use ratatui::{
     Frame,
@@ -228,26 +230,39 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let selected = app.selected_task();
     let task = selected.map_or_else(|| "未选择任务".to_owned(), |task| task.task_id.to_string());
     if let Some(selected) = selected
-        && let Some(content) = app.log_text(&selected.task_id)
+        && let Some(mut content) = app.styled_log_text(&selected.task_id)
     {
-        let prefix = if app.has_log_gap(&selected.task_id) {
-            if app.plain_mode() {
-                "! 日志游标曾过期，以下内容从当前可用位置恢复\n\n"
+        if app.has_log_gap(&selected.task_id) {
+            let warning = if app.plain_mode() {
+                "! 日志游标曾过期，以下内容从当前可用位置恢复"
             } else {
-                "⚠ 日志游标曾过期，以下内容从当前可用位置恢复\n\n"
-            }
-        } else {
-            ""
-        };
+                "⚠ 日志游标曾过期，以下内容从当前可用位置恢复"
+            };
+            content
+                .lines
+                .splice(0..0, [Line::from(warning), Line::default()]);
+        }
         let viewport_lines = usize::from(area.height.saturating_sub(2));
         let scroll_top = app.log_scroll_top(&selected.task_id, viewport_lines);
         let distance = app.log_scroll_distance(&selected.task_id);
-        let position = if distance == 0 {
+        let mut position = if distance == 0 {
             "跟随尾部".to_owned()
         } else {
             format!("已上翻 {distance} 行")
         };
-        let logs = Paragraph::new(format!("{prefix}{content}"))
+        if !app.log_query().is_empty() {
+            let filter = if app.log_filter_enabled() {
+                "过滤"
+            } else {
+                "搜索"
+            };
+            let matches = app.log_match_position(&selected.task_id).map_or_else(
+                || "0/0".to_owned(),
+                |(current, total)| format!("{current}/{total}"),
+            );
+            let _ = write!(position, " · {filter} `{}` {matches}", app.log_query());
+        }
+        let logs = Paragraph::new(content)
             .block(bordered(app).title(log_title(area.width, &task, Some(&position), app)))
             .scroll((
                 u16::try_from(scroll_top).unwrap_or(u16::MAX),
@@ -292,10 +307,20 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         "关"
     };
-    let controls = format!("{controls}  F3 自动横移:{auto_scroll}");
+    let controls = if app.active_tab() == ActiveTab::Logs {
+        format!("{controls}  / 搜索  n/N 匹配  f 过滤  C 清空")
+    } else {
+        format!("{controls}  F3 自动横移:{auto_scroll}")
+    };
     let width = usize::from(area.width);
     let mut lines = vec![Line::from(text_view::clipped(&controls, 0, width))];
-    if let Some(feedback) = app.feedback() {
+    if let Some(input) = app.log_search_input() {
+        lines.push(Line::from(text_view::clipped(
+            &format!("搜索日志：{input}_"),
+            0,
+            width,
+        )));
+    } else if let Some(feedback) = app.feedback() {
         lines.push(Line::from(text_view::clipped(
             feedback,
             app.automatic_text_offset(),

@@ -60,6 +60,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
 | `procora history <name/path>` | 从 SQLite 查询指定服务的状态变更历史。 |
 | `procora show [name/path]` | 按名称、服务目录或配置文件打开 TUI；省略目标时使用当前目录，路径尚未注册时自动发现。 |
+| `procora logs <name/path> <task> [--search TEXT\|--filter TEXT\|--clear]` | 输出 Task 日志；可按行搜索、过滤，或清空活动日志与轮转归档。 |
 | `procora start <name/path>` | 重新加载已注册配置并启动服务宿主。 |
 | `procora restart <name/path>` | 重新加载配置并重启服务宿主。 |
 | `procora preview <name/path>` | 编译当前文件并输出 SHA-256 修订及新增、删除、重启、原地更新和无影响 Task。 |
@@ -74,15 +75,15 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 命令支持唯一前缀推断，例如 `procora stat` 和 `procora li`。拼写错误会显示最相近命令，所有运行期错误都会附带 `procora --help` 入口。若路径名与命令相同，使用 `./<path>` 明确按路径打开。旧版 `procora server ...` 层级暂时保持兼容，但不再显示在帮助中。
 
-全局和临时 TUI 都支持 `s` 启动、`x` 停止、`r` 重启，并实时刷新状态和日志。日志页默认跟随尾部，使用 `PageUp/PageDown` 按页浏览、`Home/End` 跳到首尾，macOS 对应 `Fn+↑/↓` 和 `Fn+←/→`；鼠标滚轮滚动日志，`↑/↓` 或 `j/k` 切换 Task。上翻后新日志不会打断阅读，连接中断时保留当前视图并显示错误。
+全局和临时 TUI 都支持 `s` 启动、`x` 停止、`r` 重启，并实时刷新状态和日志。日志页解析常见 ANSI/SGR 彩色输出，默认跟随尾部且保留本次查看会话读取到的完整历史；使用 `PageUp/PageDown` 按页浏览、`Home/End` 跳到首尾，macOS 对应 `Fn+↑/↓` 和 `Fn+←/→`。`/` 输入搜索词，`n/N` 循环跳转匹配，`f` 切换只显示匹配行，连续按两次 `C` 清空当前 Task 的活动日志与轮转归档。鼠标滚轮滚动日志，触控板左右滚动与左右方向键一样横移文本，`↑/↓` 或 `j/k` 切换 Task。上翻后新日志不会打断阅读，连接中断时保留当前视图并显示错误。
 
 后台 Center 会对配置文件事件做 250ms 防抖并生成候选，但不会因为一次保存就自动重启服务。无效候选、项目改名、依赖准备失败和过期修订都会保留旧有效宿主；先运行 `procora preview` 审查影响，再把输出的完整修订交给 `procora apply`。退出码、重启退避和停止宽限等纯运行策略可原地提交；进程身份或依赖图变化只重启受影响的下游闭包，新增和删除按拓扑顺序对账，启动失败时恢复旧有效定义且不重启无影响 Task。
 
 自动重启采用 30 秒封顶的指数退避。Task 可用 `max_restarts` 限制连续自动重启次数（0 表示无限），并以 `restart_reset_after` 指定稳定运行多久后清零连续计数（默认 `1m`，`0ms` 表示禁用）；耗尽后停止继续创建进程，原地放宽上限可恢复调度。
 
-资源指标采用独立的 1 秒慢采样周期，TUI 的 500ms 状态刷新和 200ms 日志续读不会重复扫描系统进程。一个 Service 的全部活动 Task 在同一次系统刷新后批量聚合进程树；Task 启停会立即失效缓存，退出 Task 不触发空扫描。
+资源指标采用独立的 1 秒慢采样周期，TUI 的 500ms 状态刷新和 50ms 日志续读不会重复扫描系统进程。一个 Service 的全部活动 Task 在同一次系统刷新后批量聚合进程树；Task 启停会立即失效缓存，退出 Task 不触发空扫描。
 
-TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 500ms 检查一次，日志页每 200ms 续读一次。`PROCORA_TUI_PLAIN=1`、`NO_COLOR` 或 `TERM=dumb` 会启用 ASCII 无彩色模式。
+TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 500ms 检查一次，日志页每 50ms 续读并在单轮中批量追赶积压内容。`PROCORA_TUI_PLAIN=1`、`NO_COLOR` 或 `TERM=dumb` 会启用 ASCII 无彩色模式。
 
 配置编辑页支持 YAML、TOML 和 JSON。`Ctrl-S` 会先执行与 `procora validate` 相同的结构、语义和任务图校验，只有配置有效才写入文件；Esc 或 Ctrl-C 退出，存在未保存修改时需要再次确认。
 

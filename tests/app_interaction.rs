@@ -40,6 +40,17 @@ fn horizontal_keys_do_not_change_tabs() {
 }
 
 #[test]
+// 触控板横向滚动与左右方向键使用相同的文本横移行为。
+fn horizontal_mouse_scroll_moves_text_viewport() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_mouse(mouse(MouseEventKind::ScrollRight));
+    assert_eq!(app.horizontal_offset(), 1);
+    app.handle_mouse(mouse(MouseEventKind::ScrollLeft));
+    assert_eq!(app.horizontal_offset(), 0);
+}
+
+#[test]
 // F3切换全局折叠文本自动滚动并可按固定步进推进。
 fn f3_toggles_global_auto_scroll() {
     let mut app = App::new(support::snapshot());
@@ -118,6 +129,49 @@ fn task_logs_keep_gap_marker_and_latest_content() {
 
     assert_eq!(app.log_text(&task_id).as_deref(), Some("first\nsecond\n"));
     assert!(app.has_log_gap(&task_id));
+}
+
+#[test]
+// TUI会话不再把日志展示截断到64KiB。
+fn task_logs_keep_history_beyond_previous_display_limit() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("api").unwrap();
+    let content = format!("first-line\n{}\nlast-line\n", "x".repeat(70 * 1024));
+
+    app.append_log(task_id.clone(), content.as_bytes(), false);
+
+    let logs = app.log_text(&task_id).unwrap();
+    assert!(logs.starts_with("first-line\n"));
+    assert!(logs.ends_with("\nlast-line\n"));
+}
+
+#[test]
+// 日志搜索、过滤、匹配跳转和清空请求共享当前Task状态。
+fn log_search_filter_navigation_and_clear_are_stateful() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id.clone(), b"ok\nERROR one\nerror two\n", false);
+    app.handle_key(KeyCode::Char('3'));
+
+    app.handle_key(KeyCode::Char('/'));
+    for character in "error".chars() {
+        app.handle_key(KeyCode::Char(character));
+    }
+    app.handle_key(KeyCode::Enter);
+    assert_eq!(app.log_query(), "error");
+    assert_eq!(app.log_match_position(&task_id), Some((1, 2)));
+
+    app.handle_key(KeyCode::Char('n'));
+    assert_eq!(app.log_match_position(&task_id), Some((2, 2)));
+    app.handle_key(KeyCode::Char('f'));
+    assert!(app.log_filter_enabled());
+
+    app.handle_key(KeyCode::Char('C'));
+    assert_eq!(app.take_pending_log_clear(), None);
+    app.handle_key(KeyCode::Char('C'));
+    assert_eq!(app.take_pending_log_clear(), Some(task_id.clone()));
+    assert!(app.clear_log(&task_id));
+    assert!(app.log_text(&task_id).is_none());
 }
 
 #[test]

@@ -10,6 +10,54 @@ use uuid::Uuid;
 
 pub use file_store::{FileLogBatch, FileLogCursor, FileLogError, FileLogPolicy, FileLogStore};
 
+/// 删除文本中的 ANSI/ECMA-48 CSI、OSC 和单字符转义序列。
+pub fn strip_ansi(text: &str) -> String {
+    let characters = text.chars().collect::<Vec<_>>();
+    let mut output = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < characters.len() {
+        if characters[index] != '\u{1b}' {
+            if characters[index] == '\r'
+                || (characters[index].is_control()
+                    && characters[index] != '\n'
+                    && characters[index] != '\t')
+            {
+                index += 1;
+                continue;
+            }
+            output.push(characters[index]);
+            index += 1;
+            continue;
+        }
+        let Some(prefix) = characters.get(index + 1).copied() else {
+            break;
+        };
+        if prefix == '[' {
+            index += 2;
+            while index < characters.len() && !('\u{40}'..='\u{7e}').contains(&characters[index]) {
+                index += 1;
+            }
+            index = (index + 1).min(characters.len());
+        } else if prefix == ']' {
+            index += 2;
+            while index < characters.len() {
+                if characters[index] == '\u{7}' {
+                    index += 1;
+                    break;
+                }
+                if characters[index] == '\u{1b}' && characters.get(index + 1) == Some(&'\\') {
+                    index += 2;
+                    break;
+                }
+                index += 1;
+            }
+        } else {
+            index += 2;
+        }
+    }
+    output
+}
+
 /// 日志来源流。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

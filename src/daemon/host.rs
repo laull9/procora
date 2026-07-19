@@ -283,6 +283,24 @@ impl ServiceHost {
         })
     }
 
+    /// 刷新待写内容并清空指定 Task 的文件日志。
+    ///
+    /// # Errors
+    ///
+    /// 当嵌入模式没有文件存储或日志文件无法更新时返回错误。
+    pub fn clear_task_log(&self, task_id: &TaskId) -> Result<(), crate::log::FileLogError> {
+        self.flush_logs();
+        self.file_logs
+            .as_ref()
+            .ok_or_else(|| {
+                crate::log::FileLogError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "嵌入模式没有持久文件日志",
+                ))
+            })?
+            .clear_task(task_id)
+    }
+
     /// 执行一组引擎副作用并把结果事件送回同一写者。
     fn execute_effects(&mut self, effects: Vec<EngineEffect>) -> Result<(), ServiceHostError> {
         let mut effects = VecDeque::from(effects);

@@ -22,7 +22,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 
 这个默认入口不会仅因打开 TUI 而留下新的后台进程。需要持久托管时使用 `procora add <path>`。
 
-连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。Task、依赖和表单等字段型文本只有超出区域宽度时才响应左右方向键；日志是统一的大块纯文本视口，任一日志行需要横移时全部行使用同一偏移。`F3` 开关当前页面的自动横移，速度固定为每秒 4 个字符；字段型文本在自动模式下仍只移动实际溢出的行。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
+连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。Task、依赖和表单等字段型文本只有超出区域宽度时才响应左右方向键；日志解析常见 ANSI/SGR 颜色并使用统一的大文本视口，任一日志行需要横移时全部行使用同一偏移，触控板左右滚动执行相同横移。日志页使用 `/` 搜索、`n/N` 跳转匹配、`f` 过滤匹配行、连续两次 `C` 确认清空当前 Task 日志。`F3` 开关当前页面的自动横移，速度固定为每秒 4 个字符；字段型文本在自动模式下仍只移动实际溢出的行。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
 
 已知命令优先于同名路径；同名路径使用 `./status` 这类显式路径。命令和子命令支持唯一前缀推断，接近但不唯一或拼写错误的输入会显示最相近命令；运行期错误统一提示通过 `procora --help` 查看完整用法。
 
@@ -35,6 +35,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 - `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
 - `procora down`：发送正常关闭请求并等待端点退出；保留中心 SQLite 状态和每个 Service 自己的日志。
 - `procora status`：只探测并显示状态，不隐式启动全局服务器。
+- `procora logs <target> <task>`：输出指定 Task 的活动日志并保留原始 ANSI 颜色；`--search TEXT` 只输出匹配行并带原始行号，`--filter TEXT` 只输出匹配行，`--clear` 清空活动日志和该 Task 的全部 gzip 轮转归档。三个操作参数互斥，Center 未运行时不会隐式启动。
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
 - `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。
@@ -86,7 +87,7 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 
 中心服务器使用当前用户数据目录中的 `procora.sqlite3` 保存注册表、服务当前状态和状态历史。测试和隔离环境可通过 `PROCORA_HOME` 覆盖目录；本地 IPC 端点从该目录派生，以避免不同用户或隔离环境互相连接。
 
-SQLite 不保存日志正文。Service 日志固定写入自身目录的 `.procora/logs/service.log`，Task 日志写入 `.procora/logs/tasks/<task>.log`；压缩归档也留在该 Service 目录，不汇总到 Center 数据目录。
+SQLite 不保存日志正文。Service 日志固定写入自身目录的 `.procora/logs/service.log`，Task 日志写入 `.procora/logs/tasks/<task>.log`；压缩归档也留在该 Service 目录，不汇总到 Center 数据目录。清空 Task 日志会推进文件代次，使现有读取游标收到 Gap 后从清空后的新内容安全恢复。
 
 Center 使用跨平台独占文件锁保证同一 `PROCORA_HOME` 只有一个实例。本地协议先进行版本握手，服务变化进入容量为 256 的内存事件缓冲；慢客户端游标过期后必须重取快照，不能把不连续事件误当作完整状态。
 

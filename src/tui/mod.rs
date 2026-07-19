@@ -24,6 +24,7 @@ mod config_task_defaults;
 mod config_task_dialog;
 mod config_ui;
 mod config_ui_support;
+mod log_view;
 mod text_view;
 mod ui;
 mod ui_support;
@@ -133,6 +134,13 @@ pub trait LiveSession {
     ///
     /// 当中心服务器不可用或日志文件无法读取时返回错误。
     fn poll_log(&mut self, task_id: &TaskId) -> io::Result<Option<LogUpdate>>;
+
+    /// 清空指定 Task 的持久日志。
+    ///
+    /// # Errors
+    ///
+    /// 当服务不可用或日志文件无法更新时返回错误。
+    fn clear_log(&mut self, task_id: &TaskId) -> io::Result<()>;
 }
 
 /// 初始化终端并运行 TUI 输入循环。
@@ -184,7 +192,8 @@ pub fn run_live(
     session: &mut dyn LiveSession,
 ) -> io::Result<()> {
     const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(500);
-    const LOG_INTERVAL: Duration = Duration::from_millis(200);
+    const LOG_INTERVAL: Duration = Duration::from_millis(50);
+    const LOG_CATCH_UP_BATCHES: usize = 16;
 
     let mut app = App::new(snapshot);
     app.set_control_allowed(control_allowed);
@@ -231,6 +240,16 @@ pub fn run_live(
                 }
             }
 
+            if let Some(task_id) = app.take_pending_log_clear() {
+                match session.clear_log(&task_id) {
+                    Ok(()) => {
+                        dirty |= app.clear_log(&task_id);
+                        dirty |= app.set_feedback(format!("已清空 Task `{task_id}` 的日志"));
+                    }
+                    Err(error) => dirty |= app.set_feedback(format!("日志清空失败：{error}")),
+                }
+            }
+
             let now = Instant::now();
             if now >= next_snapshot {
                 next_snapshot = now + SNAPSHOT_INTERVAL;
@@ -244,15 +263,22 @@ pub fn run_live(
             if app.active_tab() == ActiveTab::Logs && now >= next_log {
                 next_log = now + LOG_INTERVAL;
                 if let Some(task_id) = app.selected_task().map(|task| task.task_id.clone()) {
-                    match session.poll_log(&task_id) {
-                        Ok(Some(update)) => {
-                            dirty |= app.append_log(update.task_id, &update.bytes, update.gap);
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            dirty |= app.set_feedback(format!("日志读取异常：{error}"));
+                    let mut bytes = Vec::new();
+                    let mut gap = false;
+                    for _ in 0..LOG_CATCH_UP_BATCHES {
+                        match session.poll_log(&task_id) {
+                            Ok(Some(update)) => {
+                                bytes.extend_from_slice(&update.bytes);
+                                gap |= update.gap;
+                            }
+                            Ok(None) => break,
+                            Err(error) => {
+                                dirty |= app.set_feedback(format!("日志读取异常：{error}"));
+                                break;
+                            }
                         }
                     }
+                    dirty |= app.append_log(task_id, &bytes, gap);
                 }
             }
 
