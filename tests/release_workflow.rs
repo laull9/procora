@@ -78,7 +78,9 @@ fn release_reuses_successful_main_ci() {
     assert!(RELEASE_WORKFLOW.contains("actions: read"));
     assert!(RELEASE_WORKFLOW.contains("--workflow ci.yml"));
     assert!(RELEASE_WORKFLOW.contains("--branch main"));
-    assert!(RELEASE_WORKFLOW.contains("--status success"));
+    assert!(RELEASE_WORKFLOW.contains("for attempt in {1..60}"));
+    assert!(RELEASE_WORKFLOW.contains(".conclusion == \"success\""));
+    assert!(RELEASE_WORKFLOW.contains("等待 main 提交"));
     assert!(RELEASE_WORKFLOW.contains("needs: prepare"));
     assert!(!RELEASE_WORKFLOW.contains("cargo test"));
     assert!(!RELEASE_WORKFLOW.contains("cargo clippy"));
