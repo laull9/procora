@@ -66,18 +66,31 @@ jobs:
             exit 1
           fi
 
-          ci_conclusion=$(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
-            --workflow ci.yml \
-            --branch main \
-            --commit "$release_commit" \
-            --event push \
-            --status success \
-            --limit 1 \
-            --json conclusion \
-            --jq '.[0].conclusion // ""')
-          if [[ "$ci_conclusion" != "success" ]]; then
-            echo "main 提交 $release_commit 没有成功的 CI 记录" >&2
+          for attempt in {1..60}; do
+            ci_state=$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow ci.yml \
+              --branch main \
+              --commit "$release_commit" \
+              --event push \
+              --limit 20 \
+              --json status,conclusion \
+              --jq 'if any(.[]; .conclusion == "success") then "success" elif any(.[]; .status != "completed") then "pending" elif length > 0 then "failure" else "missing" end')
+            case "$ci_state" in
+              success) break ;;
+              failure)
+                echo "main 提交 $release_commit 的 CI 未成功" >&2
+                exit 1
+                ;;
+              pending|missing)
+                echo "等待 main 提交 $release_commit 的 CI 完成（$attempt/60）"
+                sleep 15
+                ;;
+            esac
+          done
+
+          if [[ "$ci_state" != "success" ]]; then
+            echo "等待 main 提交 $release_commit 的 CI 超时" >&2
             exit 1
           fi
 
