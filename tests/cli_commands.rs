@@ -23,6 +23,22 @@ fn top_level_path_opens_service_tui() {
 }
 
 #[test]
+// temp-run提供显式的临时服务入口并允许省略路径。
+fn temp_run_is_explicit_temporary_service_entry() {
+    let current = Cli::try_parse_from(["procora", "temp-run"]).unwrap();
+    let target = Cli::try_parse_from(["procora", "temp-run", "./demo"]).unwrap();
+
+    assert!(matches!(
+        current.command,
+        Some(Command::TempRun { path: None })
+    ));
+    assert!(matches!(
+        target.command,
+        Some(Command::TempRun { path: Some(path) }) if path == std::path::Path::new("./demo")
+    ));
+}
+
+#[test]
 // show省略目标时默认使用当前目录。
 fn show_without_target_uses_current_directory() {
     let cli = Cli::try_parse_from(["procora", "show"]).unwrap();

@@ -1,9 +1,4 @@
-use std::{
-    env,
-    io::{self, Write},
-    path::Path,
-    str::FromStr,
-};
+use std::{env, path::Path};
 
 use crate::daemon::{CenterClient, ServiceHost, run_center_server};
 use crate::platform::capabilities;
@@ -16,7 +11,7 @@ use clap::CommandFactory;
 use clap_complete::generate;
 
 use super::{
-    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, project,
+    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, logs, project,
     session, source, suggestion, template,
 };
 
@@ -34,6 +29,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             project::edit_after_init(&path, no_edit)
         }
         Some(Command::Edit { path }) => project::edit(path.as_deref()),
+        Some(Command::TempRun { path }) => run_temporary(path.as_deref()),
         Some(Command::Deps { path, check }) => project::dependencies(&path, check),
         Some(Command::Clean { path }) => project::clean(path.as_deref()),
         Some(Command::Up) => up(),
@@ -63,7 +59,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             search,
             filter,
             clear,
-        }) => logs(&target, &task, search.as_deref(), filter.as_deref(), clear),
+        }) => logs::run(&target, &task, search.as_deref(), filter.as_deref(), clear),
         Some(Command::Validate { path }) => project::validate(&path),
         Some(Command::Graph { path }) => project::graph(&path),
         Some(Command::Config { path }) => project::effective_config(&path),
@@ -88,42 +84,94 @@ fn completions(shell: clap_complete::Shell) {
     generate(shell, &mut command, "procora", &mut std::io::stdout());
 }
 
-/// 在指定路径连接已有服务，或创建与 TUI 同生命周期的临时宿主。
+/// 默认连接已有中心；中心未运行时让用户显式选择运行方式。
 fn open_tui(target: Option<&Path>) -> anyhow::Result<()> {
+    let target = resolve_tui_target(target)?;
+    project::warn_python_execution(&target);
+    if let Some(client) = center_runtime::running_center()? {
+        return open_center_tui(client, target);
+    }
+
+    let choice = crate::tui::select_inline(
+        "Procora 运行方式",
+        "未检测到当前用户的全局 Procora 服务，请选择本次如何启动。",
+        vec![
+            crate::tui::SelectionItem::new(
+                "启动全局服务",
+                "后台托管并在后续命令中复用",
+                StartupChoice::Global,
+            ),
+            crate::tui::SelectionItem::new(
+                "启动临时服务",
+                "仅在本次 TUI 存续期间运行",
+                StartupChoice::Temporary,
+            ),
+        ],
+    )
+    .context("无法询问运行方式；非交互环境请显式运行 `procora up` 或 `procora temp-run`")?;
+    match choice {
+        Some(StartupChoice::Global) => {
+            let client = center_runtime::ensure_center()?;
+            open_center_tui(client, target)
+        }
+        Some(StartupChoice::Temporary) => run_temporary_at(&target),
+        None => Ok(()),
+    }
+}
+
+/// 默认启动询问支持的运行方式。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupChoice {
+    Global,
+    Temporary,
+}
+
+/// 解析 TUI 路径为不依赖后续当前目录变化的绝对路径。
+fn resolve_tui_target(target: Option<&Path>) -> anyhow::Result<std::path::PathBuf> {
     let target = target.map_or_else(
         || env::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
-    let target = api::absolute_user_path(target)?;
-    project::warn_python_execution(&target);
-    if let Some(client) = center_runtime::running_center()? {
-        let hello = client.hello("procora-tui")?;
-        let mut selector = ServiceSelectorDto::Path(target.clone());
-        let snapshot = match client.request(&CenterRequest::Snapshot {
-            selector: selector.clone(),
-        })? {
-            CenterResponse::Snapshot(snapshot) => snapshot,
-            CenterResponse::Error { .. } => {
-                let service =
-                    expect_service(client.request(&CenterRequest::Open { path: target })?)?;
-                selector = ServiceSelectorDto::Name(service.name);
-                expect_snapshot(client.request(&CenterRequest::Snapshot {
-                    selector: selector.clone(),
-                })?)?
-            }
-            response => unexpected_response(&response)?,
-        };
-        session::run_center_tui(
-            client,
-            selector,
-            snapshot,
-            hello.event_sequence,
-            hello.control_allowed,
-        )?;
-        return Ok(());
-    }
+    api::absolute_user_path(target)
+}
 
-    let mut discovered = crate::config::discover_path(&target)
+/// 在中心服务器中打开目标服务并进入实时 TUI。
+fn open_center_tui(client: CenterClient, target: std::path::PathBuf) -> anyhow::Result<()> {
+    let hello = client.hello("procora-tui")?;
+    let mut selector = ServiceSelectorDto::Path(target.clone());
+    let snapshot = match client.request(&CenterRequest::Snapshot {
+        selector: selector.clone(),
+    })? {
+        CenterResponse::Snapshot(snapshot) => snapshot,
+        CenterResponse::Error { .. } => {
+            let service = expect_service(client.request(&CenterRequest::Open { path: target })?)?;
+            selector = ServiceSelectorDto::Name(service.name);
+            expect_snapshot(client.request(&CenterRequest::Snapshot {
+                selector: selector.clone(),
+            })?)?
+        }
+        response => unexpected_response(&response)?,
+    };
+    session::run_center_tui(
+        client,
+        selector,
+        snapshot,
+        hello.event_sequence,
+        hello.control_allowed,
+    )?;
+    Ok(())
+}
+
+/// 从可选路径显式启动临时服务。
+fn run_temporary(target: Option<&Path>) -> anyhow::Result<()> {
+    let target = resolve_tui_target(target)?;
+    project::warn_python_execution(&target);
+    run_temporary_at(&target)
+}
+
+/// 创建与当前 TUI 同生命周期的临时宿主。
+fn run_temporary_at(target: &Path) -> anyhow::Result<()> {
+    let mut discovered = crate::config::discover_path(target)
         .with_context(|| format!("无法打开 Procora 服务：{}", target.display()))?;
     project::prepare(&mut discovered)?;
     let mut host = ServiceHost::from_compiled_at(discovered.compiled, &discovered.root);
@@ -262,77 +310,6 @@ fn show(target: &str) -> anyhow::Result<()> {
         hello.event_sequence,
         hello.control_allowed,
     )?;
-    Ok(())
-}
-
-/// 读取、匹配或清空指定服务的 Task 文件日志。
-fn logs(
-    target: &str,
-    task: &str,
-    search: Option<&str>,
-    filter: Option<&str>,
-    clear: bool,
-) -> anyhow::Result<()> {
-    const BATCH_BYTES: u32 = 1024 * 1024;
-
-    let task_id =
-        crate::core::TaskId::from_str(task).with_context(|| format!("无效 Task 标识：{task}"))?;
-    let client = center_runtime::running_center()?.context("全局 Procora 服务器未运行")?;
-    let selector = api::selector(target)?;
-    if clear {
-        match client.request(&CenterRequest::ClearTaskLogs {
-            selector,
-            task_id: task_id.clone(),
-        })? {
-            CenterResponse::TaskLogsCleared(cleared) if cleared == task_id => {
-                println!("已清空 Task `{task_id}` 的日志");
-                return Ok(());
-            }
-            CenterResponse::Error { message } => bail!(message),
-            response => return unexpected_response(&response),
-        }
-    }
-
-    let mut cursor = None;
-    let mut content = Vec::new();
-    loop {
-        let response = client.request(&CenterRequest::TaskLogs {
-            selector: selector.clone(),
-            task_id: task_id.clone(),
-            cursor,
-            max_bytes: BATCH_BYTES,
-        })?;
-        let batch = match response {
-            CenterResponse::TaskLogs(batch) => batch,
-            CenterResponse::Error { message } => bail!(message),
-            response => return unexpected_response(&response),
-        };
-        if batch.gap {
-            eprintln!("警告：日志读取期间发生轮转，输出已从当前可用位置恢复");
-        }
-        let empty = batch.bytes.is_empty();
-        cursor = Some(batch.next_cursor);
-        content.extend_from_slice(&batch.bytes);
-        if empty || batch.bytes.len() < BATCH_BYTES as usize {
-            break;
-        }
-    }
-
-    if search.is_none() && filter.is_none() {
-        io::stdout().write_all(&content)?;
-        return Ok(());
-    }
-    let query = search.or(filter).unwrap_or_default().to_ascii_lowercase();
-    for (index, line) in String::from_utf8_lossy(&content).lines().enumerate() {
-        let searchable = crate::log::strip_ansi(line).to_ascii_lowercase();
-        if searchable.contains(&query) {
-            if search.is_some() {
-                println!("{}:{line}", index + 1);
-            } else {
-                println!("{line}");
-            }
-        }
-    }
     Ok(())
 }
 

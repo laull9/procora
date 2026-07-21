@@ -21,7 +21,7 @@ pub(super) fn form_key_hints(form: &FormState) -> Vec<Line<'static>> {
         key_hint("Enter / h / a", "编辑 / 健康检查 / 依赖高级策略"),
         key_hint("n / d", "新建 / 二次确认删除"),
         key_hint("Ctrl-S / F2", "保存 / 高级文本"),
-        key_hint("Esc", "退出；未保存内容会请求确认"),
+        key_hint("Esc", "退出；本轮或全局未保存内容会弹窗确认"),
     ]
 }
 

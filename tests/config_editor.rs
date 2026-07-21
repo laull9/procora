@@ -62,7 +62,7 @@ fn only_valid_config_is_saved() {
 }
 
 #[test]
-// 未保存修改需要二次确认退出。
+// 未保存修改退出时提供保存、放弃和取消选择。
 fn unsaved_changes_require_exit_confirmation() {
     let mut editor = ConfigEditor::from_text(
         "procora.yaml",
@@ -72,9 +72,97 @@ fn unsaved_changes_require_exit_confirmation() {
     editor.handle_key(KeyEvent::new(KeyCode::Char('#'), KeyModifiers::NONE));
     editor.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(!editor.should_quit());
-    assert!(editor.message().contains("再次按"));
-    editor.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(editor.message().contains("选择处理方式"));
+    press(&mut editor, KeyCode::Down);
+    press(&mut editor, KeyCode::Enter);
     assert!(editor.should_quit());
+}
+
+#[test]
+// 退出选择默认保存有效修改并在写盘成功后退出。
+fn exit_confirmation_can_save_before_quitting() {
+    let path = temporary_config();
+    let initial = "version: 1\nproject: demo\ntasks: {}\n";
+    fs::write(&path, initial).unwrap();
+    let mut editor = ConfigEditor::from_text(&path, ConfigFormat::Yaml, initial);
+    press(&mut editor, KeyCode::End);
+    type_text(&mut editor, " # schema");
+
+    press(&mut editor, KeyCode::Esc);
+    press(&mut editor, KeyCode::Enter);
+
+    assert!(editor.should_quit());
+    assert!(fs::read_to_string(&path).unwrap().contains("# schema"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// Task弹窗不再由Enter提交，Ctrl-S会提交并写入完整配置。
+fn task_dialog_uses_ctrl_s_instead_of_enter_to_save() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Enter);
+    type_text(&mut editor, "-next");
+
+    press(&mut editor, KeyCode::Enter);
+    assert!(editor.message().contains("Ctrl-S"));
+    assert!(fs::read_to_string(&path).unwrap().contains("  api:"));
+
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    let compiled = procora::config::load_path(&path).unwrap();
+    assert!(
+        compiled
+            .spec
+            .tasks
+            .contains_key(&"api-next".parse().unwrap())
+    );
+    assert!(editor.message().starts_with("已保存"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// Task弹窗探测本轮修改，Esc后可以从弹窗选择保存。
+fn task_dialog_escape_prompts_to_save_dirty_round() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: api\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Enter);
+    type_text(&mut editor, "-saved");
+    press(&mut editor, KeyCode::Esc);
+
+    let backend = TestBackend::new(110, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(text.contains("保存并退出"));
+
+    press(&mut editor, KeyCode::Enter);
+    let compiled = procora::config::load_path(&path).unwrap();
+    assert!(
+        compiled
+            .spec
+            .tasks
+            .contains_key(&"api-saved".parse().unwrap())
+    );
+    fs::remove_file(path).unwrap();
 }
 
 #[test]

@@ -13,7 +13,11 @@ use std::{
 #[cfg(windows)]
 use std::sync::OnceLock;
 
-use crate::protocol::{CenterHello, CenterRequest, CenterResponse, ClientHello, PROTOCOL_VERSION};
+use crate::core::TaskId;
+use crate::protocol::{
+    CenterHello, CenterRequest, CenterResponse, ClientHello, LOG_STREAM_CHUNK_BYTES, LogBatchDto,
+    LogCursorDto, PROTOCOL_VERSION, ServiceSelectorDto,
+};
 use crate::storage::SqliteCenterRepository;
 use fs2::{FileExt, lock_contended_error};
 use interprocess::local_socket::{
@@ -47,6 +51,9 @@ pub enum IpcError {
     /// 单条协议帧超过服务端允许的上限。
     #[error("中心服务器协议帧超过 {0} 字节上限")]
     FrameTooLarge(usize),
+    /// 中心服务器返回了错误或不符合请求类型的响应。
+    #[error("中心服务器协议响应无效: {0}")]
+    Protocol(String),
 }
 
 /// 单条 IPC 请求 JSON 帧允许占用的最大字节数。
@@ -125,6 +132,33 @@ impl CenterClient {
             response => Err(IpcError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("中心服务器返回了意外握手响应: {response:?}"),
+            ))),
+        }
+    }
+
+    /// 按安全分片大小从指定 Task 日志游标续读一批内容。
+    ///
+    /// 调用方只有在实际需要更多内容时才应携带返回游标继续调用。
+    ///
+    /// # Errors
+    ///
+    /// 当中心服务器不可用、传输失败或响应类型无效时返回错误。
+    pub fn read_task_logs(
+        &self,
+        selector: &ServiceSelectorDto,
+        task_id: &TaskId,
+        cursor: Option<LogCursorDto>,
+    ) -> Result<LogBatchDto, IpcError> {
+        match self.request(&CenterRequest::TaskLogs {
+            selector: selector.clone(),
+            task_id: task_id.clone(),
+            cursor,
+            max_bytes: LOG_STREAM_CHUNK_BYTES,
+        })? {
+            CenterResponse::TaskLogs(batch) => Ok(batch),
+            CenterResponse::Error { message } => Err(IpcError::Protocol(message)),
+            response => Err(IpcError::Protocol(format!(
+                "日志续读收到意外响应: {response:?}"
             ))),
         }
     }
