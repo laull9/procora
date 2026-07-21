@@ -177,7 +177,7 @@ fn form_edits_and_saves_readable_durations() {
     }
     clear_field(&mut editor, 5);
     type_text(&mut editor, "1s500ms");
-    press(&mut editor, KeyCode::Enter);
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
 
     press(&mut editor, KeyCode::Char('h'));
     for _ in 0..5 {

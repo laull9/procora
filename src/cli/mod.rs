@@ -6,6 +6,7 @@ mod autostart_command;
 mod center_runtime;
 #[cfg(target_os = "windows")]
 mod elevation;
+mod logs;
 mod project;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
@@ -55,6 +56,11 @@ pub enum Command {
     },
     /// 打开配置引导与编辑页面。
     Edit {
+        /// 配置文件或服务目录；省略时使用当前目录。
+        path: Option<PathBuf>,
+    },
+    /// 启动与当前 TUI 同生命周期、不会注册到全局服务器的临时服务。
+    TempRun {
         /// 配置文件或服务目录；省略时使用当前目录。
         path: Option<PathBuf>,
     },

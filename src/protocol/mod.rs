@@ -9,6 +9,9 @@ use uuid::Uuid;
 /// 当前本地 IPC 协议主版本。
 pub const PROTOCOL_VERSION: u16 = 5;
 
+/// 单个日志流分片允许携带的原始字节数，避免 JSON 编码膨胀触发 IPC 帧上限。
+pub const LOG_STREAM_CHUNK_BYTES: u32 = 64 * 1024;
+
 /// 客户端连接中心服务器时发送的握手请求。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ClientHello {

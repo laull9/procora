@@ -46,6 +46,31 @@ fn completions_generate_shell_scripts_without_server() {
 }
 
 #[test]
+// 非交互默认入口不会擅自启动临时服务，并提示显式运行方式。
+fn non_interactive_default_entry_requires_explicit_runtime_choice() {
+    let directory = temporary_directory();
+    let home = directory.join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        directory.join("procora.yaml"),
+        "version: 1\nproject: choice-demo\ntasks: {}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .current_dir(&directory)
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("procora up"));
+    assert!(stderr.contains("procora temp-run"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 // config输出包含默认值和规范化路径的有效_json。
 fn config_outputs_valid_json_with_defaults_and_paths() {
     let directory = temporary_directory();

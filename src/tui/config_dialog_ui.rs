@@ -63,7 +63,9 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
     let scroll = selected
         .saturating_sub(visible_lines.saturating_sub(1))
         .min(field_count.saturating_sub(visible_lines));
-    let hint = if dialog.selected_is_directory() {
+    let hint = if dialog.is_task() {
+        "Ctrl-S 保存并退出 · Esc 退出；↑↓ 切换字段 · ←→ 移动/选择"
+    } else if dialog.selected_is_directory() {
         "F5 浏览目录；也可直接输入，Enter 确认"
     } else if dialog.selected_is_map() {
         "F4 键值表；←→ 移动光标，↑↓ 切换字段，Enter 确认"

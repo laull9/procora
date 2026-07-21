@@ -57,6 +57,11 @@ pub(crate) fn render(frame: &mut Frame<'_>, editor: &ConfigEditor) {
     .block(Block::default().title("状态").borders(Borders::ALL))
     .style(message_style(editor.message()));
     frame.render_widget(footer, outer[2]);
+    if let Some(prompt) = editor.exit_prompt() {
+        let area = centered_rect(72, 9, frame.area());
+        frame.render_widget(Clear, area);
+        prompt.render(frame, area, "退出配置编辑器", "检测到尚未保存的配置修改。");
+    }
 }
 
 /// 绘制以项目、profile、Task 和管理依赖为核心的结构化编辑页。
@@ -81,6 +86,16 @@ fn render_form(frame: &mut Frame<'_>, area: Rect, form: &FormState) {
     render_form_detail(frame, columns[1], form);
     if let Some(dialog) = form.dialog() {
         config_dialog_ui::render(frame, dialog);
+        if let Some(prompt) = form.dialog_exit_prompt() {
+            let area = centered_rect(72, 9, frame.area());
+            frame.render_widget(Clear, area);
+            prompt.render(
+                frame,
+                area,
+                "退出本轮编辑",
+                "检测到本轮字段内容发生了变化。",
+            );
+        }
     } else if let Some(name) = form.pending_delete_name() {
         render_delete_confirmation(frame, name);
     }

@@ -39,6 +39,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 - 每个 Task 的日志保存在 `<service>/.procora/logs/tasks/<task>.log`。
 - 活动日志达到大小阈值后自动轮转为 `.gz`，并按归档数量、归档总字节和时间策略清理旧文件。
 - 每个活动日志旁保存文件代次与字节游标；客户端落后到跨越轮转边界时会收到 Gap 标记，并从当前可用尾部恢复。
+- Center IPC 以 64 KiB 有界分片按游标续读日志；CLI 边接收边输出，日志总量不会膨胀成单个协议帧。
 
 ## 高频命令
 
@@ -55,7 +56,8 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora disable` | 停止并移除开机自启动；Windows 会显式请求 UAC 提权，并保留状态和日志。 |
 | `procora completions <shell>` | 输出 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本。 |
 | `procora mcp` | 通过 stdio 运行本地 MCP 服务，提供结构化工具和内嵌文档 Prompts。 |
-| `procora [path/config]` | 在当前目录、指定服务目录或配置文件打开 TUI。全局服务器未运行时使用与 TUI 同生命周期的临时服务。 |
+| `procora [path/config]` | 在当前目录、指定服务目录或配置文件打开 TUI；全局服务器未运行时用内联选择栏询问启动全局或临时服务。 |
+| `procora temp-run [path/config]` | 显式启动只与本次 TUI 同生命周期的临时服务。 |
 | `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
 | `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
 | `procora history <name/path>` | 从 SQLite 查询指定服务的状态变更历史。 |
@@ -85,7 +87,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 500ms 检查一次，日志页每 50ms 续读并在单轮中批量追赶积压内容。`PROCORA_TUI_PLAIN=1`、`NO_COLOR` 或 `TERM=dumb` 会启用 ASCII 无彩色模式。
 
-配置编辑页支持 YAML、TOML 和 JSON。`Ctrl-S` 会先执行与 `procora validate` 相同的结构、语义和任务图校验，只有配置有效才写入文件；Esc 或 Ctrl-C 退出，存在未保存修改时需要再次确认。
+配置编辑页支持 YAML、TOML 和 JSON。Task 编辑弹窗不再用 Enter 提交，统一按 `Ctrl-S` 校验、写入并退出弹窗；Esc 会探测本轮字段变化并弹出保存、放弃或取消选择。整个编辑页退出时也会探测未保存配置并显示同类选择弹窗。
 
 生命周期和健康检查时长可直接写成 `restart_delay: 750ms`、`shutdown_timeout: 5s`、`period: 1m30s`。支持按 `h`、`m`、`s`、`ms` 降序组合；旧 `_ms` 整数字段继续兼容，TUI 则统一显示和保存可读写法。运行期与 `procora config` 的有效值仍使用毫秒整数，兼容现有 API 与差异判断。
 

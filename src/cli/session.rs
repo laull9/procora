@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, io};
 use crate::core::TaskId;
 use crate::daemon::{CenterClient, ServiceHost};
 use crate::protocol::{
-    CenterRequest, CenterResponse, EventBatchDto, LogCursorDto, ProjectSnapshot, ServiceActionDto,
-    ServiceSelectorDto,
+    CenterRequest, CenterResponse, EventBatchDto, LOG_STREAM_CHUNK_BYTES, LogCursorDto,
+    ProjectSnapshot, ServiceActionDto, ServiceSelectorDto,
 };
 use crate::tui::{LiveSession, LogUpdate};
 
@@ -91,7 +91,11 @@ impl LiveSession for EmbeddedTuiSession<'_> {
     fn poll_log(&mut self, task_id: &TaskId) -> io::Result<Option<LogUpdate>> {
         let batch = self
             .host
-            .read_task_log(task_id, self.log_cursors.get(task_id).copied(), 1024 * 1024)
+            .read_task_log(
+                task_id,
+                self.log_cursors.get(task_id).copied(),
+                LOG_STREAM_CHUNK_BYTES as usize,
+            )
             .map_err(io::Error::other)?;
         self.log_cursors.insert(task_id.clone(), batch.next_cursor);
         Ok((batch.gap || !batch.bytes.is_empty()).then_some(LogUpdate {
@@ -177,27 +181,20 @@ impl LiveSession for CenterTuiSession {
     }
 
     fn poll_log(&mut self, task_id: &TaskId) -> io::Result<Option<LogUpdate>> {
-        let response = self
+        let batch = self
             .client
-            .request(&CenterRequest::TaskLogs {
-                selector: self.selector.clone(),
-                task_id: task_id.clone(),
-                cursor: self.log_cursors.get(task_id).copied(),
-                max_bytes: 1024 * 1024,
-            })
+            .read_task_logs(
+                &self.selector,
+                task_id,
+                self.log_cursors.get(task_id).copied(),
+            )
             .map_err(io::Error::other)?;
-        match response {
-            CenterResponse::TaskLogs(batch) => {
-                self.log_cursors.insert(task_id.clone(), batch.next_cursor);
-                Ok((batch.gap || !batch.bytes.is_empty()).then_some(LogUpdate {
-                    task_id: batch.task_id,
-                    bytes: batch.bytes,
-                    gap: batch.gap,
-                }))
-            }
-            CenterResponse::Error { message } => Err(io::Error::other(message)),
-            response => Err(io::Error::other(format!("意外日志响应: {response:?}"))),
-        }
+        self.log_cursors.insert(task_id.clone(), batch.next_cursor);
+        Ok((batch.gap || !batch.bytes.is_empty()).then_some(LogUpdate {
+            task_id: batch.task_id,
+            bytes: batch.bytes,
+            gap: batch.gap,
+        }))
     }
 
     fn clear_log(&mut self, task_id: &TaskId) -> io::Result<()> {

@@ -300,6 +300,52 @@ fn add_and_remove_form_top_level_service_lifecycle() {
 }
 
 #[test]
+// 相对服务路径必须按调用端目录解析，不能依赖后台中心的工作目录。
+fn relative_add_uses_client_working_directory() {
+    let home = temporary_directory("relative-add-home");
+    let service = temporary_directory("relative-add-service");
+    fs::write(
+        service.join("procora.yaml"),
+        "version: 1\nproject: relative-add\ntasks: {}\n",
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_procora");
+
+    let up = run_background_cli(
+        ProcessCommand::new(binary)
+            .arg("up")
+            .current_dir(&home)
+            .env("PROCORA_HOME", &home),
+        &home,
+        "relative-add-up",
+    );
+    assert!(up.status.success());
+
+    let opened = ProcessCommand::new(binary)
+        .args(["add", "."])
+        .current_dir(&service)
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(
+        opened.status.success(),
+        "相对路径注册失败\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&opened.stdout),
+        String::from_utf8_lossy(&opened.stderr)
+    );
+    assert!(String::from_utf8_lossy(&opened.stdout).contains("relative-add"));
+
+    let down = ProcessCommand::new(binary)
+        .arg("down")
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(down.status.success());
+    remove_directory_when_released(&home);
+    fs::remove_dir_all(service).unwrap();
+}
+
+#[test]
 // 自启动命令保持顶层入口。
 fn autostart_commands_remain_top_level() {
     let enable = Cli::try_parse_from(["procora", "enable"]).unwrap();

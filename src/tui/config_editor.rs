@@ -5,9 +5,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 
 use super::{
+    config_exit::EditorExitChoice,
     config_form::FormConfig,
     config_form_state::{FormEvent, FormState},
     config_ui,
+    selection::SelectionState,
 };
 
 /// 配置编辑器的当前输入模式。
@@ -38,10 +40,10 @@ pub struct ConfigEditor {
     column: usize,
     scroll: usize,
     horizontal_scroll: usize,
-    dirty: bool,
-    should_quit: bool,
-    confirm_discard: bool,
-    message: String,
+    pub(super) dirty: bool,
+    pub(super) should_quit: bool,
+    pub(super) exit_prompt: Option<SelectionState<EditorExitChoice>>,
+    pub(super) message: String,
     mode: EditorMode,
     form: Option<FormState>,
     source: EditorSource,
@@ -93,7 +95,7 @@ impl ConfigEditor {
             horizontal_scroll: 0,
             dirty: false,
             should_quit: false,
-            confirm_discard: false,
+            exit_prompt: None,
             message: "编辑后按 Ctrl-S 校验并保存".to_owned(),
             mode: EditorMode::Text,
             form: None,
@@ -108,10 +110,14 @@ impl ConfigEditor {
 
     /// 处理一次终端按键。
     pub fn handle_key(&mut self, key: KeyEvent) {
+        if self.exit_prompt.is_some() {
+            self.handle_exit_prompt(key);
+            return;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('s') => {
-                    self.save();
+                    self.save_requested();
                     return;
                 }
                 KeyCode::Char('c') => {
@@ -134,9 +140,6 @@ impl ConfigEditor {
             "已进入高级文本模式；F1 返回表单".clone_into(&mut self.message);
             return;
         }
-        if key.code != KeyCode::Esc {
-            self.confirm_discard = false;
-        }
         if self.mode == EditorMode::Form {
             if key.code == KeyCode::Esc
                 && self
@@ -148,12 +151,8 @@ impl ConfigEditor {
                 return;
             }
             if let Some(form) = &mut self.form {
-                match form.handle_key(key) {
-                    FormEvent::None => {}
-                    FormEvent::Changed => self.synchronize_form(false),
-                    FormEvent::Reload => self.synchronize_form(true),
-                    FormEvent::Message(message) => self.message = message,
-                }
+                let event = form.handle_key(key);
+                self.handle_form_event(event);
             }
             return;
         }
@@ -271,6 +270,46 @@ impl ConfigEditor {
         self.form.as_ref()
     }
 
+    /// 统一处理 Ctrl-S：先提交字段弹窗，再保存完整配置。
+    pub(super) fn save_requested(&mut self) {
+        if self.mode == EditorMode::Form {
+            let event = self
+                .form
+                .as_mut()
+                .map_or(FormEvent::Save(false), FormState::save_dialog);
+            self.handle_form_event(event);
+        } else {
+            self.save();
+        }
+    }
+
+    /// 返回完整配置或当前字段弹窗是否存在未保存修改。
+    pub(super) fn has_unsaved_changes(&self) -> bool {
+        self.dirty
+            || self
+                .form
+                .as_ref()
+                .is_some_and(FormState::has_unsaved_dialog)
+    }
+
+    /// 应用表单事件，并在请求时继续写入文件。
+    fn handle_form_event(&mut self, event: FormEvent) {
+        match event {
+            FormEvent::None => {}
+            FormEvent::Changed => self.synchronize_form(false),
+            FormEvent::Reload => self.synchronize_form(true),
+            FormEvent::Save(reload) => {
+                self.synchronize_form(reload);
+                if !self.message.starts_with("配置无效")
+                    && !self.message.starts_with("表单输出失败")
+                {
+                    self.save();
+                }
+            }
+            FormEvent::Message(message) => self.message = message,
+        }
+    }
+
     /// 校验并原子语义保存当前缓冲区。
     fn save(&mut self) {
         if self.mode == EditorMode::Form {
@@ -294,16 +333,6 @@ impl ConfigEditor {
                 Err(error) => self.message = format!("保存失败：{error}"),
             },
             Err(error) => self.message = format!("配置无效：{error}"),
-        }
-    }
-
-    /// 处理带未保存确认的退出请求。
-    fn request_quit(&mut self) {
-        if self.dirty && !self.confirm_discard {
-            self.confirm_discard = true;
-            "有未保存修改；再次按 Esc 或 Ctrl-C 放弃".clone_into(&mut self.message);
-        } else {
-            self.should_quit = true;
         }
     }
 
@@ -391,7 +420,6 @@ impl ConfigEditor {
     /// 标记缓冲区已修改并清除旧反馈。
     fn changed(&mut self) {
         self.dirty = true;
-        self.confirm_discard = false;
         "未保存；Ctrl-S 校验并保存".clone_into(&mut self.message);
     }
 

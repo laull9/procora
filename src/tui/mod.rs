@@ -7,9 +7,11 @@ mod config_dependency_dialog;
 mod config_dialog_ui;
 mod config_directory_picker;
 mod config_editor;
+mod config_exit;
 mod config_form;
 mod config_form_defaults;
 mod config_form_dialog;
+mod config_form_exit;
 mod config_form_field;
 mod config_form_serialize;
 mod config_form_state;
@@ -25,6 +27,7 @@ mod config_task_dialog;
 mod config_ui;
 mod config_ui_support;
 mod log_view;
+mod selection;
 mod text_view;
 mod ui;
 mod ui_support;
@@ -46,6 +49,7 @@ const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
 
 pub use app::{ActiveTab, App};
 pub use config_editor::ConfigEditor;
+pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline};
 
 /// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
 struct MouseCaptureGuard;

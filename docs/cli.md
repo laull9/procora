@@ -18,9 +18,9 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 2. 全局服务器存在时，优先按规范化目录连接已注册服务。
 3. 目录尚未注册时，在全局服务器中发现配置并注册服务。
 4. 获取一致性 Task 快照后打开 TUI。
-5. 全局服务器不存在时，在当前进程创建临时 `ServiceHost`；它同样提供实时状态、服务控制和日志续读，但 TUI 退出后不保留后台宿主。
+5. 全局服务器不存在时，在不占满屏幕的内联选择栏中询问：启动并使用全局服务器，或创建仅与本次 TUI 同生命周期的临时 `ServiceHost`。
 
-这个默认入口不会仅因打开 TUI 而留下新的后台进程。需要持久托管时使用 `procora add <path>`。
+非交互环境不会擅自选择运行模式，应显式使用 `procora up` 或 `procora temp-run [path]`。需要持久注册服务时仍使用 `procora add <path>`。
 
 连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。Task、依赖和表单等字段型文本只有超出区域宽度时才响应左右方向键；日志解析常见 ANSI/SGR 颜色并使用统一的大文本视口，任一日志行需要横移时全部行使用同一偏移，触控板左右滚动执行相同横移。日志页使用 `/` 搜索、`n/N` 跳转匹配、`f` 过滤匹配行、连续两次 `C` 确认清空当前 Task 日志。`F3` 开关当前页面的自动横移，速度固定为每秒 4 个字符；字段型文本在自动模式下仍只移动实际溢出的行。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
 
@@ -29,13 +29,14 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 ## 3. 项目初始化与中心进程
 
 - `procora init --config yaml|json|toml`：在当前目录写入不依赖 Cargo 的可运行示例；默认 YAML。已有同名文件时拒绝覆盖，只有显式 `--force` 才覆盖。交互式终端会自动进入配置编辑页，脚本使用 `--no-edit` 跳过。
-- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。项目弹窗可编辑项目变量、基础项目环境、`task_defaults`，并在已声明 profile 与基础配置之间循环切换；独立 Profiles 区域可新增、编辑、重命名和删除 profile，包括继承目标、可空/显式空 Task 白名单、环境及默认层覆盖。变量或 profile 改变后立即重编译活动 Task 和有效来源预览，保存时保留变量表达式、未准入 Task 及 profile 原始声明；重命名会同步活动选择和直接继承引用，仍被继承的 profile 不能删除。项目卡片显示变量解析数、活动 profile、准入 Task 数和模板数；Task 弹窗可填写 `extends` 选择模板、预览具体来源并只保存局部覆盖，依赖字段接受 `task:condition` 及 process-compose 条件别名，保存时规范化为数组或标量 map；生命周期与健康检查时长接受 `750ms`、`5s`、`1m30s` 并保存为带单位的新字段，健康检查弹窗根据 `none`、`exec`、`http` 类型只显示适用字段；模板定义使用 F2 高级文本编辑。Task 命令字段可直接输入带引号的完整命令文本，保存时规范化为精确 argv。新建和保存 Task 不会复制继承值；覆盖字段留空、或把重启策略设为 `inherit`，会删除本地覆盖并恢复模板/profile/项目/内建默认。通过 `Tab` 或 `Shift-Tab` 切换区域，上下方向键在列表边界自动跨区，左右方向键只横移当前高亮的溢出文本，`F3` 开关全局自动横移；`Enter` 编辑、`n` 新建、`d` 二次确认删除，`Ctrl-S` 完整校验后保存。`F1` 在配置有效时返回表单；未保存退出需要二次确认。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
+- `procora edit [path]`：发现唯一声明式配置并默认打开结构化 TUI 表单。项目弹窗可编辑项目变量、基础项目环境、`task_defaults`，并在已声明 profile 与基础配置之间循环切换；独立 Profiles 区域可新增、编辑、重命名和删除 profile，包括继承目标、可空/显式空 Task 白名单、环境及默认层覆盖。变量或 profile 改变后立即重编译活动 Task 和有效来源预览，保存时保留变量表达式、未准入 Task 及 profile 原始声明；重命名会同步活动选择和直接继承引用，仍被继承的 profile 不能删除。项目卡片显示变量解析数、活动 profile、准入 Task 数和模板数；Task 弹窗可填写 `extends` 选择模板、预览具体来源并只保存局部覆盖，依赖字段接受 `task:condition` 及 process-compose 条件别名，保存时规范化为数组或标量 map；生命周期与健康检查时长接受 `750ms`、`5s`、`1m30s` 并保存为带单位的新字段，健康检查弹窗根据 `none`、`exec`、`http` 类型只显示适用字段；模板定义使用 F2 高级文本编辑。Task 命令字段可直接输入带引号的完整命令文本，保存时规范化为精确 argv。新建和保存 Task 不会复制继承值；覆盖字段留空、或把重启策略设为 `inherit`，会删除本地覆盖并恢复模板/profile/项目/内建默认。通过 `Tab` 或 `Shift-Tab` 切换区域，上下方向键在列表边界自动跨区，左右方向键只横移当前高亮的溢出文本，`F3` 开关全局自动横移；`Enter` 打开编辑，Task 弹窗内 Enter 不再提交，统一用 `Ctrl-S` 校验、写盘并退出；`n` 新建、`d` 二次确认删除。Task 弹窗 Esc 会按本轮字段差异询问保存、放弃或取消，整个编辑页退出也会按全局脏状态弹出相同选择。`F1` 在配置有效时返回表单。内置编辑器不执行或改写 `procora.py`，Python 入口应使用可信的外部代码编辑器。
+- `procora temp-run [path]`：显式创建与当前 TUI 同生命周期的临时服务，不连接或注册到全局服务器。
 - `procora clean [path]`：删除服务目录下的 `.procora` 运行时目录，包括日志和管理依赖缓存；省略路径时使用当前目录。配置文件和其他项目文件不会删除，目录不存在时正常返回。
 - `procora deps [path]`：同步项目声明依赖；`--check` 仅依据版本清单、目标类型和版本命令离线复核。
 - `procora up`：确保当前用户的全局 Procora 服务器运行，并输出服务数量。
 - `procora down`：发送正常关闭请求并等待端点退出；保留中心 SQLite 状态和每个 Service 自己的日志。
 - `procora status`：只探测并显示状态，不隐式启动全局服务器。
-- `procora logs <target> <task>`：输出指定 Task 的活动日志并保留原始 ANSI 颜色；`--search TEXT` 只输出匹配行并带原始行号，`--filter TEXT` 只输出匹配行，`--clear` 清空活动日志和该 Task 的全部 gzip 轮转归档。三个操作参数互斥，Center 未运行时不会隐式启动。
+- `procora logs <target> <task>`：以 64 KiB 有界分片按文件游标读取并立即输出指定 Task 的活动日志，不把全部内容聚合为单个 IPC 包或内存缓冲；保留原始 ANSI 颜色，`--search TEXT` 跨分片按完整行匹配并附原始行号，`--filter TEXT` 只输出匹配行，`--clear` 清空活动日志和该 Task 的全部 gzip 轮转归档。三个操作参数互斥，Center 未运行时不会隐式启动。
 - `procora enable`：正常关闭已有的手动 Center，把内部前台 daemon 注册到当前平台的用户级原生托管器，并立即启动。
 - `procora disable`：正常关闭 Center，停止并移除当前用户的自启动注册；不删除 SQLite 状态和 Service/Task 日志。
 - `procora completions <shell>`：把 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本写到标准输出，不启动 Center。用户可按 shell 约定保存或 `source` 该输出。

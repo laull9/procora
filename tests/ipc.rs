@@ -12,10 +12,11 @@ use std::{
 #[cfg(windows)]
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, prelude::*};
+use procora::core::TaskId;
 use procora::daemon::{CenterClient, IpcError, run_center_server};
 use procora::protocol::{
-    CenterRequest, CenterResponse, ClientHello, PROTOCOL_VERSION, ServiceActionDto,
-    ServiceSelectorDto, ServiceStatusDto,
+    CenterRequest, CenterResponse, ClientHello, LOG_STREAM_CHUNK_BYTES, PROTOCOL_VERSION,
+    ServiceActionDto, ServiceSelectorDto, ServiceStatusDto,
 };
 
 /// 同一进程并行测试使用的临时端点去重序列。
@@ -273,6 +274,59 @@ fn center_advances_completed_dependencies_without_clients() {
         client.request(&CenterRequest::Shutdown).unwrap(),
         CenterResponse::ShuttingDown
     ));
+    server.join().unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+// 大日志通过安全分片按游标续读，不产生接近IPC上限的单帧响应。
+fn large_task_logs_are_read_in_bounded_stream_chunks() {
+    let (endpoint, directory) = isolated_runtime();
+    fs::write(
+        directory.join("procora.yaml"),
+        "version: 1\nproject: stream-demo\ntasks:\n  task:\n    command: sh\n    args: ['-c', 'dd if=/dev/zero bs=70000 count=2 2>/dev/null']\n",
+    )
+    .unwrap();
+    let state = directory.join("procora.sqlite3");
+    let server_endpoint = endpoint.clone();
+    let server_state = state.clone();
+    let server = thread::spawn(move || {
+        run_center_server(&server_endpoint, &server_state).unwrap();
+    });
+    let client = CenterClient::new(endpoint);
+    for _ in 0..100 {
+        if client.ping() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    client
+        .request(&CenterRequest::Open {
+            path: directory.clone(),
+        })
+        .unwrap();
+    let log = directory.join(".procora/logs/tasks/task.log");
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while fs::metadata(&log).map_or(0, |metadata| metadata.len()) < 140_000 {
+        assert!(std::time::Instant::now() < deadline, "大日志没有及时写入");
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let selector = ServiceSelectorDto::Name("stream-demo".to_owned());
+    let task_id = "task".parse::<TaskId>().unwrap();
+    let first = client.read_task_logs(&selector, &task_id, None).unwrap();
+    let second = client
+        .read_task_logs(&selector, &task_id, Some(first.next_cursor))
+        .unwrap();
+    assert_eq!(first.bytes.len(), LOG_STREAM_CHUNK_BYTES as usize);
+    assert_eq!(second.bytes.len(), LOG_STREAM_CHUNK_BYTES as usize);
+    assert_eq!(
+        second.next_cursor.offset,
+        u64::from(LOG_STREAM_CHUNK_BYTES) * 2
+    );
+
+    client.request(&CenterRequest::Shutdown).unwrap();
     server.join().unwrap();
     fs::remove_dir_all(directory).unwrap();
 }
