@@ -1,6 +1,9 @@
 //! CLI、MCP 与其他本地入口共享的程序化接口。
 
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, bail};
 use serde::Serialize;
@@ -122,6 +125,7 @@ pub fn list_services() -> anyhow::Result<Option<Vec<ServiceViewDto>>> {
 ///
 /// 当中心启动、项目发现、配置加载或服务启动失败时返回错误。
 pub fn add_service(path: PathBuf) -> anyhow::Result<ServiceViewDto> {
+    let path = absolute_user_path(path)?;
     let client = center_runtime::ensure_center()?;
     expect_service(client.request(&CenterRequest::Open { path })?)
 }
@@ -134,7 +138,7 @@ pub fn add_service(path: PathBuf) -> anyhow::Result<ServiceViewDto> {
 pub fn service_history(target: &str) -> anyhow::Result<Vec<ServiceStatusRecordDto>> {
     let client = running_center_required()?;
     expect_history(client.request(&CenterRequest::History {
-        selector: selector(target),
+        selector: selector(target)?,
     })?)
 }
 
@@ -147,7 +151,7 @@ pub fn manage_service(action: ServiceActionDto, target: &str) -> anyhow::Result<
     let client = center_runtime::ensure_center()?;
     expect_service(client.request(&CenterRequest::Manage {
         action,
-        selector: selector(target),
+        selector: selector(target)?,
     })?)
 }
 
@@ -159,7 +163,7 @@ pub fn manage_service(action: ServiceActionDto, target: &str) -> anyhow::Result<
 pub fn preview_config(target: &str) -> anyhow::Result<ConfigCandidateDto> {
     let client = running_center_required()?;
     match client.request(&CenterRequest::PreviewConfig {
-        selector: selector(target),
+        selector: selector(target)?,
     })? {
         CenterResponse::ConfigCandidate(candidate) => Ok(candidate),
         CenterResponse::Error { message } => bail!(message),
@@ -175,7 +179,7 @@ pub fn preview_config(target: &str) -> anyhow::Result<ConfigCandidateDto> {
 pub fn apply_config(target: &str, revision: &str) -> anyhow::Result<ServiceViewDto> {
     let client = running_center_required()?;
     expect_service(client.request(&CenterRequest::ApplyConfig {
-        selector: selector(target),
+        selector: selector(target)?,
         revision: revision.to_owned(),
     })?)
 }
@@ -188,7 +192,7 @@ pub fn apply_config(target: &str, revision: &str) -> anyhow::Result<ServiceViewD
 pub fn remove_service(target: &str) -> anyhow::Result<ServiceViewDto> {
     let client = center_runtime::ensure_center()?;
     match client.request(&CenterRequest::Remove {
-        selector: selector(target),
+        selector: selector(target)?,
     })? {
         CenterResponse::Removed(service) => Ok(service),
         CenterResponse::Error { message } => bail!(message),
@@ -196,8 +200,12 @@ pub fn remove_service(target: &str) -> anyhow::Result<ServiceViewDto> {
     }
 }
 
-/// 根据用户输入区分稳定名称和文件系统路径。
-pub fn selector(target: &str) -> ServiceSelectorDto {
+/// 根据用户输入区分稳定名称和文件系统路径，并固定调用端的路径语义。
+///
+/// # Errors
+///
+/// 当目标是相对路径且无法读取调用进程当前目录时返回错误。
+pub fn selector(target: &str) -> anyhow::Result<ServiceSelectorDto> {
     let path = Path::new(target);
     if path.exists()
         || path.is_absolute()
@@ -206,10 +214,19 @@ pub fn selector(target: &str) -> ServiceSelectorDto {
         || target.contains('/')
         || target.contains('\\')
     {
-        ServiceSelectorDto::Path(path.to_path_buf())
+        Ok(ServiceSelectorDto::Path(absolute_user_path(path)?))
     } else {
-        ServiceSelectorDto::Name(target.to_owned())
+        Ok(ServiceSelectorDto::Name(target.to_owned()))
     }
+}
+
+/// 把用户提供的路径按 CLI 当前目录转换为可跨进程传输的绝对路径。
+pub(crate) fn absolute_user_path(path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+    let path = path.as_ref();
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    Ok(env::current_dir().context("无法读取当前目录")?.join(path))
 }
 
 /// 返回正在运行的中心客户端，否则给出稳定离线错误。

@@ -4,6 +4,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::config_form::{FormConfig, FormPane};
 use super::config_form_dialog::Dialog;
+use super::config_form_exit::{DialogExitChoice, dialog_exit_selection};
+use super::selection::SelectionState;
 use super::text_view;
 
 /// 表单模式的选择状态与弹窗状态。
@@ -14,7 +16,8 @@ pub(crate) struct FormState {
     selected: usize,
     horizontal_scroll: text_view::HorizontalScroll,
     base_directory: PathBuf,
-    dialog: Option<Dialog>,
+    pub(super) dialog: Option<Dialog>,
+    pub(super) dialog_exit_prompt: Option<SelectionState<DialogExitChoice>>,
     pending_delete: Option<DeleteTarget>,
 }
 
@@ -27,6 +30,8 @@ pub(crate) enum FormEvent {
     Changed,
     /// profile 已切换，需要重编译并刷新有效值预览。
     Reload,
+    /// 表单已提交，并要求把完整配置立即保存到文件。
+    Save(bool),
     /// 需要显示提示。
     Message(String),
 }
@@ -49,6 +54,7 @@ impl FormState {
             horizontal_scroll: text_view::HorizontalScroll::default(),
             base_directory,
             dialog: None,
+            dialog_exit_prompt: None,
             pending_delete: None,
         }
     }
@@ -97,6 +103,11 @@ impl FormState {
         self.dialog.as_ref()
     }
 
+    /// 返回当前字段弹窗是否存在尚未提交的本轮修改。
+    pub(crate) fn has_unsaved_dialog(&self) -> bool {
+        self.dialog.as_ref().is_some_and(Dialog::is_dirty)
+    }
+
     /// 返回等待确认删除的名称。
     pub(crate) fn pending_delete_name(&self) -> Option<&str> {
         self.pending_delete.as_ref().map(|target| match target {
@@ -118,6 +129,9 @@ impl FormState {
 
     /// 处理结构化页面中的一次按键。
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> FormEvent {
+        if self.dialog_exit_prompt.is_some() {
+            return self.handle_dialog_exit(key);
+        }
         if self.dialog.is_some() {
             return self.handle_dialog(key);
         }
@@ -157,6 +171,20 @@ impl FormState {
             KeyCode::Char('d') => self.request_delete(),
             _ => FormEvent::None,
         }
+    }
+
+    /// 统一提交当前字段弹窗，并请求编辑器写入配置文件。
+    pub(crate) fn save_dialog(&mut self) -> FormEvent {
+        let Some(dialog) = self.dialog.as_mut() else {
+            return FormEvent::Save(false);
+        };
+        if dialog.directory_picker().is_some() {
+            return FormEvent::Message("请先在目录选择器中选定或取消".to_owned());
+        }
+        if let Err(message) = dialog.apply_map_editor() {
+            return FormEvent::Message(message);
+        }
+        self.commit_dialog(true)
     }
 
     /// 为当前选中 Task 打开独立健康检查编辑弹窗。
@@ -335,8 +363,13 @@ impl FormState {
         }
         match key.code {
             KeyCode::Esc => {
-                self.dialog = None;
-                FormEvent::Message("已取消编辑".to_owned())
+                if dialog.is_dirty() {
+                    self.dialog_exit_prompt = Some(dialog_exit_selection());
+                    FormEvent::Message("本轮编辑尚未保存，请选择处理方式".to_owned())
+                } else {
+                    self.dialog = None;
+                    FormEvent::Message("已退出编辑".to_owned())
+                }
             }
             KeyCode::Tab | KeyCode::Down => {
                 dialog.next_field(true);
@@ -382,18 +415,23 @@ impl FormState {
                 dialog.insert(character);
                 FormEvent::None
             }
-            KeyCode::Enter => self.commit_dialog(),
+            KeyCode::Enter if dialog.is_task() => {
+                FormEvent::Message("Task 编辑请按 Ctrl-S 保存，Esc 退出".to_owned())
+            }
+            KeyCode::Enter => self.commit_dialog(false),
             _ => FormEvent::None,
         }
     }
 
     /// 将弹窗草稿提交到结构化配置。
-    fn commit_dialog(&mut self) -> FormEvent {
+    fn commit_dialog(&mut self, save_file: bool) -> FormEvent {
         let dialog = self.dialog.take().expect("弹窗状态存在");
         match dialog.commit(&mut self.config) {
             Ok(reload) => {
                 self.clamp_selection();
-                if reload {
+                if save_file {
+                    FormEvent::Save(reload)
+                } else if reload {
                     FormEvent::Reload
                 } else {
                     FormEvent::Changed

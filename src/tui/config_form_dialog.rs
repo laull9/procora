@@ -36,21 +36,32 @@ enum DialogKind {
 pub(crate) struct Dialog {
     kind: DialogKind,
     pub(super) fields: Vec<DialogField>,
+    initial_values: Vec<String>,
     pub(super) selected: usize,
     map_editor: Option<MapEditor>,
     pub(super) directory_picker: Option<DirectoryPicker>,
 }
 
 impl Dialog {
-    /// 创建项目基础信息弹窗。
-    pub(crate) fn project(config: &FormConfig) -> Self {
+    /// 从实体类型和字段快照创建可探测本轮修改的弹窗。
+    fn new(kind: DialogKind, fields: Vec<DialogField>) -> Self {
+        let initial_values = fields.iter().map(|field| field.value.clone()).collect();
         Self {
-            kind: DialogKind::Project,
-            fields: config_task_defaults::project_fields(config),
+            kind,
+            fields,
+            initial_values,
             selected: 0,
             map_editor: None,
             directory_picker: None,
         }
+    }
+
+    /// 创建项目基础信息弹窗。
+    pub(crate) fn project(config: &FormConfig) -> Self {
+        Self::new(
+            DialogKind::Project,
+            config_task_defaults::project_fields(config),
+        )
     }
 
     /// 创建空白 Task 弹窗。
@@ -70,13 +81,10 @@ impl Dialog {
 
     /// 创建 Task 编辑弹窗。
     pub(crate) fn task(original: Option<&str>, task: &FormTask) -> Self {
-        Self {
-            kind: DialogKind::Task(original.map(str::to_owned), Box::new(task.clone())),
-            fields: config_task_dialog::fields(original, task),
-            selected: 0,
-            map_editor: None,
-            directory_picker: None,
-        }
+        Self::new(
+            DialogKind::Task(original.map(str::to_owned), Box::new(task.clone())),
+            config_task_dialog::fields(original, task),
+        )
     }
 
     /// 创建命名 profile 编辑弹窗。
@@ -85,24 +93,18 @@ impl Dialog {
         profile: &FormProfile,
         config: &FormConfig,
     ) -> Self {
-        Self {
-            kind: DialogKind::Profile(original.map(str::to_owned)),
-            fields: config_profile::fields(original, profile, config),
-            selected: 0,
-            map_editor: None,
-            directory_picker: None,
-        }
+        Self::new(
+            DialogKind::Profile(original.map(str::to_owned)),
+            config_profile::fields(original, profile, config),
+        )
     }
 
     /// 创建当前 Task 的健康检查编辑弹窗。
     pub(crate) fn health(task_name: &str, task: &FormTask) -> Self {
-        Self {
-            kind: DialogKind::Health(task_name.to_owned()),
-            fields: config_health_dialog::fields(task),
-            selected: 0,
-            map_editor: None,
-            directory_picker: None,
-        }
+        Self::new(
+            DialogKind::Health(task_name.to_owned()),
+            config_health_dialog::fields(task),
+        )
     }
 
     /// 创建管理依赖编辑弹窗。
@@ -112,12 +114,9 @@ impl Dialog {
         } else {
             dependency.version.as_str()
         };
-        Self {
-            kind: DialogKind::DependencyBasic(
-                original.map(str::to_owned),
-                Box::new(dependency.clone()),
-            ),
-            fields: vec![
+        Self::new(
+            DialogKind::DependencyBasic(original.map(str::to_owned), Box::new(dependency.clone())),
+            vec![
                 field("依赖名称", original.unwrap_or(""), &[]),
                 field("来源（HTTP / SSH / SCP / 本地）", &dependency.source, &[]),
                 field("版本（可空，默认 source）", version, &[]),
@@ -137,18 +136,15 @@ impl Dialog {
                     &[],
                 ),
             ],
-            selected: 0,
-            map_editor: None,
-            directory_picker: None,
-        }
+        )
     }
 
     /// 创建管理依赖高级传输策略弹窗。
     pub(crate) fn dependency_advanced(name: &str, dependency: &FormDependency) -> Self {
         let verify = dependency.verify.as_ref();
-        Self {
-            kind: DialogKind::DependencyAdvanced(name.to_owned(), Box::new(dependency.clone())),
-            fields: vec![
+        Self::new(
+            DialogKind::DependencyAdvanced(name.to_owned(), Box::new(dependency.clone())),
+            vec![
                 field("镜像（JSON 数组）", &args_text(&dependency.mirrors), &[]),
                 field("解包", &dependency.unpack, &["auto", "never"]),
                 field(
@@ -200,10 +196,7 @@ impl Dialog {
                     &[],
                 ),
             ],
-            selected: 0,
-            map_editor: None,
-            directory_picker: None,
-        }
+        )
     }
 
     /// 返回弹窗标题。
@@ -219,6 +212,19 @@ impl Dialog {
             DialogKind::DependencyBasic(None, _) => "新建管理依赖",
             DialogKind::DependencyAdvanced(_, _) => "高级下载与 SSH 策略",
         }
+    }
+
+    /// 返回本轮字段内容是否相对打开时发生变化。
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.fields
+            .iter()
+            .map(|field| field.value.as_str())
+            .ne(self.initial_values.iter().map(String::as_str))
+    }
+
+    /// 返回当前是否为 Task 主编辑弹窗。
+    pub(crate) fn is_task(&self) -> bool {
+        matches!(self.kind, DialogKind::Task(_, _))
     }
 
     /// 返回弹窗字段供界面绘制。
@@ -315,6 +321,19 @@ impl Dialog {
                 Some(Ok(()))
             }
         }
+    }
+
+    /// 将已打开键值表的草稿应用回字段，供统一保存快捷键使用。
+    pub(crate) fn apply_map_editor(&mut self) -> Result<(), String> {
+        let Some(editor) = self.map_editor.as_ref() else {
+            return Ok(());
+        };
+        let values = editor.values()?;
+        let field = editor.field();
+        self.fields[field].value = map_text(&values);
+        self.fields[field].cursor = self.fields[field].value.chars().count();
+        self.map_editor = None;
+        Ok(())
     }
 
     /// 移动弹窗字段选择。
