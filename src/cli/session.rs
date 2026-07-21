@@ -22,17 +22,11 @@ pub(super) fn run_center_overview(
         client: client.clone(),
         last_services: services.clone(),
     };
-    let mut selected_service = None;
+    let mut app = crate::tui::OverviewApp::new(services);
     loop {
-        match crate::tui::run_overview_live(
-            overview_session.last_services.clone(),
-            selected_service.as_deref(),
-            control_allowed,
-            &mut overview_session,
-        )? {
+        match crate::tui::run_overview_live(&mut app, control_allowed, &mut overview_session)? {
             OverviewExit::Quit => return Ok(()),
             OverviewExit::OpenService(service_name) => {
-                selected_service = Some(service_name.clone());
                 let selector = ServiceSelectorDto::Name(service_name.clone());
                 let snapshot = request_snapshot(client, &selector).unwrap_or(ProjectSnapshot {
                     project: service_name,
@@ -50,6 +44,7 @@ pub(super) fn run_center_overview(
                 )?;
                 overview_session.last_services =
                     request_services(client).map_err(anyhow::Error::from)?;
+                app.replace_services(overview_session.last_services.clone());
             }
         }
     }

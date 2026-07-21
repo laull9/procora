@@ -28,6 +28,7 @@ mod config_ui;
 mod config_ui_support;
 mod log_view;
 mod overview_app;
+mod overview_collection;
 mod overview_ui;
 mod selection;
 mod text_view;
@@ -52,6 +53,7 @@ const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
 pub use app::{ActiveTab, App};
 pub use config_editor::ConfigEditor;
 pub use overview_app::{OverviewAction, OverviewApp, OverviewExit};
+pub use overview_collection::OverviewSort;
 pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline};
 
 /// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
@@ -177,17 +179,12 @@ pub trait OverviewSession {
 ///
 /// 当终端操作或中心会话交互失败时返回 I/O 错误。
 pub fn run_overview_live(
-    services: Vec<crate::protocol::ServiceViewDto>,
-    selected_service: Option<&str>,
+    app: &mut OverviewApp,
     control_allowed: bool,
     session: &mut dyn OverviewSession,
 ) -> io::Result<OverviewExit> {
     const SERVICES_INTERVAL: Duration = Duration::from_millis(500);
 
-    let mut app = OverviewApp::new(services);
-    if let Some(selected_service) = selected_service {
-        app.select_service_named(selected_service);
-    }
     app.set_control_allowed(control_allowed);
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;

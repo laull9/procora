@@ -10,7 +10,8 @@ use ratatui::{
 };
 
 use super::ui_support::{
-    bordered, display_color, resource_labels, source_label, status_label, status_visual,
+    bordered, detail_label, detail_label_width, display_color, resource_labels, source_label,
+    status_label, status_visual,
 };
 use super::{ActiveTab, App, text_view};
 
@@ -151,7 +152,7 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
                 detail_line("命令", &task.command, area.width, app),
                 Line::from(vec![
                     Span::styled(
-                        "状态  ",
+                        detail_label("状态"),
                         Style::default().fg(display_color(app, Color::DarkGray)),
                     ),
                     Span::styled(
@@ -426,11 +427,10 @@ fn render_too_small(frame: &mut Frame<'_>, area: Rect, app: &App) {
 /// 创建统一的详情字段行。
 fn detail_line(label: &str, value: impl Into<String>, area_width: u16, app: &App) -> Line<'static> {
     let value = value.into();
-    let label_width = text_view::width(&format!("{label}  "));
-    let available = usize::from(area_width.saturating_sub(2)).saturating_sub(label_width);
+    let available = usize::from(area_width.saturating_sub(2)).saturating_sub(detail_label_width());
     Line::from(vec![
         Span::styled(
-            format!("{label}  "),
+            detail_label(label),
             Style::default().fg(display_color(app, Color::DarkGray)),
         ),
         Span::raw(text_view::clipped(&value, app.text_offset(true), available)),

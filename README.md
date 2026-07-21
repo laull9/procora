@@ -56,7 +56,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora disable` | 停止并移除开机自启动；Windows 会显式请求 UAC 提权，并保留状态和日志。 |
 | `procora completions <shell>` | 输出 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本。 |
 | `procora mcp` | 通过 stdio 运行本地 MCP 服务，提供结构化工具和内嵌文档 Prompts。 |
-| `procora` | 打开全部已注册服务的总览 TUI，可管理服务并往返进入 Task 详情；必要时启动全局服务器。 |
+| `procora` | 打开全部已注册服务的总览 TUI，可筛选、按状态/CPU/内存排序、查看 Service 聚合资源、管理服务并往返进入 Task 详情；必要时启动全局服务器。 |
 | `procora path/config` | 直接打开指定服务目录或配置文件；全局服务器未运行时用内联选择栏询问启动全局或临时服务。 |
 | `procora temp-run [path/config]` | 显式启动只与本次 TUI 同生命周期的临时服务。 |
 | `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |

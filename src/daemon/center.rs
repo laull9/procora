@@ -235,8 +235,11 @@ impl Center {
     }
 
     /// 返回按稳定名称排序的服务列表。
-    fn list(&self) -> Vec<ServiceViewDto> {
-        self.services.values().map(ManagedService::view).collect()
+    fn list(&mut self) -> Vec<ServiceViewDto> {
+        self.services
+            .values_mut()
+            .map(ManagedService::view_with_resources)
+            .collect()
     }
 
     /// 返回指定服务的 TUI 快照。

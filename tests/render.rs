@@ -4,7 +4,7 @@ mod support;
 
 use crossterm::event::KeyCode;
 use procora::core::TaskId;
-use procora::protocol::SnapshotSourceDto;
+use procora::protocol::{ResourceUsageDto, SnapshotSourceDto};
 use procora::tui::App;
 use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
 use std::time::Duration;
@@ -23,6 +23,59 @@ fn render_text(app: &App, width: u16, height: u16) -> String {
         .map(Cell::symbol)
         .collect::<String>()
         .replace(' ', "")
+}
+
+/// 返回 ASCII 标记在测试终端中的所有起始列。
+fn marker_columns(app: &App, width: u16, height: u16, marker: &str) -> Vec<u16> {
+    assert!(marker.is_ascii());
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let symbols = marker
+        .chars()
+        .map(|character| character.to_string())
+        .collect::<Vec<_>>();
+    let marker_width = u16::try_from(symbols.len()).expect("测试标记长度应适合终端宽度");
+    let mut columns = Vec::new();
+    for y in 0..height {
+        for x in 0..=width.saturating_sub(marker_width) {
+            let matches = symbols.iter().enumerate().all(|(offset, expected)| {
+                let index = usize::from(y) * usize::from(width) + usize::from(x) + offset;
+                buffer.content[index].symbol() == expected
+            });
+            if matches {
+                columns.push(x);
+            }
+        }
+    }
+    columns
+}
+
+/// 返回 ASCII 标记最靠右的起始列。
+fn rightmost_marker_column(app: &App, width: u16, height: u16, marker: &str) -> u16 {
+    marker_columns(app, width, height, marker)
+        .into_iter()
+        .max()
+        .unwrap_or_else(|| panic!("未找到渲染标记：{marker}"))
+}
+
+#[test]
+// Task详情中的英文和中文字段值从同一终端列开始。
+fn task_detail_values_align_in_terminal_columns() {
+    let mut snapshot = support::snapshot();
+    snapshot.tasks[0].resources = Some(ResourceUsageDto {
+        cpu_tenths_percent: Some(237),
+        memory_bytes: Some(64 * 1024 * 1024),
+    });
+    let app = App::new(snapshot);
+
+    let command_column = rightmost_marker_column(&app, 100, 24, "postgres");
+    let cpu_column = rightmost_marker_column(&app, 100, 24, "23.7%");
+    let memory_column = rightmost_marker_column(&app, 100, 24, "64.0 MiB");
+
+    assert_eq!(cpu_column, command_column);
+    assert_eq!(memory_column, command_column);
 }
 
 #[test]

@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use crate::protocol::{ConfigCandidateDto, ServiceStatusDto, ServiceViewDto};
+use crate::protocol::{
+    ConfigCandidateDto, ProjectSnapshot, ResourceUsageDto, ServiceStatusDto, ServiceViewDto,
+    SnapshotSourceDto,
+};
 use crate::storage::{StoredService, StoredServiceStatus};
 use crate::{
     config::{CompiledProject, ManagedDependencies, ProjectDiff, discover_path},
@@ -58,8 +61,21 @@ impl ManagedService {
             config_path: self.config_path.clone(),
             status: self.status,
             task_count: self.host.as_ref().map_or(0, |host| host.start_plan().len()),
+            resources: None,
             message: self.message.clone(),
         }
+    }
+
+    /// 返回包含当前进程树聚合资源的服务摘要。
+    pub(crate) fn view_with_resources(&mut self) -> ServiceViewDto {
+        let running = self.status == ServiceStatusDto::Running;
+        let resources = self.host.as_mut().and_then(|host| {
+            let snapshot = host.snapshot(SnapshotSourceDto::CenterLive, running);
+            aggregate_resources(&snapshot)
+        });
+        let mut view = self.view();
+        view.resources = resources;
+        view
     }
 
     /// 返回用于注册表恢复的最小持久化信息。
@@ -74,6 +90,24 @@ impl ManagedService {
             task_count: self.host.as_ref().map_or(0, |host| host.start_plan().len()),
         }
     }
+}
+
+/// 聚合一个 Service 快照中全部 Task 的 CPU 与常驻内存。
+fn aggregate_resources(snapshot: &ProjectSnapshot) -> Option<ResourceUsageDto> {
+    let mut cpu = None;
+    let mut memory = None;
+    for resources in snapshot.tasks.iter().filter_map(|task| task.resources) {
+        if let Some(value) = resources.cpu_tenths_percent {
+            cpu = Some(cpu.unwrap_or(0_u16).saturating_add(value).min(1000_u16));
+        }
+        if let Some(value) = resources.memory_bytes {
+            memory = Some(memory.unwrap_or(0_u64).saturating_add(value));
+        }
+    }
+    (cpu.is_some() || memory.is_some()).then_some(ResourceUsageDto {
+        cpu_tenths_percent: cpu,
+        memory_bytes: memory,
+    })
 }
 
 /// 从单条持久化记录恢复服务，失败时保留可诊断的注册项。

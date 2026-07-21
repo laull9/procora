@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// 单个日志流分片允许携带的原始字节数，避免 JSON 编码膨胀触发 IPC 帧上限。
 pub const LOG_STREAM_CHUNK_BYTES: u32 = 64 * 1024;
@@ -180,6 +180,9 @@ pub struct ServiceViewDto {
     pub status: ServiceStatusDto,
     /// 最近一次成功加载的任务数量。
     pub task_count: usize,
+    /// 当前 Service 全部 Task 进程树的聚合资源占用。
+    #[serde(default)]
+    pub resources: Option<ResourceUsageDto>,
     /// 失败或降级状态的可读说明。
     pub message: Option<String>,
 }
