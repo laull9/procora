@@ -27,6 +27,8 @@ mod config_task_dialog;
 mod config_ui;
 mod config_ui_support;
 mod log_view;
+mod overview_app;
+mod overview_ui;
 mod selection;
 mod text_view;
 mod ui;
@@ -49,6 +51,7 @@ const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
 
 pub use app::{ActiveTab, App};
 pub use config_editor::ConfigEditor;
+pub use overview_app::{OverviewAction, OverviewApp, OverviewExit};
 pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline};
 
 /// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
@@ -147,6 +150,107 @@ pub trait LiveSession {
     fn clear_log(&mut self, task_id: &TaskId) -> io::Result<()>;
 }
 
+/// 总览 TUI 与全局中心服务器之间的最小交互接口。
+pub trait OverviewSession {
+    /// 检查并返回发生变化的完整服务摘要列表。
+    ///
+    /// # Errors
+    ///
+    /// 当中心服务器不可用或返回无效响应时返回错误。
+    fn poll_services(&mut self) -> io::Result<Option<Vec<crate::protocol::ServiceViewDto>>>;
+
+    /// 对指定服务执行管理动作并返回最新完整列表。
+    ///
+    /// # Errors
+    ///
+    /// 当中心服务器拒绝操作、不可用或返回无效响应时返回错误。
+    fn manage_overview(
+        &mut self,
+        service_name: &str,
+        action: OverviewAction,
+    ) -> io::Result<Vec<crate::protocol::ServiceViewDto>>;
+}
+
+/// 运行可实时刷新和管理全部服务的中心总览页面。
+///
+/// # Errors
+///
+/// 当终端操作或中心会话交互失败时返回 I/O 错误。
+pub fn run_overview_live(
+    services: Vec<crate::protocol::ServiceViewDto>,
+    selected_service: Option<&str>,
+    control_allowed: bool,
+    session: &mut dyn OverviewSession,
+) -> io::Result<OverviewExit> {
+    const SERVICES_INTERVAL: Duration = Duration::from_millis(500);
+
+    let mut app = OverviewApp::new(services);
+    if let Some(selected_service) = selected_service {
+        app.select_service_named(selected_service);
+    }
+    app.set_control_allowed(control_allowed);
+    ratatui::run(|terminal| {
+        let _mouse_capture = MouseCaptureGuard::enable()?;
+        let mut dirty = true;
+        let mut next_services = Instant::now() + SERVICES_INTERVAL;
+        let mut last_auto_scroll = Instant::now();
+        loop {
+            if dirty {
+                terminal.draw(|frame| app.render(frame))?;
+                dirty = false;
+            }
+            let timeout = next_services
+                .saturating_duration_since(Instant::now())
+                .min(INPUT_MAX_WAIT);
+            if event::poll(timeout)? {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        dirty |= app.handle_key_event(key);
+                    }
+                    Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
+                    Event::Resize(_, _) => dirty = true,
+                    _ => {}
+                }
+            }
+            if let Some(exit) = app.take_exit() {
+                break Ok(exit);
+            }
+            if let Some((service_name, action)) = app.take_pending_action() {
+                match session.manage_overview(&service_name, action) {
+                    Ok(services) => {
+                        dirty |= app.replace_services(services);
+                        dirty |= app.set_feedback(overview_action_feedback(action, &service_name));
+                    }
+                    Err(error) => dirty |= app.set_feedback(format!("操作失败：{error}")),
+                }
+            }
+            let now = Instant::now();
+            if now >= next_services {
+                match session.poll_services() {
+                    Ok(Some(services)) => dirty |= app.replace_services(services),
+                    Ok(None) => {}
+                    Err(error) => dirty |= app.set_feedback(format!("刷新失败：{error}")),
+                }
+                next_services = now + SERVICES_INTERVAL;
+            }
+            let elapsed = now.saturating_duration_since(last_auto_scroll);
+            last_auto_scroll = now;
+            dirty |= app.advance_auto_scroll(elapsed);
+        }
+    })
+}
+
+/// 返回总览服务动作的完成提示。
+fn overview_action_feedback(action: OverviewAction, service_name: &str) -> String {
+    let action = match action {
+        OverviewAction::Start => "已启动",
+        OverviewAction::Stop => "已停止",
+        OverviewAction::Restart => "已重启",
+        OverviewAction::Remove => "已移除",
+    };
+    format!("{action}服务 `{service_name}`")
+}
+
 /// 初始化终端并运行 TUI 输入循环。
 ///
 /// # Errors
@@ -195,12 +299,32 @@ pub fn run_live(
     control_allowed: bool,
     session: &mut dyn LiveSession,
 ) -> io::Result<()> {
+    run_live_mode(snapshot, control_allowed, session, false)
+}
+
+/// 运行从总览进入、退出后返回上一级的服务详情页面。
+pub(crate) fn run_live_back(
+    snapshot: ProjectSnapshot,
+    control_allowed: bool,
+    session: &mut dyn LiveSession,
+) -> io::Result<()> {
+    run_live_mode(snapshot, control_allowed, session, true)
+}
+
+/// 按退出导航语义运行实时服务页面。
+fn run_live_mode(
+    snapshot: ProjectSnapshot,
+    control_allowed: bool,
+    session: &mut dyn LiveSession,
+    back_navigation: bool,
+) -> io::Result<()> {
     const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(500);
     const LOG_INTERVAL: Duration = Duration::from_millis(50);
     const LOG_CATCH_UP_BATCHES: usize = 16;
 
     let mut app = App::new(snapshot);
     app.set_control_allowed(control_allowed);
+    app.set_back_navigation(back_navigation);
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;

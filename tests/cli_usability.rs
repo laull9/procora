@@ -46,8 +46,8 @@ fn completions_generate_shell_scripts_without_server() {
 }
 
 #[test]
-// 非交互默认入口不会擅自启动临时服务，并提示显式运行方式。
-fn non_interactive_default_entry_requires_explicit_runtime_choice() {
+// 非交互默认入口明确要求终端，并提示脚本使用列表命令。
+fn non_interactive_default_entry_requires_terminal() {
     let directory = temporary_directory();
     let home = directory.join("home");
     fs::create_dir_all(&home).unwrap();
@@ -65,8 +65,8 @@ fn non_interactive_default_entry_requires_explicit_runtime_choice() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("procora up"));
-    assert!(stderr.contains("procora temp-run"));
+    assert!(stderr.contains("服务总览 TUI 需要交互终端"));
+    assert!(stderr.contains("procora list"));
     fs::remove_dir_all(directory).unwrap();
 }
 

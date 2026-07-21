@@ -300,6 +300,11 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         "↑↓/jk 选择任务  Tab 切页  ←→ 横移文本  1/2/3 直达  q/Esc 退出"
     };
+    let controls = if app.back_navigation() {
+        controls.replace("退出", "返回")
+    } else {
+        controls.to_owned()
+    };
     let auto_scroll = if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
         "开·高亮冻结"
     } else if app.auto_scroll_enabled() {
@@ -366,7 +371,11 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         lines.push(Line::from("无 Task"));
     }
-    lines.push(Line::from("q/Esc 退出 · 放大终端查看详情"));
+    lines.push(Line::from(if app.back_navigation() {
+        "q/Esc 返回 · 放大终端查看详情"
+    } else {
+        "q/Esc 退出 · 放大终端查看详情"
+    }));
     frame.render_widget(Paragraph::new(lines), area);
 }
 

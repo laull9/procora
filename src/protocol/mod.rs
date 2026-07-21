@@ -327,7 +327,7 @@ pub enum TaskStatusDto {
 /// 任务资源使用的跨平台传输值。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ResourceUsageDto {
-    /// CPU 百分比的十分之一，例如 123 表示 12.3%。
+    /// 整机可用逻辑 CPU 总容量占比的十分之一，例如 123 表示 12.3%。
     pub cpu_tenths_percent: Option<u16>,
     /// 常驻内存字节数。
     pub memory_bytes: Option<u64>,

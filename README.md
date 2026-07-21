@@ -56,7 +56,8 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 | `procora disable` | 停止并移除开机自启动；Windows 会显式请求 UAC 提权，并保留状态和日志。 |
 | `procora completions <shell>` | 输出 Bash、Zsh、Fish、PowerShell 或 Elvish 补全脚本。 |
 | `procora mcp` | 通过 stdio 运行本地 MCP 服务，提供结构化工具和内嵌文档 Prompts。 |
-| `procora [path/config]` | 在当前目录、指定服务目录或配置文件打开 TUI；全局服务器未运行时用内联选择栏询问启动全局或临时服务。 |
+| `procora` | 打开全部已注册服务的总览 TUI，可管理服务并往返进入 Task 详情；必要时启动全局服务器。 |
+| `procora path/config` | 直接打开指定服务目录或配置文件；全局服务器未运行时用内联选择栏询问启动全局或临时服务。 |
 | `procora temp-run [path/config]` | 显式启动只与本次 TUI 同生命周期的临时服务。 |
 | `procora add <path>` | 必要时启动全局服务器，并注册、启动指定服务。 |
 | `procora list` | 列出全局服务器中的服务；服务器未运行时不会启动它。 |
@@ -83,7 +84,7 @@ irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | i
 
 自动重启采用 30 秒封顶的指数退避。Task 可用 `max_restarts` 限制连续自动重启次数（0 表示无限），并以 `restart_reset_after` 指定稳定运行多久后清零连续计数（默认 `1m`，`0ms` 表示禁用）；耗尽后停止继续创建进程，原地放宽上限可恢复调度。
 
-资源指标采用独立的 1 秒慢采样周期，TUI 的 500ms 状态刷新和 50ms 日志续读不会重复扫描系统进程。一个 Service 的全部活动 Task 在同一次系统刷新后批量聚合进程树；Task 启停会立即失效缓存，退出 Task 不触发空扫描。
+资源指标采用独立的 1 秒慢采样周期，TUI 的 500ms 状态刷新和 50ms 日志续读不会重复扫描系统进程。一个 Service 的全部活动 Task 在同一次系统刷新后批量聚合进程树；CPU 按当前进程可用的逻辑 CPU 总容量归一化到 0–100%，Task 启停会立即失效缓存，退出 Task 不触发空扫描。
 
 TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 500ms 检查一次，日志页每 50ms 续读并在单轮中批量追赶积压内容。`PROCORA_TUI_PLAIN=1`、`NO_COLOR` 或 `TERM=dumb` 会启用 ASCII 无彩色模式。
 

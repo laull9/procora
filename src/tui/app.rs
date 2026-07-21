@@ -93,6 +93,16 @@ enum KeyHintPlatform {
     MacOs,
 }
 
+/// 服务页退出键的上层导航语义。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ExitNavigation {
+    /// 退出当前 TUI 命令。
+    #[default]
+    Quit,
+    /// 返回服务总览。
+    Back,
+}
+
 /// TUI 持有的协议快照与本地交互状态。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct App {
@@ -103,6 +113,7 @@ pub struct App {
     pending_action: Option<ServiceActionDto>,
     feedback: Option<String>,
     control_allowed: bool,
+    exit_navigation: ExitNavigation,
     plain_mode: bool,
     key_hint_platform: KeyHintPlatform,
     log_buffers: BTreeMap<TaskId, Vec<u8>>,
@@ -128,6 +139,7 @@ impl App {
             pending_action: None,
             feedback: None,
             control_allowed: false,
+            exit_navigation: ExitNavigation::default(),
             plain_mode: terminal_plain_mode(),
             key_hint_platform: if cfg!(target_os = "macos") {
                 KeyHintPlatform::MacOs
@@ -338,6 +350,20 @@ impl App {
         self.control_allowed
     }
 
+    /// 设置退出键是否返回上一级总览页面。
+    pub const fn set_back_navigation(&mut self, enabled: bool) {
+        self.exit_navigation = if enabled {
+            ExitNavigation::Back
+        } else {
+            ExitNavigation::Quit
+        };
+    }
+
+    /// 返回退出键是否表示返回上一级总览页面。
+    pub const fn back_navigation(&self) -> bool {
+        matches!(self.exit_navigation, ExitNavigation::Back)
+    }
+
     /// 返回当前页面选中文本的水平字符偏移。
     pub const fn horizontal_offset(&self) -> usize {
         self.horizontal_scroll.manual_offset()
@@ -466,7 +492,7 @@ impl App {
 }
 
 /// 根据环境变量判断是否启用低能力终端兼容模式。
-fn terminal_plain_mode() -> bool {
+pub(super) fn terminal_plain_mode() -> bool {
     std::env::var_os("PROCORA_TUI_PLAIN").is_some()
         || std::env::var_os("NO_COLOR").is_some()
         || std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb"))

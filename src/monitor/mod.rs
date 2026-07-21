@@ -24,6 +24,7 @@ pub struct ResourceSnapshot {
 #[derive(Debug)]
 pub struct SystemMonitor {
     system: System,
+    logical_cpu_count: u16,
 }
 
 impl SystemMonitor {
@@ -31,6 +32,8 @@ impl SystemMonitor {
     pub fn new() -> Self {
         Self {
             system: System::new(),
+            logical_cpu_count: std::thread::available_parallelism()
+                .map_or(1, |count| u16::try_from(count.get()).unwrap_or(u16::MAX)),
         }
     }
 
@@ -43,7 +46,7 @@ impl SystemMonitor {
             let disk = process.disk_usage();
             ResourceSnapshot {
                 pid: pid.as_u32(),
-                cpu_percent: process.cpu_usage(),
+                cpu_percent: normalize_cpu_percent(process.cpu_usage(), self.logical_cpu_count),
                 memory_bytes: process.memory(),
                 read_bytes: disk.total_read_bytes,
                 written_bytes: disk.total_written_bytes,
@@ -101,14 +104,39 @@ impl SystemMonitor {
                         pending.extend(descendants);
                     }
                 }
+                snapshot.cpu_percent =
+                    normalize_cpu_percent(snapshot.cpu_percent, self.logical_cpu_count);
                 Some((pid, snapshot))
             })
             .collect()
     }
 }
 
+/// 把 sysinfo 以单核为 100% 的进程值换算为整机可用 CPU 容量占比。
+fn normalize_cpu_percent(cpu_percent: f32, logical_cpu_count: u16) -> f32 {
+    (cpu_percent.max(0.0) / f32::from(logical_cpu_count.max(1))).min(100.0)
+}
+
 impl Default for SystemMonitor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_cpu_percent;
+
+    #[test]
+    // 多核进程值按可用逻辑CPU总容量归一化并限制在百分之百以内。
+    fn cpu_percent_uses_total_available_capacity() {
+        for (raw, cores, expected) in [
+            (250.0, 4, 62.5),
+            (800.0, 4, 100.0),
+            (-1.0, 4, 0.0),
+            (50.0, 0, 50.0),
+        ] {
+            assert!((normalize_cpu_percent(raw, cores) - expected).abs() < f32::EPSILON);
+        }
     }
 }

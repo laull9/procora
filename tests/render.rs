@@ -130,6 +130,18 @@ fn minimal_terminal_preserves_project_source_task_and_exit() {
 }
 
 #[test]
+// 从总览进入的服务详情把退出键提示为返回上一级。
+fn overview_detail_uses_back_navigation_label() {
+    let mut app = App::new(support::snapshot());
+    app.set_back_navigation(true);
+
+    let text = render_text(&app, 80, 20);
+
+    assert!(text.contains("q/Esc返回"));
+    assert!(!text.contains("q/Esc退出"));
+}
+
+#[test]
 // 极小终端至少保留产品名和恢复原因。
 fn tiny_terminal_preserves_product_and_recovery_reason() {
     let app = App::new(support::snapshot());
