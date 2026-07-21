@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, io};
+use std::{
+    collections::BTreeMap,
+    io,
+    time::{Duration, Instant},
+};
 
 use crate::core::TaskId;
 use crate::daemon::{CenterClient, ServiceHost};
@@ -7,6 +11,9 @@ use crate::protocol::{
     ProjectSnapshot, ServiceActionDto, ServiceSelectorDto,
 };
 use crate::tui::{LiveSession, LogUpdate};
+
+/// 中心会话主动拉取资源快照的最长间隔。
+const RESOURCE_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
 
 /// 使用中心事件游标运行可控制的实时 TUI 会话。
 pub(super) fn run_center_tui(
@@ -20,6 +27,7 @@ pub(super) fn run_center_tui(
         client,
         selector,
         event_sequence,
+        resource_schedule: ResourceSnapshotSchedule::new(Instant::now()),
         log_cursors: BTreeMap::new(),
     };
     crate::tui::run_live(snapshot, control_allowed, &mut session)?;
@@ -119,7 +127,33 @@ struct CenterTuiSession {
     client: CenterClient,
     selector: ServiceSelectorDto,
     event_sequence: u64,
+    resource_schedule: ResourceSnapshotSchedule,
     log_cursors: BTreeMap<TaskId, LogCursorDto>,
+}
+
+/// 独立于状态事件维护资源快照拉取节奏。
+#[derive(Debug)]
+struct ResourceSnapshotSchedule {
+    next_at: Instant,
+}
+
+impl ResourceSnapshotSchedule {
+    /// 从最近一次完整快照开始计算下一次资源刷新时间。
+    fn new(now: Instant) -> Self {
+        Self {
+            next_at: now + RESOURCE_SNAPSHOT_INTERVAL,
+        }
+    }
+
+    /// 判断资源快照是否已经到期。
+    fn is_due(&self, now: Instant) -> bool {
+        now >= self.next_at
+    }
+
+    /// 在成功读取到期快照后安排下一次刷新。
+    fn record_success(&mut self, now: Instant) {
+        self.next_at = now + RESOURCE_SNAPSHOT_INTERVAL;
+    }
 }
 
 impl CenterTuiSession {
@@ -159,8 +193,14 @@ impl LiveSession for CenterTuiSession {
             };
         };
         self.event_sequence = next_sequence;
-        if resync_required || !events.is_empty() {
-            return self.snapshot().map(Some);
+        let now = Instant::now();
+        let resource_snapshot_due = self.resource_schedule.is_due(now);
+        if resync_required || !events.is_empty() || resource_snapshot_due {
+            let snapshot = self.snapshot()?;
+            if resource_snapshot_due {
+                self.resource_schedule.record_success(Instant::now());
+            }
+            return Ok(Some(snapshot));
         }
         Ok(None)
     }
@@ -213,5 +253,24 @@ impl LiveSession for CenterTuiSession {
             CenterResponse::Error { message } => Err(io::Error::other(message)),
             response => Err(io::Error::other(format!("意外日志清空响应: {response:?}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    // 状态事件触发的额外快照不会推迟固定的一秒资源刷新。
+    fn resource_snapshot_schedule_is_independent_from_events() {
+        let started_at = Instant::now();
+        let mut schedule = ResourceSnapshotSchedule::new(started_at);
+
+        assert!(!schedule.is_due(started_at + Duration::from_millis(999)));
+        assert!(schedule.is_due(started_at + RESOURCE_SNAPSHOT_INTERVAL));
+
+        schedule.record_success(started_at + RESOURCE_SNAPSHOT_INTERVAL);
+        assert!(!schedule.is_due(started_at + Duration::from_millis(1999)));
+        assert!(schedule.is_due(started_at + Duration::from_secs(2)));
     }
 }
