@@ -9,6 +9,9 @@ use ratatui::{
 
 use super::App;
 
+/// 详情面板标签占用的固定终端显示列数。
+const DETAIL_LABEL_WIDTH: usize = 6;
+
 /// 低能力终端使用的 ASCII 边框。
 const ASCII_BORDER: border::Set<'static> = border::Set {
     top_left: "+",
@@ -81,10 +84,26 @@ pub(super) fn resource_labels(task: &TaskView, plain: bool) -> (String, String) 
     )
 }
 
+/// 按终端显示宽度把中英文详情标签补齐到同一列。
+pub(super) fn detail_label(label: &str) -> String {
+    let padding = DETAIL_LABEL_WIDTH.saturating_sub(super::text_view::width(label));
+    format!("{label}{}", " ".repeat(padding))
+}
+
+/// 返回详情面板标签固定占用的终端显示列数。
+pub(super) const fn detail_label_width() -> usize {
+    DETAIL_LABEL_WIDTH
+}
+
 /// 创建统一边框块。
 pub(super) fn bordered(app: &App) -> Block<'_> {
+    bordered_for(app.plain_mode())
+}
+
+/// 按终端能力创建统一边框块。
+pub(super) fn bordered_for(plain: bool) -> Block<'static> {
     let block = Block::default().borders(Borders::ALL);
-    if app.plain_mode() {
+    if plain {
         block.border_set(ASCII_BORDER)
     } else {
         block
@@ -93,15 +112,16 @@ pub(super) fn bordered(app: &App) -> Block<'_> {
 
 /// 在纯文本模式下关闭显式颜色。
 pub(super) const fn display_color(app: &App, color: Color) -> Color {
-    if app.plain_mode() {
-        Color::Reset
-    } else {
-        color
-    }
+    display_color_for(app.plain_mode(), color)
+}
+
+/// 按终端能力决定是否保留显式颜色。
+pub(super) const fn display_color_for(plain: bool, color: Color) -> Color {
+    if plain { Color::Reset } else { color }
 }
 
 /// 将字节数格式化为适合终端详情面板的短文本。
-fn format_bytes(bytes: u64) -> String {
+pub(super) fn format_bytes(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = KIB * 1024;
     const GIB: u64 = MIB * 1024;

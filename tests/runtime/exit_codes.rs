@@ -70,13 +70,13 @@ fn custom_success_codes_release_completed_dependencies() {
         "tasks": {
             "prepare": {
                 "command": executable,
-                "args": ["--exact", "nonzero_exit_helper", "--nocapture"],
+                "args": ["--exact", "exit_codes::nonzero_exit_helper", "--nocapture"],
                 "env": { "PROCORA_EXIT_CODE_HELPER": "1" },
                 "success_exit_codes": [42]
             },
             "dependent": {
                 "command": executable,
-                "args": ["--exact", "completed_dependency_helper", "--nocapture"],
+                "args": ["--exact", "exit_codes::completed_dependency_helper", "--nocapture"],
                 "env": {
                     "PROCORA_DEPENDENT_HELPER": "1",
                     "PROCORA_DEPENDENT_FILE": marker,

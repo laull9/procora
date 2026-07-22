@@ -6,8 +6,8 @@ use clap::Parser;
 use procora::cli::{Cli, Command, ServerCommand};
 
 #[test]
-// 无子命令解析为当前目录tui入口。
-fn no_subcommand_defaults_to_current_directory_tui() {
+// 无子命令解析为服务总览tui入口。
+fn no_subcommand_defaults_to_overview_tui() {
     let cli = Cli::try_parse_from(["procora"]).unwrap();
     assert!(cli.command.is_none());
     assert!(cli.target.is_none());

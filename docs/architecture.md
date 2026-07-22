@@ -126,11 +126,19 @@ procora/
 │   ├── cli/                    # 命令定义、输出格式与客户端
 │   ├── mcp.rs                  # stdio 工具与内嵌文档 Prompts
 │   └── daemon/                 # 组合根、后台服务与 IPC 服务端
-├── tests/                      # 全部集成测试、共享支持代码与夹具
+├── tests/                      # 集成测试入口与粗粒度职责目录
+│   ├── cli/                    # CLI、会话与 MCP
+│   ├── config/                 # 配置与领域契约
+│   ├── runtime/                # 中心服务、运行时、存储与来源
+│   ├── tui/                    # 终端交互、编辑与渲染
+│   ├── platform/               # 平台集成与路径边界
+│   ├── project/                # 文档、工作流与仓库规范
+│   ├── support/                # 共享测试构造器
+│   └── fixtures/               # 固定配置夹具
 └── docs/
 ```
 
-根 manifest 声明唯一的 `procora` package。`procora` 二进制位于 `src/main.rs`；全部集成测试位于根 `tests/`，共享代码放在 `tests/support/`，夹具放在 `tests/fixtures/`。
+根 manifest 声明唯一的 `procora` package。`procora` 二进制位于 `src/main.rs`；全部集成测试位于根 `tests/`，六个职责目录分别通过 `main.rs` 接入 Cargo，共享代码放在 `tests/support/`，夹具放在 `tests/fixtures/`。
 
 应在实际需求出现时才增加模块。模块内先按职责拆分文件；只有当业务边界足够清晰时才继续分目录，防止早期结构碎片化。
 

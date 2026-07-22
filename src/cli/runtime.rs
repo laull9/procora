@@ -1,4 +1,4 @@
-use std::{env, path::Path};
+use std::{env, io::IsTerminal, path::Path};
 
 use crate::daemon::{CenterClient, ServiceHost, run_center_server};
 use crate::platform::capabilities;
@@ -18,6 +18,7 @@ use super::{
 /// 分发默认路径行为和全部顶层命令。
 pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Result<()> {
     match command {
+        None if target.is_none() => open_overview(),
         None => open_tui(target),
         Some(Command::Init {
             config,
@@ -76,6 +77,16 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             run_center_server(&endpoint, &database).context("全局 Procora 服务器退出")
         }
     }
+}
+
+/// 打开默认服务总览，并在需要时启动当前用户的全局中心。
+fn open_overview() -> anyhow::Result<()> {
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        bail!("服务总览 TUI 需要交互终端；脚本可使用 `procora list`");
+    }
+    let client = center_runtime::ensure_center()?;
+    let hello = client.hello("procora-overview")?;
+    session::run_center_overview(&client, hello.control_allowed)
 }
 
 /// 把目标 shell 的补全脚本写到标准输出。

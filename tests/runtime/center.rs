@@ -74,6 +74,33 @@ fn handshake_events_and_history_form_consistent_session() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+// 服务列表聚合全部活动Task进程树的资源占用。
+fn service_list_includes_aggregate_resources() {
+    let directory = temporary_directory();
+    let service_root = directory.join("demo");
+    write_service(&service_root, "demo");
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open { path: service_root });
+    thread::sleep(Duration::from_millis(30));
+
+    let CenterResponse::Services(services) = center.handle(CenterRequest::List) else {
+        panic!("应返回服务列表");
+    };
+    let resources = services[0].resources.expect("运行中服务应提供聚合资源");
+    assert!(resources.cpu_tenths_percent.is_some_and(|cpu| cpu <= 1000));
+    assert!(resources.memory_bytes.is_some_and(|memory| memory > 0));
+
+    center.handle(CenterRequest::Manage {
+        action: ServiceActionDto::Stop,
+        selector: ServiceSelectorDto::Name("demo".to_owned()),
+    });
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 // 过期事件游标要求客户端重新获取快照。
 fn expired_event_cursor_requires_snapshot_refresh() {

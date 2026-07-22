@@ -25,4 +25,4 @@ jobs:
       - name: 运行 release 模式生命周期 soak
         env:
           PROCORA_SOAK_CYCLES: "2000"
-        run: cargo test --locked --release --test soak -- --ignored --nocapture
+        run: cargo test --locked --release --test runtime soak:: -- --ignored --nocapture

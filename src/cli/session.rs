@@ -8,9 +8,61 @@ use crate::core::TaskId;
 use crate::daemon::{CenterClient, ServiceHost};
 use crate::protocol::{
     CenterRequest, CenterResponse, EventBatchDto, LOG_STREAM_CHUNK_BYTES, LogCursorDto,
-    ProjectSnapshot, ServiceActionDto, ServiceSelectorDto,
+    ProjectSnapshot, ServiceActionDto, ServiceSelectorDto, ServiceViewDto,
 };
-use crate::tui::{LiveSession, LogUpdate};
+use crate::tui::{LiveSession, LogUpdate, OverviewAction, OverviewExit, OverviewSession};
+
+mod new_service;
+
+/// 运行全局中心的服务总览，并允许往返进入单服务详情。
+pub(super) fn run_center_overview(
+    client: &CenterClient,
+    control_allowed: bool,
+) -> anyhow::Result<()> {
+    let services = request_services(client).map_err(anyhow::Error::from)?;
+    let mut overview_session = CenterOverviewSession {
+        client: client.clone(),
+        last_services: services.clone(),
+    };
+    let mut app = crate::tui::OverviewApp::new(services);
+    loop {
+        match crate::tui::run_overview_live(&mut app, control_allowed, &mut overview_session)? {
+            OverviewExit::Quit => return Ok(()),
+            OverviewExit::CreateService => {
+                let current = std::env::current_dir().map_err(anyhow::Error::from)?;
+                if let Some(choice) = crate::tui::run_new_service_wizard(current)?
+                    && let Err(error) = new_service::create(client, choice)
+                {
+                    app.set_feedback(format!("新建服务失败：{error:#}"));
+                }
+                overview_session.last_services =
+                    request_services(client).map_err(anyhow::Error::from)?;
+                app.replace_services(overview_session.last_services.clone());
+            }
+            OverviewExit::OpenService(service_name) => {
+                let selector = ServiceSelectorDto::Name(service_name.clone());
+                let snapshot = request_snapshot(client, &selector).unwrap_or(ProjectSnapshot {
+                    project: service_name,
+                    source: crate::protocol::SnapshotSourceDto::CenterStale,
+                    tasks: Vec::new(),
+                });
+                let hello = client.hello("procora-tui-detail")?;
+                run_center_tui_mode(
+                    client.clone(),
+                    selector,
+                    snapshot,
+                    hello.event_sequence,
+                    hello.control_allowed,
+                    true,
+                    false,
+                )?;
+                overview_session.last_services =
+                    request_services(client).map_err(anyhow::Error::from)?;
+                app.replace_services(overview_session.last_services.clone());
+            }
+        }
+    }
+}
 
 /// 中心会话主动拉取资源快照的最长间隔。
 const RESOURCE_SNAPSHOT_INTERVAL: Duration = Duration::from_secs(1);
@@ -23,15 +75,124 @@ pub(super) fn run_center_tui(
     event_sequence: u64,
     control_allowed: bool,
 ) -> anyhow::Result<()> {
+    run_center_tui_mode(
+        client,
+        selector,
+        snapshot,
+        event_sequence,
+        control_allowed,
+        false,
+        false,
+    )
+}
+
+/// 按退出键语义运行中心单服务详情。
+fn run_center_tui_mode(
+    client: CenterClient,
+    selector: ServiceSelectorDto,
+    snapshot: ProjectSnapshot,
+    event_sequence: u64,
+    control_allowed: bool,
+    back_navigation: bool,
+    start_in_editor: bool,
+) -> anyhow::Result<()> {
+    let config_path = request_services(&client)?
+        .into_iter()
+        .find(|service| service.name == snapshot.project)
+        .map(|service| service.config_path);
     let mut session = CenterTuiSession {
         client,
         selector,
+        config_path,
         event_sequence,
         resource_schedule: ResourceSnapshotSchedule::new(Instant::now()),
         log_cursors: BTreeMap::new(),
     };
-    crate::tui::run_live(snapshot, control_allowed, &mut session)?;
+    if back_navigation {
+        crate::tui::run_live_back(snapshot, control_allowed, &mut session, start_in_editor)?;
+    } else {
+        crate::tui::run_live(snapshot, control_allowed, &mut session)?;
+    }
     Ok(())
+}
+
+/// 全局中心服务总览的 IPC 会话。
+struct CenterOverviewSession {
+    client: CenterClient,
+    last_services: Vec<ServiceViewDto>,
+}
+
+impl OverviewSession for CenterOverviewSession {
+    fn poll_services(&mut self) -> io::Result<Option<Vec<ServiceViewDto>>> {
+        let services = request_services(&self.client)?;
+        if services == self.last_services {
+            return Ok(None);
+        }
+        self.last_services.clone_from(&services);
+        Ok(Some(services))
+    }
+
+    fn manage_overview(
+        &mut self,
+        service_name: &str,
+        action: OverviewAction,
+    ) -> io::Result<Vec<ServiceViewDto>> {
+        let selector = ServiceSelectorDto::Name(service_name.to_owned());
+        let response = match action {
+            OverviewAction::Start => CenterRequest::Manage {
+                action: ServiceActionDto::Start,
+                selector,
+            },
+            OverviewAction::Stop => CenterRequest::Manage {
+                action: ServiceActionDto::Stop,
+                selector,
+            },
+            OverviewAction::Restart => CenterRequest::Manage {
+                action: ServiceActionDto::Restart,
+                selector,
+            },
+            OverviewAction::Remove => CenterRequest::Remove { selector },
+        };
+        match self.client.request(&response).map_err(io::Error::other)? {
+            CenterResponse::Service(_) | CenterResponse::Removed(_) => {}
+            CenterResponse::Error { message } => return Err(io::Error::other(message)),
+            response => {
+                return Err(io::Error::other(format!("意外服务管理响应: {response:?}")));
+            }
+        }
+        let services = request_services(&self.client)?;
+        self.last_services.clone_from(&services);
+        Ok(services)
+    }
+}
+
+/// 从中心读取完整服务摘要列表。
+fn request_services(client: &CenterClient) -> io::Result<Vec<ServiceViewDto>> {
+    match client
+        .request(&CenterRequest::List)
+        .map_err(io::Error::other)?
+    {
+        CenterResponse::Services(services) => Ok(services),
+        CenterResponse::Error { message } => Err(io::Error::other(message)),
+        response => Err(io::Error::other(format!("意外服务列表响应: {response:?}"))),
+    }
+}
+
+/// 从中心读取指定服务详情快照。
+fn request_snapshot(
+    client: &CenterClient,
+    selector: &ServiceSelectorDto,
+) -> io::Result<ProjectSnapshot> {
+    match client
+        .request(&CenterRequest::Snapshot {
+            selector: selector.clone(),
+        })
+        .map_err(io::Error::other)?
+    {
+        CenterResponse::Snapshot(snapshot) => Ok(snapshot),
+        CenterResponse::Error { message } => Err(io::Error::other(message)),
+        response => Err(io::Error::other(format!("意外快照响应: {response:?}"))),
+    }
 }
 
 /// 运行与 TUI 同生命周期的临时服务会话。
@@ -126,6 +287,7 @@ impl LiveSession for EmbeddedTuiSession<'_> {
 struct CenterTuiSession {
     client: CenterClient,
     selector: ServiceSelectorDto,
+    config_path: Option<std::path::PathBuf>,
     event_sequence: u64,
     resource_schedule: ResourceSnapshotSchedule,
     log_cursors: BTreeMap<TaskId, LogCursorDto>,
@@ -174,6 +336,10 @@ impl CenterTuiSession {
 }
 
 impl LiveSession for CenterTuiSession {
+    fn config_path(&self) -> Option<&std::path::Path> {
+        self.config_path.as_deref()
+    }
+
     fn poll_snapshot(&mut self) -> io::Result<Option<ProjectSnapshot>> {
         let response = self
             .client
@@ -252,6 +418,44 @@ impl LiveSession for CenterTuiSession {
             }
             CenterResponse::Error { message } => Err(io::Error::other(message)),
             response => Err(io::Error::other(format!("意外日志清空响应: {response:?}"))),
+        }
+    }
+
+    fn apply_saved_config(&mut self) -> io::Result<ProjectSnapshot> {
+        let candidate = match self
+            .client
+            .request(&CenterRequest::PreviewConfig {
+                selector: self.selector.clone(),
+            })
+            .map_err(io::Error::other)?
+        {
+            CenterResponse::ConfigCandidate(candidate) => candidate,
+            CenterResponse::Error { message } => return Err(io::Error::other(message)),
+            response => {
+                return Err(io::Error::other(format!("意外配置预览响应: {response:?}")));
+            }
+        };
+        if !candidate.valid {
+            return Err(io::Error::other(
+                candidate
+                    .message
+                    .unwrap_or_else(|| "候选配置无效".to_owned()),
+            ));
+        }
+        let revision = candidate
+            .revision
+            .ok_or_else(|| io::Error::other("候选配置缺少修订标识"))?;
+        match self
+            .client
+            .request(&CenterRequest::ApplyConfig {
+                selector: self.selector.clone(),
+                revision,
+            })
+            .map_err(io::Error::other)?
+        {
+            CenterResponse::Service(_) => self.snapshot(),
+            CenterResponse::Error { message } => Err(io::Error::other(message)),
+            response => Err(io::Error::other(format!("意外配置应用响应: {response:?}"))),
         }
     }
 }

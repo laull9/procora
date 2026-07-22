@@ -1,0 +1,23 @@
+//! 配置解析、合并与领域契约测试入口。
+
+mod command_text;
+mod config_compatibility;
+mod config_diff;
+mod config_reload;
+mod config_usability;
+mod dependencies;
+mod dependency_syntax;
+mod diagnostics;
+mod discovery;
+mod durations;
+mod env_files;
+mod formats;
+mod includes;
+mod profiles;
+mod properties;
+mod python_config;
+mod service_name;
+mod task_defaults;
+mod task_graph;
+mod task_templates;
+mod variables;

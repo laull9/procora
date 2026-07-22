@@ -47,7 +47,7 @@ fn fenced_block<'a>(document: &'a str, marker: &str) -> &'a str {
 #[test]
 // 文档中的综合配置与环境文件可以共同完成结构、语义和任务图校验。
 fn comprehensive_documentation_example_is_valid() {
-    let document = include_str!("../docs/example.md");
+    let document = include_str!("../../docs/example.md");
     let directory = temporary_directory();
     let configuration = fenced_block(document, "<!-- 配置块：comprehensive.yaml -->");
     let environment = fenced_block(document, "<!-- 配置块：comprehensive.env -->");

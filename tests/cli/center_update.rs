@@ -15,10 +15,7 @@ use interprocess::local_socket::{GenericNamespaced, ListenerOptions, prelude::*}
 use procora::protocol::{CenterHello, CenterRequest, CenterResponse, PROTOCOL_VERSION};
 use uuid::Uuid;
 
-#[path = "support/command.rs"]
-mod command_support;
-
-use command_support::{remove_directory_when_released, run_background_cli};
+use crate::command_support::{remove_directory_when_released, run_background_cli};
 
 /// 创建测试独占的中心数据目录。
 fn temporary_home() -> PathBuf {

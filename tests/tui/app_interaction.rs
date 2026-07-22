@@ -1,7 +1,5 @@
 //! TUI 键盘导航和选择状态测试。
 
-mod support;
-
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -9,6 +7,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use procora::core::TaskId;
 use procora::protocol::ServiceActionDto;
 use procora::tui::{ActiveTab, App};
+
+use crate::support;
 
 #[test]
 // 可以循环选择任务并切换页面。
@@ -96,6 +96,20 @@ fn service_action_keys_are_ignored_without_permission() {
     let mut app = App::new(support::snapshot());
     app.handle_key(KeyCode::Char('x'));
     assert_eq!(app.take_pending_action(), None);
+}
+
+#[test]
+// 只有具有本地配置入口的中心服务才响应内嵌编辑快捷键。
+fn config_edit_key_requires_explicit_capability() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_key(KeyCode::Char('e'));
+    assert!(!app.take_pending_config_edit());
+
+    app.set_config_edit_allowed(true);
+    app.handle_key(KeyCode::Char('e'));
+    assert!(app.take_pending_config_edit());
+    assert!(!app.take_pending_config_edit());
 }
 
 #[test]

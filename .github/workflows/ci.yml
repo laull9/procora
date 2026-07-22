@@ -27,7 +27,7 @@ jobs:
       - name: 运行测试
         run: cargo test --locked --all-features
       - name: 单独验证 Linux systemd feature 与权限失败契约
-        run: cargo test --locked --no-default-features --features systemd --test systemd --test autostart --test capabilities
+        run: cargo test --locked --no-default-features --features systemd --test platform
       - name: 检查公共文档
         env:
           RUSTDOCFLAGS: -D warnings

@@ -11,6 +11,7 @@ use ratatui::Frame;
 use super::text_view;
 use super::ui;
 
+mod config;
 mod logs;
 
 /// 单次日志翻页移动的逻辑行数。
@@ -93,6 +94,16 @@ enum KeyHintPlatform {
     MacOs,
 }
 
+/// 服务页退出键的上层导航语义。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ExitNavigation {
+    /// 退出当前 TUI 命令。
+    #[default]
+    Quit,
+    /// 返回服务总览。
+    Back,
+}
+
 /// TUI 持有的协议快照与本地交互状态。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct App {
@@ -101,8 +112,10 @@ pub struct App {
     active_tab: ActiveTab,
     should_quit: bool,
     pending_action: Option<ServiceActionDto>,
+    config_edit: config::ConfigEditState,
     feedback: Option<String>,
     control_allowed: bool,
+    exit_navigation: ExitNavigation,
     plain_mode: bool,
     key_hint_platform: KeyHintPlatform,
     log_buffers: BTreeMap<TaskId, Vec<u8>>,
@@ -126,9 +139,11 @@ impl App {
             active_tab: ActiveTab::default(),
             should_quit: false,
             pending_action: None,
+            config_edit: config::ConfigEditState::default(),
             feedback: None,
             control_allowed: false,
-            plain_mode: terminal_plain_mode(),
+            exit_navigation: ExitNavigation::default(),
+            plain_mode: super::ui_environment::terminal_plain_mode(),
             key_hint_platform: if cfg!(target_os = "macos") {
                 KeyHintPlatform::MacOs
             } else {
@@ -162,6 +177,7 @@ impl App {
         if self.log_search_input.is_some() {
             return self.handle_log_search_input(key);
         }
+        let previous_config_edit = self.config_edit;
         let previous = (
             self.selected,
             self.active_tab,
@@ -226,23 +242,27 @@ impl App {
             KeyCode::Char('r') if self.control_allowed => {
                 self.pending_action = Some(ServiceActionDto::Restart);
             }
+            KeyCode::Char('e') if self.config_edit == config::ConfigEditState::Ready => {
+                self.config_edit = config::ConfigEditState::Pending;
+            }
             _ => {}
         }
-        previous
-            != (
-                self.selected,
-                self.active_tab,
-                self.should_quit,
-                self.pending_action,
-                self.current_log_scroll(),
-                self.horizontal_scroll,
-                self.log_query.clone(),
-                self.log_search_input.clone(),
-                self.log_filter_mode,
-                self.log_clear_confirmation.clone(),
-                self.pending_log_clear.clone(),
-                self.current_log_match_index(),
-            )
+        previous_config_edit != self.config_edit
+            || previous
+                != (
+                    self.selected,
+                    self.active_tab,
+                    self.should_quit,
+                    self.pending_action,
+                    self.current_log_scroll(),
+                    self.horizontal_scroll,
+                    self.log_query.clone(),
+                    self.log_search_input.clone(),
+                    self.log_filter_mode,
+                    self.log_clear_confirmation.clone(),
+                    self.pending_log_clear.clone(),
+                    self.current_log_match_index(),
+                )
     }
 
     /// 处理带修饰键的终端按键，并把 Ctrl-C 统一解释为正常退出请求。
@@ -336,6 +356,20 @@ impl App {
     /// 返回当前中心会话是否允许提交控制动作。
     pub const fn control_allowed(&self) -> bool {
         self.control_allowed
+    }
+
+    /// 设置退出键是否返回上一级总览页面。
+    pub const fn set_back_navigation(&mut self, enabled: bool) {
+        self.exit_navigation = if enabled {
+            ExitNavigation::Back
+        } else {
+            ExitNavigation::Quit
+        };
+    }
+
+    /// 返回退出键是否表示返回上一级总览页面。
+    pub const fn back_navigation(&self) -> bool {
+        matches!(self.exit_navigation, ExitNavigation::Back)
     }
 
     /// 返回当前页面选中文本的水平字符偏移。
@@ -463,11 +497,4 @@ impl App {
             self.feedback = None;
         }
     }
-}
-
-/// 根据环境变量判断是否启用低能力终端兼容模式。
-fn terminal_plain_mode() -> bool {
-    std::env::var_os("PROCORA_TUI_PLAIN").is_some()
-        || std::env::var_os("NO_COLOR").is_some()
-        || std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb"))
 }

@@ -10,7 +10,8 @@ use ratatui::{
 };
 
 use super::ui_support::{
-    bordered, display_color, resource_labels, source_label, status_label, status_visual,
+    bordered, detail_label, detail_label_width, display_color, resource_labels, source_label,
+    status_label, status_visual,
 };
 use super::{ActiveTab, App, text_view};
 
@@ -151,7 +152,7 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
                 detail_line("命令", &task.command, area.width, app),
                 Line::from(vec![
                     Span::styled(
-                        "状态  ",
+                        detail_label("状态"),
                         Style::default().fg(display_color(app, Color::DarkGray)),
                     ),
                     Span::styled(
@@ -291,14 +292,23 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
     let controls = if app.active_tab() == ActiveTab::Logs {
         log_controls(app, area.width)
+    } else if area.width < 64 && live && app.control_allowed() && app.config_edit_allowed() {
+        "j/k 选择  Tab 切页  e 编辑  s/x/r 控制  q 退出"
     } else if area.width < 64 && live && app.control_allowed() {
         "j/k 选择  Tab 切页  s/x/r 控制  q 退出"
     } else if area.width < 64 {
         "j/k 选择  Tab 切页  1/2/3 直达  q 退出"
+    } else if live && app.control_allowed() && app.config_edit_allowed() {
+        "↑↓/jk 选择  Tab 切页  e 编辑配置  s 启动  x 停止  r 重启  q/Esc 退出"
     } else if live && app.control_allowed() {
         "↑↓/jk 选择  Tab 切页  ←→ 横移文本  s 启动  x 停止  r 重启  q/Esc 退出"
     } else {
         "↑↓/jk 选择任务  Tab 切页  ←→ 横移文本  1/2/3 直达  q/Esc 退出"
+    };
+    let controls = if app.back_navigation() {
+        controls.replace("退出", "返回")
+    } else {
+        controls.to_owned()
     };
     let auto_scroll = if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
         "开·高亮冻结"
@@ -366,7 +376,17 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         lines.push(Line::from("无 Task"));
     }
-    lines.push(Line::from("q/Esc 退出 · 放大终端查看详情"));
+    lines.push(Line::from(
+        if app.back_navigation() && app.config_edit_allowed() {
+            "e 编辑配置 · q/Esc 返回 · 放大终端查看详情"
+        } else if app.back_navigation() {
+            "q/Esc 返回 · 放大终端查看详情"
+        } else if app.config_edit_allowed() {
+            "e 编辑配置 · q/Esc 退出 · 放大终端查看详情"
+        } else {
+            "q/Esc 退出 · 放大终端查看详情"
+        },
+    ));
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -417,11 +437,10 @@ fn render_too_small(frame: &mut Frame<'_>, area: Rect, app: &App) {
 /// 创建统一的详情字段行。
 fn detail_line(label: &str, value: impl Into<String>, area_width: u16, app: &App) -> Line<'static> {
     let value = value.into();
-    let label_width = text_view::width(&format!("{label}  "));
-    let available = usize::from(area_width.saturating_sub(2)).saturating_sub(label_width);
+    let available = usize::from(area_width.saturating_sub(2)).saturating_sub(detail_label_width());
     Line::from(vec![
         Span::styled(
-            format!("{label}  "),
+            detail_label(label),
             Style::default().fg(display_color(app, Color::DarkGray)),
         ),
         Span::raw(text_view::clipped(&value, app.text_offset(true), available)),

@@ -14,62 +14,62 @@ const EQUIVALENT_CASES: &[CompatibilityCase] = &[
     CompatibilityCase {
         name: "legacy-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/legacy.yaml"),
+        input: include_str!("../fixtures/config/equivalent/legacy.yaml"),
     },
     CompatibilityCase {
         name: "current-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/current.yaml"),
+        input: include_str!("../fixtures/config/equivalent/current.yaml"),
     },
     CompatibilityCase {
         name: "current-toml",
         format: ConfigFormat::Toml,
-        input: include_str!("fixtures/config/equivalent/current.toml"),
+        input: include_str!("../fixtures/config/equivalent/current.toml"),
     },
     CompatibilityCase {
         name: "current-json",
         format: ConfigFormat::Json,
-        input: include_str!("fixtures/config/equivalent/current.json"),
+        input: include_str!("../fixtures/config/equivalent/current.json"),
     },
     CompatibilityCase {
         name: "python-output-json",
         format: ConfigFormat::Json,
-        input: include_str!("fixtures/config/equivalent/python-output.json"),
+        input: include_str!("../fixtures/config/equivalent/python-output.json"),
     },
     CompatibilityCase {
         name: "task-templates-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/templates.yaml"),
+        input: include_str!("../fixtures/config/equivalent/templates.yaml"),
     },
     CompatibilityCase {
         name: "profile-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/profile.yaml"),
+        input: include_str!("../fixtures/config/equivalent/profile.yaml"),
     },
     CompatibilityCase {
         name: "profile-inheritance-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/profile-inheritance.yaml"),
+        input: include_str!("../fixtures/config/equivalent/profile-inheritance.yaml"),
     },
     CompatibilityCase {
         name: "variables-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/variables.yaml"),
+        input: include_str!("../fixtures/config/equivalent/variables.yaml"),
     },
     CompatibilityCase {
         name: "dependency-list-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/dependency-list.yaml"),
+        input: include_str!("../fixtures/config/equivalent/dependency-list.yaml"),
     },
     CompatibilityCase {
         name: "dependency-scalar-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/dependency-scalar.yaml"),
+        input: include_str!("../fixtures/config/equivalent/dependency-scalar.yaml"),
     },
     CompatibilityCase {
         name: "readable-durations-yaml",
         format: ConfigFormat::Yaml,
-        input: include_str!("fixtures/config/equivalent/durations.yaml"),
+        input: include_str!("../fixtures/config/equivalent/durations.yaml"),
     },
 ];
 
@@ -94,7 +94,7 @@ fn equivalent_fixtures_produce_same_project_and_graph() {
 // 无Task时非法默认层夹具仍返回稳定字段路径而不是被静默忽略。
 fn invalid_fixture_keeps_task_default_diagnostics() {
     let error = load_str(
-        include_str!("fixtures/config/invalid/task-defaults.yaml"),
+        include_str!("../fixtures/config/invalid/task-defaults.yaml"),
         ConfigFormat::Yaml,
     )
     .unwrap_err();

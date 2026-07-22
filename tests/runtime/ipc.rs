@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(windows)]
@@ -22,6 +22,9 @@ use procora::protocol::{
 /// 同一进程并行测试使用的临时端点去重序列。
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// 与生产启动流程一致的中心服务器就绪等待上限。
+const CENTER_START_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// 创建独占的端点名称和临时状态目录。
 fn isolated_runtime() -> (String, PathBuf) {
     let nonce = SystemTime::now()
@@ -33,6 +36,15 @@ fn isolated_runtime() -> (String, PathBuf) {
     let directory = std::env::temp_dir().join(&endpoint);
     fs::create_dir_all(&directory).unwrap();
     (endpoint, directory)
+}
+
+/// 等待中心服务器开始响应，避免 Windows 命名管道创建较慢时产生竞态。
+fn wait_until_ready(client: &CenterClient) {
+    let deadline = Instant::now() + CENTER_START_TIMEOUT;
+    while !client.ping() {
+        assert!(Instant::now() < deadline, "中心服务器未在期限内就绪");
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// 写入可供中心服务器发现的最小配置。
@@ -75,12 +87,7 @@ fn local_ipc_rejects_incompatible_protocol() {
         run_center_server(&server_endpoint, &server_state).unwrap();
     });
     let client = CenterClient::new(endpoint);
-    for _ in 0..100 {
-        if client.ping() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_until_ready(&client);
 
     let response = client
         .request(&CenterRequest::Hello(ClientHello {
@@ -169,12 +176,7 @@ fn center_handles_consecutive_management_requests() {
     });
 
     let client = CenterClient::new(endpoint);
-    for _ in 0..100 {
-        if client.ping() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_until_ready(&client);
     assert!(client.ping());
     let hello = client.hello("ipc-test").unwrap();
     assert_eq!(hello.service_count, 0);
@@ -245,12 +247,7 @@ fn center_advances_completed_dependencies_without_clients() {
         run_center_server(&server_endpoint, &server_state).unwrap();
     });
     let client = CenterClient::new(endpoint);
-    for _ in 0..100 {
-        if client.ping() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_until_ready(&client);
     assert!(matches!(
         client
             .request(&CenterRequest::Open {
@@ -295,12 +292,7 @@ fn large_task_logs_are_read_in_bounded_stream_chunks() {
         run_center_server(&server_endpoint, &server_state).unwrap();
     });
     let client = CenterClient::new(endpoint);
-    for _ in 0..100 {
-        if client.ping() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_until_ready(&client);
     client
         .request(&CenterRequest::Open {
             path: directory.clone(),

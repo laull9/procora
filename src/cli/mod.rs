@@ -31,10 +31,10 @@ use tracing_subscriber::EnvFilter;
     args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
-    /// 要在 TUI 中打开的服务目录或配置文件；省略时使用当前目录。
+    /// 要在 TUI 中打开的服务目录或配置文件；省略时打开服务总览。
     #[arg(value_name = "PATH")]
     pub target: Option<PathBuf>,
-    /// 要执行的子命令；省略时在当前目录打开 TUI。
+    /// 要执行的子命令；省略时打开服务总览 TUI。
     #[command(subcommand)]
     pub command: Option<Command>,
 }
