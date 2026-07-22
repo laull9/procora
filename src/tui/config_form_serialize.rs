@@ -97,6 +97,9 @@ impl Serialize for FormConfig {
         if !self.dependencies.is_empty() {
             map.serialize_entry("dependencies", &self.dependencies)?;
         }
+        if !self.uploads.is_empty() {
+            map.serialize_entry("uploads", &self.uploads)?;
+        }
         let mut tasks = self.inactive_tasks.clone();
         for (name, task) in &self.tasks {
             let value = serde_json::to_value(task).map_err(serde::ser::Error::custom)?;
@@ -166,6 +169,9 @@ impl Serialize for FormTask {
                     .collect::<std::collections::BTreeMap<_, _>>();
                 map.serialize_entry("depends_on", &conditions)?;
             }
+        }
+        if !self.uploads.is_empty() {
+            map.serialize_entry("uploads", &self.uploads)?;
         }
         if self.explicit("restart") {
             map.serialize_entry("restart", &self.restart)?;

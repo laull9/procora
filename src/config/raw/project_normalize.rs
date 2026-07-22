@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    config::{ManagedDependencies, TaskConfigOrigins},
+    config::{ManagedDependencies, TaskConfigOrigins, UploadTargetSpec},
     core::{ProjectSpec, TaskId, TaskSpec},
 };
 
@@ -38,12 +38,20 @@ struct TaskNormalization<'a> {
     diagnostics: &'a mut Vec<ConfigDiagnostic>,
 }
 
+/// 原始配置完成校验与规范化后的编译输入集合。
+pub(crate) type NormalizedProject = (
+    ProjectSpec,
+    ManagedDependencies,
+    BTreeMap<String, UploadTargetSpec>,
+    RawDeclarations,
+);
+
 impl RawProject {
     /// 校验并规范化原始 DTO，独立错误尽量一次返回。
     pub(crate) fn normalize(
         self,
         base_directory: Option<&Path>,
-    ) -> Result<(ProjectSpec, ManagedDependencies, RawDeclarations), Vec<ConfigDiagnostic>> {
+    ) -> Result<NormalizedProject, Vec<ConfigDiagnostic>> {
         let mut diagnostics = Vec::new();
         validate_profile_defaults(&self, base_directory, &mut diagnostics);
         let version = normalize_version(self.version, &mut diagnostics);
@@ -58,6 +66,12 @@ impl RawProject {
             normalized_task_defaults.clone()
         };
         let dependencies = normalize_dependencies(self.dependencies, &mut diagnostics);
+        let uploads = normalize_uploads(
+            &self.uploads,
+            &self.tasks,
+            self.admitted_tasks.as_ref(),
+            &mut diagnostics,
+        );
         let valid_ids = self
             .tasks
             .keys()
@@ -89,6 +103,7 @@ impl RawProject {
                 tasks: normalized_tasks.tasks,
             },
             dependencies,
+            uploads,
             RawDeclarations {
                 vars: self.vars,
                 resolved_vars: self.resolved_vars,
@@ -110,6 +125,7 @@ impl RawProject {
                     .collect(),
                 profiles: self.declared_profiles,
                 task_templates: self.declared_task_templates,
+                uploads: self.declared_uploads,
                 task_extends: normalized_tasks.task_extends,
                 task_env_files: normalized_tasks.task_env_files,
                 task_inline_env: normalized_tasks.task_inline_env,
@@ -119,6 +135,44 @@ impl RawProject {
             },
         ))
     }
+}
+
+/// 把 Service 与活动 Task 的上传目标展平成稳定选择器后缀。
+fn normalize_uploads(
+    service_uploads: &BTreeMap<String, crate::config::upload::RawUploadTarget>,
+    tasks: &BTreeMap<String, RawTask>,
+    admitted_tasks: Option<&BTreeSet<String>>,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> BTreeMap<String, UploadTargetSpec> {
+    let mut output = BTreeMap::new();
+    for (name, target) in service_uploads {
+        let field = format!("uploads.{name}");
+        if !super::valid_dependency_id(name) {
+            diagnostics.push(diagnostic(
+                &field,
+                "上传目标名称只能包含 ASCII 字母、数字、点、短横线和下划线",
+            ));
+        } else if let Some(target) = target.clone().normalize(&field, diagnostics) {
+            output.insert(name.to_owned(), target);
+        }
+    }
+    for (task, declaration) in tasks {
+        if admitted_tasks.is_some_and(|tasks| !tasks.contains(task)) {
+            continue;
+        }
+        for (name, target) in &declaration.uploads {
+            let field = format!("tasks.{task}.uploads.{name}");
+            if !super::valid_dependency_id(name) {
+                diagnostics.push(diagnostic(
+                    &field,
+                    "上传目标名称只能包含 ASCII 字母、数字、点、短横线和下划线",
+                ));
+            } else if let Some(target) = target.clone().normalize(&field, diagnostics) {
+                output.insert(format!("{task}::{name}"), target);
+            }
+        }
+    }
+    output
 }
 
 impl TaskNormalization<'_> {

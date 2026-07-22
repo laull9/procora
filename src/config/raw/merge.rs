@@ -21,6 +21,7 @@ impl RawProject {
             task_defaults: RawTaskDefaults::default(),
             task_templates: BTreeMap::default(),
             dependencies: BTreeMap::default(),
+            uploads: BTreeMap::default(),
             tasks: BTreeMap::default(),
             task_declarations: BTreeMap::default(),
             task_template_sources: BTreeMap::default(),
@@ -32,6 +33,7 @@ impl RawProject {
             variable_references: BTreeMap::default(),
             declared_profiles: BTreeMap::default(),
             declared_task_templates: BTreeMap::default(),
+            declared_uploads: BTreeMap::default(),
             declared_tasks: BTreeMap::default(),
         }
     }
@@ -99,6 +101,7 @@ impl RawProject {
         self.task_defaults.overlay(higher.task_defaults);
         self.task_templates.extend(higher.task_templates);
         self.dependencies.extend(higher.dependencies);
+        self.uploads.extend(higher.uploads);
         self.tasks.extend(higher.tasks);
     }
 }

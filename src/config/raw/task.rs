@@ -13,6 +13,7 @@ use serde::{
 
 use super::{RawRestartPolicy, command::RawCommand};
 use crate::config::health::RawHealthCheck;
+use crate::config::upload::RawUploadTarget;
 
 /// 配置前端反序列化使用的原始 Task DTO。
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -38,6 +39,9 @@ pub(crate) struct RawTask {
     pub(super) success_exit_codes: Option<Vec<i32>>,
     #[serde(default, skip_serializing_if = "RawDependencies::is_empty")]
     pub(super) depends_on: RawDependencies,
+    /// Task 命名空间内的上传目标。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) uploads: BTreeMap<String, RawUploadTarget>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) restart: Option<RawRestartPolicy>,
     #[serde(

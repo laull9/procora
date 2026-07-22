@@ -16,7 +16,8 @@ use crate::{
     daemon::{CenterClient, ServiceHost},
     protocol::{
         CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ServiceActionDto,
-        ServiceSelectorDto, ServiceStatusRecordDto, ServiceViewDto,
+        ServiceSelectorDto, ServiceStatusRecordDto, ServiceViewDto, UploadTargetDto,
+        UploadTargetViewDto,
     },
 };
 
@@ -126,6 +127,7 @@ pub fn effective_config(path: &Path) -> anyhow::Result<serde_json::Value> {
         "profiles": compiled.profile_names,
         "profile_extends": compiled.profile_extends,
         "dependencies": compiled.dependencies,
+        "uploads": compiled.upload_targets,
         "env": compiled.project_env,
         "task_defaults": compiled.task_defaults,
         "task_templates": compiled.task_template_names,
@@ -157,6 +159,40 @@ pub fn list_services() -> anyhow::Result<Option<Vec<ServiceViewDto>>> {
         return Ok(None);
     };
     expect_services(client.request(&CenterRequest::List)?).map(Some)
+}
+
+/// 从 Center 当前已生效配置读取声明式上传目标。
+///
+/// # Errors
+///
+/// 当 Center 离线、服务不存在或目标没有声明时返回错误。
+pub(crate) fn resolve_upload_target(
+    service: &str,
+    target: &str,
+) -> anyhow::Result<UploadTargetDto> {
+    let client = running_center_required()?;
+    match client.request(&CenterRequest::ResolveUploadTarget {
+        selector: ServiceSelectorDto::Name(service.to_owned()),
+        target: target.to_owned(),
+    })? {
+        CenterResponse::UploadTarget(target) => Ok(target),
+        CenterResponse::Error { message } => bail!(message),
+        response => unexpected_response(&response),
+    }
+}
+
+/// 从 Center 当前已生效配置列出全部声明式上传目标。
+///
+/// # Errors
+///
+/// 当 Center 离线或返回了不兼容响应时返回错误。
+pub(crate) fn list_upload_targets() -> anyhow::Result<Vec<UploadTargetViewDto>> {
+    let client = running_center_required()?;
+    match client.request(&CenterRequest::ListUploadTargets)? {
+        CenterResponse::UploadTargets(targets) => Ok(targets),
+        CenterResponse::Error { message } => bail!(message),
+        response => unexpected_response(&response),
+    }
 }
 
 /// 注册并启动一个持久托管服务。

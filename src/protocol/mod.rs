@@ -2,12 +2,15 @@
 
 use std::path::PathBuf;
 
-use crate::{config::ProjectDiff, core::TaskId};
+use crate::{
+    config::{ProjectDiff, UploadKind},
+    core::TaskId,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// 单个日志流分片允许携带的原始字节数，避免 JSON 编码膨胀触发 IPC 帧上限。
 pub const LOG_STREAM_CHUNK_BYTES: u32 = 64 * 1024;
@@ -187,6 +190,30 @@ pub struct ServiceViewDto {
     pub message: Option<String>,
 }
 
+/// Center 从当前已生效配置解析出的上传目标。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UploadTargetDto {
+    /// 所属 Service 的规范化根目录。
+    pub root: PathBuf,
+    /// 已与 Service 根目录组合的最终目标路径。
+    pub path: PathBuf,
+    /// 允许接收的来源类型。
+    pub kind: UploadKind,
+    /// 单次未压缩内容字节上限。
+    pub max_bytes: u64,
+}
+
+/// Center 对客户端公开的活动上传目标摘要。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct UploadTargetViewDto {
+    /// `service::name` 或 `service::task::name` 完整选择器。
+    pub selector: String,
+    /// 允许接收的来源类型。
+    pub kind: UploadKind,
+    /// 单次未压缩内容字节上限。
+    pub max_bytes: u64,
+}
+
 /// 尚未提交的配置候选及其相对当前有效修订的影响。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ConfigCandidateDto {
@@ -215,6 +242,15 @@ pub enum CenterRequest {
     },
     /// 列出所有已经注册的服务。
     List,
+    /// 列出所有当前已生效配置声明的上传目标。
+    ListUploadTargets,
+    /// 从当前已生效配置解析声明式上传目标。
+    ResolveUploadTarget {
+        /// 上传目标所属服务。
+        selector: ServiceSelectorDto,
+        /// `name` 或 `task::name` 目标键。
+        target: String,
+    },
     /// 从指定序列号之后读取中心增量事件。
     Events {
         /// 客户端最后处理完成的事件序列号。
@@ -286,6 +322,10 @@ pub enum CenterResponse {
     Pong,
     /// 返回服务列表。
     Services(Vec<ServiceViewDto>),
+    /// 返回当前有效配置中的上传目标摘要。
+    UploadTargets(Vec<UploadTargetViewDto>),
+    /// 返回当前有效配置中的上传目标。
+    UploadTarget(UploadTargetDto),
     /// 返回有界增量事件批次。
     Events(EventBatchDto),
     /// 返回按写入顺序排列的服务状态历史。

@@ -478,3 +478,39 @@ procora.py
 - `procora config effective` 应输出脱敏后的有效配置及来源说明。
 
 具体测试矩阵见[测试策略](testing.md)。
+
+## 声明式远端上传目标
+
+项目可以声明 Service 共享目标，以及位于 Task 命名空间内的目标：
+
+```yaml
+version: 1
+project: demo
+
+uploads:
+  assets:
+    path: shared/assets
+    kind: directory
+    max_bytes: 536870912
+
+tasks:
+  api:
+    command: ./bin/api
+    uploads:
+      release:
+        path: releases/api
+        kind: directory
+        max_bytes: 2147483648
+      config:
+        path: config/api.toml
+        kind: file
+        max_bytes: 1048576
+```
+
+三个目标分别通过 `demo::assets`、`demo::api::release` 和 `demo::api::config` 定位。`path` 必须是 Service 根目录内的非空相对路径，不能包含父目录分量，不能是 Service 根目录本身，也不能进入 `.procora`。`kind` 必须为 `file` 或 `directory`；`max_bytes` 限制归档展开后的普通文件总字节数，默认 2 GiB。
+
+当前版本采用完整替换语义：目录上传不会保留远端目标中的旧文件。客户端拒绝本机符号链接和特殊文件；远端完整接收并校验 gzip tar 的 SHA-256、类型和大小后，先备份旧目标，再通过同目录重命名提交，失败时恢复备份。同一目标有跨进程排他锁。
+
+`procora push ./local --ssh prod` 可以省略选择器。远端会从当前活动声明中筛选来源类型一致且大小上限足够的目标：唯一候选自动采用，多个候选由交互终端选择；脚本环境必须用 `--target` 消除歧义。目标清单只返回选择器、类型和大小上限，不向本机暴露服务器路径。
+
+上传目标属于配置语义，但不会引起 Task 重启。修改目标声明后，先执行 `procora preview demo` 并用返回的 revision 执行 `procora apply demo <revision>`，远端上传只使用 Center 当前已经生效的目标。

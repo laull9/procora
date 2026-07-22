@@ -40,6 +40,7 @@ impl FormConfig {
             text.push('\n');
         }
         append_dependencies(&mut text, self);
+        append_uploads(&mut text, 0, &self.uploads);
         text.push_str("tasks:\n");
         for (id, task) in &self.tasks {
             text.push_str(&format!("  {}:\n", quoted(id)));
@@ -64,6 +65,7 @@ impl FormConfig {
                 yaml_i32_array(&mut text, 4, "success_exit_codes", &task.success_exit_codes);
             }
             append_task_dependencies(&mut text, task);
+            append_uploads(&mut text, 4, &task.uploads);
             yaml_origin_value(&mut text, task, "restart", &task.restart);
             yaml_origin_duration(
                 &mut text,
@@ -97,6 +99,21 @@ impl FormConfig {
         }
         text
     }
+}
+
+/// 以 YAML 兼容 JSON 紧凑保留暂未提供表单控件的上传目标。
+fn append_uploads(
+    text: &mut String,
+    indent: usize,
+    uploads: &std::collections::BTreeMap<String, serde_json::Value>,
+) {
+    if uploads.is_empty() {
+        return;
+    }
+    text.push_str(&" ".repeat(indent));
+    text.push_str("uploads: ");
+    text.push_str(&serde_json::to_string(uploads).expect("上传目标声明可序列化为 YAML 兼容 JSON"));
+    text.push('\n');
 }
 
 /// 以名称数组或条件标量 map 追加紧凑 Task 依赖。

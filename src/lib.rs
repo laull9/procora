@@ -26,5 +26,7 @@ pub mod protocol;
 pub mod source;
 /// SQLite 状态持久化。
 pub mod storage;
+/// 远端声明式文件传输实现。
+mod transfer;
 /// 终端用户界面。
 pub mod tui;

@@ -54,6 +54,8 @@ pub(crate) struct FormConfig {
     pub(crate) task_templates: BTreeMap<String, serde_json::Value>,
     /// 管理依赖集合。
     pub(crate) dependencies: BTreeMap<String, FormDependency>,
+    /// 结构化编辑器暂不修改但必须无损保留的 Service 上传目标。
+    pub(crate) uploads: BTreeMap<String, serde_json::Value>,
     /// Task 集合。
     pub(crate) tasks: BTreeMap<String, FormTask>,
     /// 当前 profile 未准入但保存时必须原样保留的 Task。
@@ -81,6 +83,8 @@ pub(crate) struct FormTask {
     pub(crate) success_exit_codes: Vec<i32>,
     /// 上游 Task 依赖。
     pub(crate) depends_on: BTreeMap<String, FormTaskDependency>,
+    /// 结构化编辑器暂不修改但必须无损保留的 Task 上传目标。
+    pub(crate) uploads: BTreeMap<String, serde_json::Value>,
     /// 重启策略。
     pub(crate) restart: String,
     /// 重启前等待时间。
@@ -187,6 +191,7 @@ impl FormConfig {
             base_directory,
             relativize_template_paths,
         );
+        let uploads = form_raw_values(compiled.upload_declarations, None, |_, _| {});
         let mut task_extends = compiled.task_extends;
         let mut task_env_files = compiled.task_env_files;
         let mut task_inline_env = compiled.task_inline_env;
@@ -235,6 +240,7 @@ impl FormConfig {
                     healthcheck,
                     success_exit_codes,
                     depends_on,
+                    uploads: BTreeMap::new(),
                     restart: restart_text(task.restart).to_owned(),
                     restart_delay_ms: task.restart_delay_ms,
                     max_restarts: task.max_restarts,
@@ -261,6 +267,7 @@ impl FormConfig {
             task_defaults,
             task_templates,
             dependencies,
+            uploads,
             tasks,
             inactive_tasks,
         }
@@ -345,6 +352,12 @@ fn apply_task_declaration(
     }
     if let Some(healthcheck) = value.get("healthcheck") {
         task.healthcheck = serde_json::from_value(healthcheck.clone()).ok();
+    }
+    if let Some(uploads) = value.get("uploads").and_then(serde_json::Value::as_object) {
+        task.uploads = uploads
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
     }
 }
 

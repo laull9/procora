@@ -20,4 +20,5 @@ mod service_name;
 mod task_defaults;
 mod task_graph;
 mod task_templates;
+mod uploads;
 mod variables;

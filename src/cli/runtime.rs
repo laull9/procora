@@ -33,6 +33,19 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         Some(Command::TempRun { path }) => run_temporary(path.as_deref()),
         Some(Command::Deps { path, check }) => project::dependencies(&path, check),
         Some(Command::Clean { path }) => project::clean(path.as_deref()),
+        Some(Command::Push {
+            source,
+            target,
+            ssh,
+            remote_bin,
+            batch,
+        }) => crate::transfer::push(
+            &source,
+            target.as_deref(),
+            ssh.as_deref(),
+            &remote_bin,
+            batch,
+        ),
         Some(Command::Up) => up(),
         Some(Command::Down) => down(),
         Some(Command::Status) => status(),
@@ -73,6 +86,11 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             Ok(())
         }
         Some(Command::Mcp) => crate::mcp::run_stdio(),
+        Some(Command::SshProbe) => {
+            crate::transfer::probe();
+            Ok(())
+        }
+        Some(Command::Receive) => crate::transfer::receive(),
         Some(Command::Daemon { endpoint, database }) => {
             run_center_server(&endpoint, &database).context("全局 Procora 服务器退出")
         }

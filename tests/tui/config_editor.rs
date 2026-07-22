@@ -673,6 +673,27 @@ fn form_roundtrip_preserves_health_and_restart_limits() {
 }
 
 #[test]
+// 结构化编辑保存会保留暂未提供表单控件的上传目标声明。
+fn form_roundtrip_preserves_upload_targets() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\nuploads:\n  assets:\n    path: shared/assets\n    kind: directory\ntasks:\n  api:\n    command: api\n    uploads:\n      config:\n        path: config/api.toml\n        kind: file\n        max_bytes: 1024\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_str(&saved, ConfigFormat::Yaml).unwrap();
+    assert!(compiled.upload_targets.contains_key("assets"));
+    assert!(compiled.upload_targets.contains_key("api::config"));
+    assert_eq!(compiled.upload_targets["api::config"].max_bytes, 1024);
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 // 结构化编辑保存不会丢失HTTP健康检查字段。
 fn form_roundtrip_preserves_http_health_check() {
     let path = temporary_config();

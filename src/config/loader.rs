@@ -7,7 +7,7 @@ use crate::core::{ProjectSpec, TaskGraph};
 
 use super::{
     ConfigDiagnostic, ConfigError, ConfigFormat, ManagedDependencies, TaskConfigOrigins,
-    TaskDefaultsSpec, raw::RawProject,
+    TaskDefaultsSpec, UploadTargetSpec, raw::RawProject,
 };
 
 mod include;
@@ -52,6 +52,10 @@ pub struct CompiledProject {
     pub graph: TaskGraph,
     /// 已通过字段与来源校验的项目级管理依赖。
     pub dependencies: ManagedDependencies,
+    /// 以 `name` 或 `task::name` 为键的声明式上传目标。
+    pub upload_targets: BTreeMap<String, UploadTargetSpec>,
+    /// 顶层上传目标的原始声明，供结构化编辑器保留。
+    pub(crate) upload_declarations: BTreeMap<String, super::upload::RawUploadTarget>,
     /// 已合并到每个 Task 的项目级默认环境变量。
     pub project_env: BTreeMap<String, String>,
     /// 不包含 profile 覆盖的项目级环境声明。
@@ -145,7 +149,7 @@ fn compile_raw(
     raw: RawProject,
     base_directory: Option<&Path>,
 ) -> Result<CompiledProject, ConfigError> {
-    let (spec, dependencies, declarations) =
+    let (spec, dependencies, upload_targets, declarations) =
         raw.normalize(base_directory).map_err(validation_error)?;
     let graph = TaskGraph::compile(&spec)?;
     Ok(CompiledProject {
@@ -155,6 +159,8 @@ fn compile_raw(
         spec,
         graph,
         dependencies,
+        upload_targets,
+        upload_declarations: declarations.uploads,
         project_env: declarations.project_env,
         declared_project_env: declarations.declared_project_env,
         task_defaults: declarations.task_defaults,

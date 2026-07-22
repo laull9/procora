@@ -12,6 +12,7 @@ mod origin;
 mod python;
 mod raw;
 mod task_defaults;
+mod upload;
 
 pub use dependency::{
     DependencyDownloadSpec, DependencyKind, DependencySshSpec, DependencyVerifySpec,
@@ -31,3 +32,4 @@ pub use origin::{TaskConfigOrigins, ValueOrigin};
 pub use python::{PythonConfigRunner, is_python_config};
 pub(crate) use raw::split_command_text;
 pub use task_defaults::TaskDefaultsSpec;
+pub use upload::{UploadKind, UploadTargetSpec};

@@ -57,6 +57,7 @@ fn help_command_runs() {
     assert!(stdout.contains("edit"));
     assert!(stdout.contains("deps"));
     assert!(stdout.contains("clean"));
+    assert!(stdout.contains("push"));
     assert!(stdout.contains("up"));
     assert!(stdout.contains("down"));
     assert!(stdout.contains("status"));
@@ -381,6 +382,61 @@ fn clean_arguments_remain_stable() {
     assert!(matches!(
         explicit.command,
         Some(Command::Clean { path: Some(path) }) if path == std::path::Path::new("./service/procora.yaml")
+    ));
+}
+
+#[test]
+// push使用显式声明目标并允许配置SSH登录回退策略。
+fn push_arguments_remain_stable() {
+    let parsed = Cli::try_parse_from([
+        "procora",
+        "push",
+        "./dist",
+        "--target",
+        "demo::api::release",
+        "--ssh",
+        "prod",
+        "--batch",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Push {
+            source,
+            target: Some(target),
+            ssh: Some(ssh),
+            remote_bin,
+            batch: true,
+        })
+            if source == std::path::Path::new("./dist")
+                && target == "demo::api::release"
+                && ssh == "prod"
+                && remote_bin == "procora"
+    ));
+}
+
+#[test]
+// push允许省略声明目标，由远端在同一SSH会话中发现目标。
+fn push_target_is_optional_for_remote_discovery() {
+    let parsed = Cli::try_parse_from([
+        "procora",
+        "push",
+        "./dist",
+        "--ssh",
+        "prod",
+        "--remote-bin",
+        "~/.local/bin/procora",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Push {
+            target: None,
+            remote_bin,
+            ..
+        }) if remote_bin == "~/.local/bin/procora"
     ));
 }
 

@@ -163,6 +163,7 @@ impl RawTaskDefaults {
             healthcheck: None,
             success_exit_codes: self.success_exit_codes.clone(),
             depends_on: RawDependencies::default(),
+            uploads: BTreeMap::new(),
             restart: self.restart,
             restart_delay_ms: self.restart_delay_ms,
             max_restarts: self.max_restarts,

@@ -1,5 +1,28 @@
 # CLI 与全局 Procora 服务器语义
 
+## 远端声明式上传
+
+服务端配置可在 Service 或 Task 下声明 `uploads`，客户端以稳定选择器上传而不暴露远端路径：
+
+```bash
+# 远端只有一个兼容目标时自动选择
+procora push ./assets --ssh prod
+
+# 显式选择，SSH 别名可从 Service 名 demo 推断
+procora push ./assets --target demo::assets
+procora push ./assets --target demo::assets --ssh prod
+procora push ./target/release/api --target demo::api::release --ssh user@server
+
+# 远端非交互 shell 找不到 procora 时显式给出安装路径
+procora push ./assets --ssh prod --remote-bin ~/.local/bin/procora
+```
+
+SSH 目标按 `--ssh`、`PROCORA_SSH_TARGET`、选择器中的 Service 名依次推断；同时省略 `--target` 和 SSH 地址时，交互终端会直接询问 SSH 目标。省略 `--target` 后，远端根据来源是文件还是目录及未压缩大小筛选活动目标：只有一个时自动选择，多个时列出编号供本机选择；非交互环境会列出选择器并要求用 `--target` 明确指定。
+
+目标发现、选择和归档传输在同一条 SSH 会话内完成，密码认证不会因预探测重复发生。Procora 先以 `BatchMode=yes` 和严格 known_hosts 自动认证；只有 OpenSSH 以 255 表示连接或认证失败，且标准输入/错误连接终端时，才提示用户修改 SSH 目标并启动普通 OpenSSH。远端 Procora 缺失、Center 离线或目标配置错误不会被误判为密码问题。密码提示完全由 OpenSSH 从控制终端处理，不支持密码命令行参数，也不会写入 Procora 配置或日志。`--batch` 禁止登录和目标选择交互，适合 CI。
+
+远端必须运行同一用户的 Center，上传目标从当前已经 apply 的有效配置解析。只保存在磁盘、尚未 apply 的候选声明不会提前生效。默认远端命令为 `procora`；如果 SSH 非交互 shell 的 `PATH` 不包含安装目录，可用 `--remote-bin ~/.local/bin/procora` 指定不含空格的命令路径。
+
 ## 1. 固定层级
 
 Procora 的内部模型固定为 `Center → Service → Task`；界面和命令行将 Center 称为“全局 Procora 服务器”：

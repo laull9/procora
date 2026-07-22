@@ -107,6 +107,23 @@ pub enum Command {
         /// 服务目录或配置文件；省略时使用当前目录。
         path: Option<PathBuf>,
     },
+    /// 通过 SSH 上传本机文件或目录到远端配置声明的目标。
+    Push {
+        /// 本机普通文件或目录。
+        source: PathBuf,
+        /// `service::name` 或 `service::task::name` 上传目标。
+        #[arg(long, value_name = "SELECTOR")]
+        target: Option<String>,
+        /// SSH config 别名或 `[user@]host`；省略时依次使用环境变量和服务名推断。
+        #[arg(long, value_name = "SSH_TARGET")]
+        ssh: Option<String>,
+        /// 远端 Procora 命令名或无空格路径。
+        #[arg(long, value_name = "PATH", default_value = "procora")]
+        remote_bin: String,
+        /// 禁止人工目标与密码登录回退，适合 CI。
+        #[arg(long)]
+        batch: bool,
+    },
     /// 启动当前用户的全局 Procora 服务器。
     Up,
     /// 正常关闭当前用户的全局 Procora 服务器。
@@ -194,6 +211,12 @@ pub enum Command {
     },
     /// 通过标准输入输出运行本地 MCP 服务。
     Mcp,
+    /// 回应本机 Procora 的 SSH 兼容性探测。
+    #[command(name = "__ssh-probe", hide = true)]
+    SshProbe,
+    /// 从 SSH 标准输入接收并提交声明式上传目标。
+    #[command(name = "__receive", hide = true)]
+    Receive,
     /// 运行内部全局服务器进程。
     #[command(name = "__daemon", hide = true)]
     Daemon {
