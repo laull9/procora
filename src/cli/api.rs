@@ -2,6 +2,8 @@
 
 use std::{
     env,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -10,12 +12,50 @@ use serde::Serialize;
 
 use crate::{
     config::discover_path,
+    core::ServiceName,
     daemon::{CenterClient, ServiceHost},
     protocol::{
         CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ServiceActionDto,
         ServiceSelectorDto, ServiceStatusRecordDto, ServiceViewDto,
     },
 };
+
+/// 在已有目录中排他创建供总览向导继续编辑的最小 YAML 配置。
+///
+/// # Errors
+///
+/// 当名称无效、目录不可用、目标已存在或配置无法完整写入时返回错误。
+pub fn initialize_managed_config(directory: &Path, name: &str) -> anyhow::Result<PathBuf> {
+    let _: ServiceName = name.parse()?;
+    if !directory.is_dir() {
+        bail!("托管路径 `{}` 不是已有目录", directory.display());
+    }
+    let path = directory.join("procora.yaml");
+    if path.exists() {
+        bail!("配置文件 `{}` 已存在，拒绝覆盖", path.display());
+    }
+    let content =
+        format!("version: 1\nproject: {name}\n\n# 在编辑管理页按 n 新建 Task。\ntasks: {{}}\n");
+    let mut created = false;
+    let result = (|| -> anyhow::Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .with_context(|| format!("无法创建配置 `{}`", path.display()))?;
+        created = true;
+        file.write_all(content.as_bytes())
+            .with_context(|| format!("无法写入配置 `{}`", path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("无法同步配置 `{}`", path.display()))?;
+        Ok(())
+    })();
+    if result.is_err() && created {
+        let _ = fs::remove_file(&path);
+    }
+    result?;
+    Ok(path)
+}
 
 use super::center_runtime;
 

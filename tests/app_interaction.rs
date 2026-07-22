@@ -99,6 +99,20 @@ fn service_action_keys_are_ignored_without_permission() {
 }
 
 #[test]
+// 只有具有本地配置入口的中心服务才响应内嵌编辑快捷键。
+fn config_edit_key_requires_explicit_capability() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_key(KeyCode::Char('e'));
+    assert!(!app.take_pending_config_edit());
+
+    app.set_config_edit_allowed(true);
+    app.handle_key(KeyCode::Char('e'));
+    assert!(app.take_pending_config_edit());
+    assert!(!app.take_pending_config_edit());
+}
+
+#[test]
 // 退出键只改变本地退出状态。
 fn quit_key_only_changes_local_exit_state() {
     let mut app = App::new(support::snapshot());

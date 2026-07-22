@@ -92,6 +92,8 @@ fn exit_confirmation_can_save_before_quitting() {
     press(&mut editor, KeyCode::Enter);
 
     assert!(editor.should_quit());
+    assert!(editor.take_saved());
+    assert!(!editor.take_saved());
     assert!(fs::read_to_string(&path).unwrap().contains("# schema"));
     fs::remove_file(path).unwrap();
 }

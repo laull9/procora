@@ -11,6 +11,7 @@ use ratatui::Frame;
 use super::text_view;
 use super::ui;
 
+mod config;
 mod logs;
 
 /// 单次日志翻页移动的逻辑行数。
@@ -111,6 +112,7 @@ pub struct App {
     active_tab: ActiveTab,
     should_quit: bool,
     pending_action: Option<ServiceActionDto>,
+    config_edit: config::ConfigEditState,
     feedback: Option<String>,
     control_allowed: bool,
     exit_navigation: ExitNavigation,
@@ -137,10 +139,11 @@ impl App {
             active_tab: ActiveTab::default(),
             should_quit: false,
             pending_action: None,
+            config_edit: config::ConfigEditState::default(),
             feedback: None,
             control_allowed: false,
             exit_navigation: ExitNavigation::default(),
-            plain_mode: terminal_plain_mode(),
+            plain_mode: super::ui_environment::terminal_plain_mode(),
             key_hint_platform: if cfg!(target_os = "macos") {
                 KeyHintPlatform::MacOs
             } else {
@@ -174,6 +177,7 @@ impl App {
         if self.log_search_input.is_some() {
             return self.handle_log_search_input(key);
         }
+        let previous_config_edit = self.config_edit;
         let previous = (
             self.selected,
             self.active_tab,
@@ -238,23 +242,27 @@ impl App {
             KeyCode::Char('r') if self.control_allowed => {
                 self.pending_action = Some(ServiceActionDto::Restart);
             }
+            KeyCode::Char('e') if self.config_edit == config::ConfigEditState::Ready => {
+                self.config_edit = config::ConfigEditState::Pending;
+            }
             _ => {}
         }
-        previous
-            != (
-                self.selected,
-                self.active_tab,
-                self.should_quit,
-                self.pending_action,
-                self.current_log_scroll(),
-                self.horizontal_scroll,
-                self.log_query.clone(),
-                self.log_search_input.clone(),
-                self.log_filter_mode,
-                self.log_clear_confirmation.clone(),
-                self.pending_log_clear.clone(),
-                self.current_log_match_index(),
-            )
+        previous_config_edit != self.config_edit
+            || previous
+                != (
+                    self.selected,
+                    self.active_tab,
+                    self.should_quit,
+                    self.pending_action,
+                    self.current_log_scroll(),
+                    self.horizontal_scroll,
+                    self.log_query.clone(),
+                    self.log_search_input.clone(),
+                    self.log_filter_mode,
+                    self.log_clear_confirmation.clone(),
+                    self.pending_log_clear.clone(),
+                    self.current_log_match_index(),
+                )
     }
 
     /// 处理带修饰键的终端按键，并把 Ctrl-C 统一解释为正常退出请求。
@@ -489,11 +497,4 @@ impl App {
             self.feedback = None;
         }
     }
-}
-
-/// 根据环境变量判断是否启用低能力终端兼容模式。
-pub(super) fn terminal_plain_mode() -> bool {
-    std::env::var_os("PROCORA_TUI_PLAIN").is_some()
-        || std::env::var_os("NO_COLOR").is_some()
-        || std::env::var("TERM").is_ok_and(|term| term.eq_ignore_ascii_case("dumb"))
 }

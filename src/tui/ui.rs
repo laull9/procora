@@ -292,10 +292,14 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     );
     let controls = if app.active_tab() == ActiveTab::Logs {
         log_controls(app, area.width)
+    } else if area.width < 64 && live && app.control_allowed() && app.config_edit_allowed() {
+        "j/k 选择  Tab 切页  e 编辑  s/x/r 控制  q 退出"
     } else if area.width < 64 && live && app.control_allowed() {
         "j/k 选择  Tab 切页  s/x/r 控制  q 退出"
     } else if area.width < 64 {
         "j/k 选择  Tab 切页  1/2/3 直达  q 退出"
+    } else if live && app.control_allowed() && app.config_edit_allowed() {
+        "↑↓/jk 选择  Tab 切页  e 编辑配置  s 启动  x 停止  r 重启  q/Esc 退出"
     } else if live && app.control_allowed() {
         "↑↓/jk 选择  Tab 切页  ←→ 横移文本  s 启动  x 停止  r 重启  q/Esc 退出"
     } else {
@@ -372,11 +376,17 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         lines.push(Line::from("无 Task"));
     }
-    lines.push(Line::from(if app.back_navigation() {
-        "q/Esc 返回 · 放大终端查看详情"
-    } else {
-        "q/Esc 退出 · 放大终端查看详情"
-    }));
+    lines.push(Line::from(
+        if app.back_navigation() && app.config_edit_allowed() {
+            "e 编辑配置 · q/Esc 返回 · 放大终端查看详情"
+        } else if app.back_navigation() {
+            "q/Esc 返回 · 放大终端查看详情"
+        } else if app.config_edit_allowed() {
+            "e 编辑配置 · q/Esc 退出 · 放大终端查看详情"
+        } else {
+            "q/Esc 退出 · 放大终端查看详情"
+        },
+    ));
     frame.render_widget(Paragraph::new(lines), area);
 }
 

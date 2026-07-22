@@ -5,9 +5,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use ratatui::Frame;
 
 use super::{
-    app::terminal_plain_mode,
     overview_collection::{self, OverviewSort},
     overview_ui, text_view,
+    ui_environment::terminal_plain_mode,
 };
 
 /// 总览页支持的服务管理动作。
@@ -30,6 +30,8 @@ pub enum OverviewExit {
     Quit,
     /// 打开指定服务的详情页。
     OpenService(String),
+    /// 打开新建托管服务向导。
+    CreateService,
 }
 
 /// 全局中心服务总览的交互状态。
@@ -96,6 +98,9 @@ impl OverviewApp {
                 self.exit = self
                     .selected_service()
                     .map(|service| OverviewExit::OpenService(service.name.clone()));
+            }
+            KeyCode::Char('n') if self.control_allowed => {
+                self.exit = Some(OverviewExit::CreateService);
             }
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),

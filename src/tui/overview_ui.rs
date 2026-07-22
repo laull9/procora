@@ -164,7 +164,7 @@ fn render_service_details(
     let content = service.map_or_else(
         || {
             if app.all_service_count() == 0 {
-                Text::from("尚未注册服务。\n使用 `procora add <path>` 添加服务。")
+                Text::from("尚未注册服务。\n按 n 选择托管目录并快速创建服务。")
             } else {
                 Text::from("没有匹配筛选的服务。\n按 / 修改或清空筛选条件。")
             }
@@ -211,11 +211,11 @@ fn render_service_details(
 /// 绘制总览操作提示和反馈。
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
     let controls = if area.width < 72 && app.control_allowed() {
-        "j/k 选  Enter 详情  / 筛选  o 排序  s/x/r 控制  d 移除  q 退出"
+        "j/k 选  Enter 详情  n 新建  / 筛选  s/x/r 控制  d 移除  q 退出"
     } else if area.width < 72 {
         "j/k 选择  Enter 详情  / 筛选  o 排序  q 退出"
     } else if app.control_allowed() {
-        "↑↓/jk 选择  Enter 详情  / 筛选  o 排序  O 方向  s/x/r 控制  d 移除  ←→ 横移  q/Esc 退出"
+        "↑↓/jk 选择  Enter 详情  n 新建  / 筛选  o 排序  O 方向  s/x/r 控制  d 移除  ←→ 横移  q/Esc 退出"
     } else {
         "↑↓/jk 选择  Enter 详情  / 筛选  o 排序  O 方向  ←→ 横移  q/Esc 退出"
     };
@@ -272,7 +272,11 @@ fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
             "没有匹配筛选的服务"
         }));
     }
-    lines.push(Line::from("Enter 详情 · q/Esc 退出"));
+    lines.push(Line::from(if app.control_allowed() {
+        "n 新建 · q/Esc 退出"
+    } else {
+        "Enter 详情 · q/Esc 退出"
+    }));
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)

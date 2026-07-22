@@ -44,6 +44,7 @@ pub struct ConfigEditor {
     pub(super) should_quit: bool,
     pub(super) exit_prompt: Option<SelectionState<EditorExitChoice>>,
     pub(super) message: String,
+    saved: bool,
     mode: EditorMode,
     form: Option<FormState>,
     source: EditorSource,
@@ -97,6 +98,7 @@ impl ConfigEditor {
             should_quit: false,
             exit_prompt: None,
             message: "编辑后按 Ctrl-S 校验并保存".to_owned(),
+            saved: false,
             mode: EditorMode::Text,
             form: None,
             source: EditorSource::Standalone,
@@ -197,6 +199,27 @@ impl ConfigEditor {
     /// 返回当前状态提示。
     pub fn message(&self) -> &str {
         &self.message
+    }
+
+    /// 取出一次成功写盘事件，供内嵌服务页继续应用候选配置。
+    pub fn take_saved(&mut self) -> bool {
+        std::mem::take(&mut self.saved)
+    }
+
+    /// 保持编辑页打开并展示服务端应用结果。
+    pub fn keep_open_with_message(&mut self, message: impl Into<String>) {
+        self.should_quit = false;
+        self.message = message.into();
+    }
+
+    /// 更新编辑页反馈但保留当前退出意图。
+    pub fn set_message(&mut self, message: impl Into<String>) {
+        self.message = message.into();
+    }
+
+    /// 更新内嵌服务编辑器的初始操作说明。
+    pub fn mark_live_management(&mut self) {
+        "服务配置管理：Ctrl-S 校验、保存并实时应用，Esc 返回服务页".clone_into(&mut self.message);
     }
 
     /// 返回当前配置文件路径。
@@ -324,6 +347,7 @@ impl ConfigEditor {
             Ok(compiled) => match fs::write(&self.path, text) {
                 Ok(()) => {
                     self.dirty = false;
+                    self.saved = true;
                     self.message = format!(
                         "已保存：{} 个任务，{} 个管理依赖",
                         compiled.spec.tasks.len(),

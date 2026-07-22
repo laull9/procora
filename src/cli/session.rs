@@ -12,6 +12,8 @@ use crate::protocol::{
 };
 use crate::tui::{LiveSession, LogUpdate, OverviewAction, OverviewExit, OverviewSession};
 
+mod new_service;
+
 /// 运行全局中心的服务总览，并允许往返进入单服务详情。
 pub(super) fn run_center_overview(
     client: &CenterClient,
@@ -26,6 +28,17 @@ pub(super) fn run_center_overview(
     loop {
         match crate::tui::run_overview_live(&mut app, control_allowed, &mut overview_session)? {
             OverviewExit::Quit => return Ok(()),
+            OverviewExit::CreateService => {
+                let current = std::env::current_dir().map_err(anyhow::Error::from)?;
+                if let Some(choice) = crate::tui::run_new_service_wizard(current)?
+                    && let Err(error) = new_service::create(client, choice)
+                {
+                    app.set_feedback(format!("新建服务失败：{error:#}"));
+                }
+                overview_session.last_services =
+                    request_services(client).map_err(anyhow::Error::from)?;
+                app.replace_services(overview_session.last_services.clone());
+            }
             OverviewExit::OpenService(service_name) => {
                 let selector = ServiceSelectorDto::Name(service_name.clone());
                 let snapshot = request_snapshot(client, &selector).unwrap_or(ProjectSnapshot {
@@ -41,6 +54,7 @@ pub(super) fn run_center_overview(
                     hello.event_sequence,
                     hello.control_allowed,
                     true,
+                    false,
                 )?;
                 overview_session.last_services =
                     request_services(client).map_err(anyhow::Error::from)?;
@@ -68,6 +82,7 @@ pub(super) fn run_center_tui(
         event_sequence,
         control_allowed,
         false,
+        false,
     )
 }
 
@@ -79,16 +94,22 @@ fn run_center_tui_mode(
     event_sequence: u64,
     control_allowed: bool,
     back_navigation: bool,
+    start_in_editor: bool,
 ) -> anyhow::Result<()> {
+    let config_path = request_services(&client)?
+        .into_iter()
+        .find(|service| service.name == snapshot.project)
+        .map(|service| service.config_path);
     let mut session = CenterTuiSession {
         client,
         selector,
+        config_path,
         event_sequence,
         resource_schedule: ResourceSnapshotSchedule::new(Instant::now()),
         log_cursors: BTreeMap::new(),
     };
     if back_navigation {
-        crate::tui::run_live_back(snapshot, control_allowed, &mut session)?;
+        crate::tui::run_live_back(snapshot, control_allowed, &mut session, start_in_editor)?;
     } else {
         crate::tui::run_live(snapshot, control_allowed, &mut session)?;
     }
@@ -266,6 +287,7 @@ impl LiveSession for EmbeddedTuiSession<'_> {
 struct CenterTuiSession {
     client: CenterClient,
     selector: ServiceSelectorDto,
+    config_path: Option<std::path::PathBuf>,
     event_sequence: u64,
     resource_schedule: ResourceSnapshotSchedule,
     log_cursors: BTreeMap<TaskId, LogCursorDto>,
@@ -314,6 +336,10 @@ impl CenterTuiSession {
 }
 
 impl LiveSession for CenterTuiSession {
+    fn config_path(&self) -> Option<&std::path::Path> {
+        self.config_path.as_deref()
+    }
+
     fn poll_snapshot(&mut self) -> io::Result<Option<ProjectSnapshot>> {
         let response = self
             .client
@@ -392,6 +418,44 @@ impl LiveSession for CenterTuiSession {
             }
             CenterResponse::Error { message } => Err(io::Error::other(message)),
             response => Err(io::Error::other(format!("意外日志清空响应: {response:?}"))),
+        }
+    }
+
+    fn apply_saved_config(&mut self) -> io::Result<ProjectSnapshot> {
+        let candidate = match self
+            .client
+            .request(&CenterRequest::PreviewConfig {
+                selector: self.selector.clone(),
+            })
+            .map_err(io::Error::other)?
+        {
+            CenterResponse::ConfigCandidate(candidate) => candidate,
+            CenterResponse::Error { message } => return Err(io::Error::other(message)),
+            response => {
+                return Err(io::Error::other(format!("意外配置预览响应: {response:?}")));
+            }
+        };
+        if !candidate.valid {
+            return Err(io::Error::other(
+                candidate
+                    .message
+                    .unwrap_or_else(|| "候选配置无效".to_owned()),
+            ));
+        }
+        let revision = candidate
+            .revision
+            .ok_or_else(|| io::Error::other("候选配置缺少修订标识"))?;
+        match self
+            .client
+            .request(&CenterRequest::ApplyConfig {
+                selector: self.selector.clone(),
+                revision,
+            })
+            .map_err(io::Error::other)?
+        {
+            CenterResponse::Service(_) => self.snapshot(),
+            CenterResponse::Error { message } => Err(io::Error::other(message)),
+            response => Err(io::Error::other(format!("意外配置应用响应: {response:?}"))),
         }
     }
 }

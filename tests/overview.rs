@@ -114,6 +114,19 @@ fn management_keys_queue_actions_with_remove_confirmation() {
 }
 
 #[test]
+// 总览的新建快捷键只在允许控制时打开创建向导。
+fn create_key_requires_control_capability() {
+    let mut app = OverviewApp::new(Vec::new());
+
+    app.handle_key(KeyCode::Char('n'));
+    assert_eq!(app.take_exit(), None);
+
+    app.set_control_allowed(true);
+    app.handle_key(KeyCode::Char('n'));
+    assert_eq!(app.take_exit(), Some(OverviewExit::CreateService));
+}
+
+#[test]
 // 服务刷新后按稳定名称保持选择，已删除项回退到有效索引。
 fn refresh_preserves_stable_selection() {
     let mut app = OverviewApp::new(vec![
@@ -221,13 +234,15 @@ fn overview_detail_values_align_in_terminal_columns() {
 #[test]
 // 空列表和紧凑终端都保留清晰恢复路径。
 fn empty_and_compact_overview_keep_recovery_hints() {
-    let app = OverviewApp::new(Vec::new());
+    let mut app = OverviewApp::new(Vec::new());
+    app.set_control_allowed(true);
 
     let wide = render_text(&app, 80, 18);
     assert!(wide.contains("尚未注册服务"));
-    assert!(wide.contains("procoraadd<path>"));
+    assert!(wide.contains("按n选择托管目录"));
 
     let compact = render_text(&app, 29, 7);
     assert!(compact.contains("服务总览"));
+    assert!(compact.contains("n新建"));
     assert!(compact.contains("q/Esc退出"));
 }

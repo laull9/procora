@@ -22,21 +22,26 @@ mod config_help_ui;
 mod config_highlight;
 mod config_map_dialog;
 mod config_profile;
+mod config_runner;
 mod config_task_defaults;
 mod config_task_dialog;
 mod config_ui;
 mod config_ui_support;
+mod live_editor;
 mod log_view;
+mod new_service_wizard;
 mod overview_app;
 mod overview_collection;
 mod overview_ui;
 mod selection;
 mod text_view;
 mod ui;
+mod ui_environment;
 mod ui_support;
 
 use std::{
     io,
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -52,9 +57,12 @@ const INPUT_MAX_WAIT: Duration = Duration::from_millis(50);
 
 pub use app::{ActiveTab, App};
 pub use config_editor::ConfigEditor;
+pub use config_runner::edit_config;
 pub use overview_app::{OverviewAction, OverviewApp, OverviewExit};
 pub use overview_collection::OverviewSort;
 pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline};
+
+pub(crate) use new_service_wizard::{NewServiceChoice, run as run_new_service_wizard};
 
 /// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
 struct MouseCaptureGuard;
@@ -85,44 +93,13 @@ pub struct LogUpdate {
     pub gap: bool,
 }
 
-/// 打开一个带字段引导和保存前校验的配置编辑页面。
-///
-/// # Errors
-///
-/// 当配置文件无法读取或终端无法切换到 TUI 时返回错误。
-pub fn edit_config(path: &std::path::Path) -> io::Result<()> {
-    let mut editor = ConfigEditor::open(path)?;
-    ratatui::run(|terminal| {
-        let mut dirty = true;
-        let mut last_auto_scroll = Instant::now();
-        loop {
-            if dirty {
-                terminal.draw(|frame| editor.render(frame))?;
-                dirty = false;
-            }
-            if event::poll(INPUT_MAX_WAIT)? {
-                match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        editor.handle_key(key);
-                        dirty = true;
-                    }
-                    Event::Resize(_, _) => dirty = true,
-                    _ => {}
-                }
-            }
-            let now = Instant::now();
-            let elapsed = now.saturating_duration_since(last_auto_scroll);
-            last_auto_scroll = now;
-            dirty |= editor.advance_auto_scroll(elapsed);
-            if editor.should_quit() {
-                break Ok(());
-            }
-        }
-    })
-}
-
 /// TUI 与一个中心服务器服务会话之间的最小交互接口。
 pub trait LiveSession {
+    /// 返回当前中心服务可以直接编辑的本地配置入口。
+    fn config_path(&self) -> Option<&Path> {
+        None
+    }
+
     /// 检查增量事件，并在数据变化或需要重同步时返回新快照。
     ///
     /// # Errors
@@ -150,6 +127,18 @@ pub trait LiveSession {
     ///
     /// 当服务不可用或日志文件无法更新时返回错误。
     fn clear_log(&mut self, task_id: &TaskId) -> io::Result<()>;
+
+    /// 预览、校验并应用刚由内嵌编辑器写入的配置。
+    ///
+    /// # Errors
+    ///
+    /// 当会话不支持配置应用或中心拒绝候选修订时返回错误。
+    fn apply_saved_config(&mut self) -> io::Result<ProjectSnapshot> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "当前会话不支持内嵌配置管理",
+        ))
+    }
 }
 
 /// 总览 TUI 与全局中心服务器之间的最小交互接口。
@@ -304,8 +293,9 @@ pub(crate) fn run_live_back(
     snapshot: ProjectSnapshot,
     control_allowed: bool,
     session: &mut dyn LiveSession,
+    start_in_editor: bool,
 ) -> io::Result<()> {
-    run_live_mode(snapshot, control_allowed, session, true)
+    run_live_mode_with_editor(snapshot, control_allowed, session, true, start_in_editor)
 }
 
 /// 按退出导航语义运行实时服务页面。
@@ -315,45 +305,83 @@ fn run_live_mode(
     session: &mut dyn LiveSession,
     back_navigation: bool,
 ) -> io::Result<()> {
+    run_live_mode_with_editor(snapshot, control_allowed, session, back_navigation, false)
+}
+
+/// 按退出导航语义运行实时服务页，并可直接进入配置管理。
+fn run_live_mode_with_editor(
+    snapshot: ProjectSnapshot,
+    control_allowed: bool,
+    session: &mut dyn LiveSession,
+    back_navigation: bool,
+    start_in_editor: bool,
+) -> io::Result<()> {
     const SNAPSHOT_INTERVAL: Duration = Duration::from_millis(500);
     const LOG_INTERVAL: Duration = Duration::from_millis(50);
-    const LOG_CATCH_UP_BATCHES: usize = 16;
 
     let mut app = App::new(snapshot);
     app.set_control_allowed(control_allowed);
     app.set_back_navigation(back_navigation);
+    let config_path = session.config_path().map(Path::to_path_buf);
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         let mut next_snapshot = Instant::now();
         let mut next_log = Instant::now();
         let mut last_auto_scroll = Instant::now();
+        let mut editor = live_editor::initial(
+            config_path.as_deref(),
+            control_allowed,
+            start_in_editor,
+            &mut app,
+        );
         loop {
             if dirty {
-                terminal.draw(|frame| app.render(frame))?;
+                terminal.draw(|frame| {
+                    if let Some(editor) = &editor {
+                        editor.render(frame);
+                    } else {
+                        app.render(frame);
+                    }
+                })?;
                 dirty = false;
             }
 
             let now = Instant::now();
             let mut deadline = next_snapshot;
-            if app.active_tab() == ActiveTab::Logs {
+            if editor.is_none() && app.active_tab() == ActiveTab::Logs {
                 deadline = deadline.min(next_log);
             }
             let timeout = deadline.saturating_duration_since(now).min(INPUT_MAX_WAIT);
             if event::poll(timeout)? {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        let page_lines = log_viewport_lines(terminal.size()?.height);
-                        dirty |= app.handle_key_event_with_log_page(key, page_lines);
+                        if let Some(editor) = &mut editor {
+                            editor.handle_key(key);
+                            dirty = true;
+                        } else {
+                            let page_lines = log_viewport_lines(terminal.size()?.height);
+                            dirty |= app.handle_key_event_with_log_page(key, page_lines);
+                        }
                     }
-                    Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
+                    Event::Mouse(mouse) if editor.is_none() => dirty |= app.handle_mouse(mouse),
                     Event::Resize(_, _) => dirty = true,
                     _ => {}
                 }
             }
-            if app.should_quit() {
+            if editor.is_none() && app.should_quit() {
                 break Ok(());
             }
+
+            if app.take_pending_config_edit() {
+                editor = live_editor::open(config_path.as_deref(), &mut app);
+                dirty = true;
+            }
+
+            if let Some(active_editor) = &mut editor {
+                dirty |= live_editor::apply_saved(active_editor, &mut app, session);
+            }
+            dirty |= live_editor::close_if_requested(&mut editor);
 
             if let Some(action) = app.take_pending_action() {
                 match session.manage(action) {
@@ -378,39 +406,21 @@ fn run_live_mode(
             let now = Instant::now();
             if now >= next_snapshot {
                 next_snapshot = now + SNAPSHOT_INTERVAL;
-                match session.poll_snapshot() {
-                    Ok(Some(snapshot)) => dirty |= app.replace_snapshot(snapshot),
-                    Ok(None) => {}
-                    Err(error) => dirty |= app.set_feedback(format!("连接异常：{error}")),
-                }
+                dirty |= live_editor::poll_snapshot(&mut app, session, editor.is_some());
             }
 
-            if app.active_tab() == ActiveTab::Logs && now >= next_log {
+            if editor.is_none() && app.active_tab() == ActiveTab::Logs && now >= next_log {
                 next_log = now + LOG_INTERVAL;
-                if let Some(task_id) = app.selected_task().map(|task| task.task_id.clone()) {
-                    let mut bytes = Vec::new();
-                    let mut gap = false;
-                    for _ in 0..LOG_CATCH_UP_BATCHES {
-                        match session.poll_log(&task_id) {
-                            Ok(Some(update)) => {
-                                bytes.extend_from_slice(&update.bytes);
-                                gap |= update.gap;
-                            }
-                            Ok(None) => break,
-                            Err(error) => {
-                                dirty |= app.set_feedback(format!("日志读取异常：{error}"));
-                                break;
-                            }
-                        }
-                    }
-                    dirty |= app.append_log(task_id, &bytes, gap);
-                }
+                dirty |= live_editor::poll_log(&mut app, session);
             }
 
             let auto_now = Instant::now();
             let auto_elapsed = auto_now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = auto_now;
-            dirty |= app.advance_auto_scroll(auto_elapsed);
+            dirty |= editor.as_mut().map_or_else(
+                || app.advance_auto_scroll(auto_elapsed),
+                |editor| editor.advance_auto_scroll(auto_elapsed),
+            );
         }
     })
 }
