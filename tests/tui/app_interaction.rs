@@ -1,7 +1,5 @@
 //! TUI 键盘导航和选择状态测试。
 
-mod support;
-
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -9,6 +7,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use procora::core::TaskId;
 use procora::protocol::ServiceActionDto;
 use procora::tui::{ActiveTab, App};
+
+use crate::support;
 
 #[test]
 // 可以循环选择任务并切换页面。

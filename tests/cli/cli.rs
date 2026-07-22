@@ -10,10 +10,7 @@ use std::{
 use clap::Parser;
 use procora::cli::{Cli, Command};
 
-#[path = "support/command.rs"]
-mod command_support;
-
-use command_support::{remove_directory_when_released, run_background_cli};
+use crate::command_support::{remove_directory_when_released, run_background_cli};
 
 /// 创建当前测试独占的临时目录。
 fn temporary_directory(label: &str) -> PathBuf {

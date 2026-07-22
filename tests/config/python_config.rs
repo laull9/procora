@@ -234,7 +234,7 @@ fn generated_env_file_participates_in_revision() {
 fn generated_json_supports_project_env_and_command_text() {
     let root = temporary_directory("config-usability");
     let interpreter = fake_interpreter(&root);
-    let generated = include_str!("fixtures/config/equivalent/python-output.json");
+    let generated = include_str!("../fixtures/config/equivalent/python-output.json");
     let script = write_script(&root, &format!("printf '%s' '{generated}'\n"));
 
     let compiled = PythonConfigRunner::new(interpreter).load(&script).unwrap();

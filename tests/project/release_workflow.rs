@@ -1,16 +1,16 @@
 //! 发布工作流依赖与失败恢复契约测试。
 
 /// 发布工作流文本，用于锁定发布依赖与失败恢复契约。
-const RELEASE_WORKFLOW: &str = include_str!("../.github/workflows/release.yml");
+const RELEASE_WORKFLOW: &str = include_str!("../../.github/workflows/release.yml");
 
 /// CI 工作流文本，用于锁定通用检出动作的运行时版本。
-const CI_WORKFLOW: &str = include_str!("../.github/workflows/ci.yml");
+const CI_WORKFLOW: &str = include_str!("../../.github/workflows/ci.yml");
 
 /// 安全工作流文本，用于锁定审计动作的运行时版本。
-const SECURITY_WORKFLOW: &str = include_str!("../.github/workflows/security.yml");
+const SECURITY_WORKFLOW: &str = include_str!("../../.github/workflows/security.yml");
 
 /// 浸泡测试工作流文本，用于锁定通用检出动作的运行时版本。
-const SOAK_WORKFLOW: &str = include_str!("../.github/workflows/soak.yml");
+const SOAK_WORKFLOW: &str = include_str!("../../.github/workflows/soak.yml");
 
 /// Node 24 版 checkout 的固定提交。
 const CHECKOUT_NODE24: &str = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";

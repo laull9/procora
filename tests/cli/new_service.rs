@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use procora::{cli::api::initialize_managed_config, config::discover_path};
+use procora::{cli::api::initialize_managed_config, config::discover_path, platform::canonicalize};
 
 /// 创建当前测试独占的临时服务目录。
 fn temporary_directory() -> PathBuf {
@@ -29,7 +29,7 @@ fn managed_config_is_valid_and_exclusive() {
 
     let path = initialize_managed_config(&directory, "guided-service").unwrap();
     let discovered = discover_path(&directory).unwrap();
-    assert_eq!(fs::canonicalize(&path).unwrap(), discovered.config_path);
+    assert_eq!(canonicalize(&path).unwrap(), discovered.config_path);
     assert_eq!(discovered.compiled.spec.project, "guided-service");
     assert!(discovered.compiled.spec.tasks.is_empty());
 

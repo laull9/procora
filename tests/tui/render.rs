@@ -1,7 +1,5 @@
 //! TUI 宽屏、紧凑和非正常状态的渲染测试。
 
-mod support;
-
 use crossterm::event::KeyCode;
 use procora::core::TaskId;
 use procora::protocol::{ResourceUsageDto, SnapshotSourceDto};
@@ -9,6 +7,8 @@ use procora::tui::App;
 use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
 use std::time::Duration;
 use std::{fmt::Write as _, str::FromStr};
+
+use crate::support;
 
 /// 把测试终端缓冲转换成便于断言的文本。
 fn render_text(app: &App, width: u16, height: u16) -> String {

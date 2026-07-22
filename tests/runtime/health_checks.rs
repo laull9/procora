@@ -16,6 +16,7 @@ use procora::{
 };
 use serde_json::json;
 
+#[path = "../support/mod.rs"]
 mod support;
 use support::http::{HttpFixture, HttpMode};
 
@@ -48,7 +49,7 @@ fn runtime_configuration(directory: &Path) -> String {
         "tasks": {
             "server": {
                 "command": executable,
-                "args": ["--exact", "long_running_task_helper", "--nocapture"],
+                "args": ["--exact", "health_checks::long_running_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_READY_FILE": ready,
@@ -56,7 +57,7 @@ fn runtime_configuration(directory: &Path) -> String {
                 "shutdown_timeout_ms": 500,
                 "healthcheck": {
                     "command": executable,
-                    "args": ["--exact", "health_check_helper", "--nocapture"],
+                    "args": ["--exact", "health_checks::health_check_helper", "--nocapture"],
                     "period_ms": 20,
                     "timeout_ms": 500,
                     "success_threshold": 2,
@@ -65,7 +66,7 @@ fn runtime_configuration(directory: &Path) -> String {
             },
             "dependent": {
                 "command": executable,
-                "args": ["--exact", "dependent_task_helper", "--nocapture"],
+                "args": ["--exact", "health_checks::dependent_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_DEPENDENT_FILE": dependent,
@@ -276,7 +277,7 @@ fn http_readiness_releases_dependent_after_threshold() {
         "tasks": {
             "server": {
                 "command": executable,
-                "args": ["--exact", "long_running_task_helper", "--nocapture"],
+                "args": ["--exact", "health_checks::long_running_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_READY_FILE": ready,
@@ -297,7 +298,7 @@ fn http_readiness_releases_dependent_after_threshold() {
             },
             "dependent": {
                 "command": executable,
-                "args": ["--exact", "dependent_task_helper", "--nocapture"],
+                "args": ["--exact", "health_checks::dependent_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_DEPENDENT_FILE": dependent,
@@ -343,7 +344,7 @@ fn stopping_task_cancels_http_probe_without_blocking() {
         "tasks": {
             "server": {
                 "command": executable,
-                "args": ["--exact", "long_running_task_helper", "--nocapture"],
+                "args": ["--exact", "health_checks::long_running_task_helper", "--nocapture"],
                 "env": {
                     "PROCORA_HEALTH_TEST": "1",
                     "PROCORA_READY_FILE": directory.join("ready"),
