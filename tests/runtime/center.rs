@@ -74,6 +74,74 @@ fn handshake_events_and_history_form_consistent_session() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[test]
+// 上传目标只在显式apply后从候选切换为新的有效路径。
+fn upload_target_resolution_uses_active_definition() {
+    let directory = temporary_directory();
+    let service_root = directory.join("upload-service");
+    fs::create_dir_all(&service_root).unwrap();
+    let config = service_root.join("procora.yaml");
+    fs::write(
+        &config,
+        "version: 1\nproject: upload-demo\nuploads:\n  release:\n    path: old\n    kind: directory\ntasks: {}\n",
+    )
+    .unwrap();
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open {
+        path: service_root.clone(),
+    });
+    let canonical_root = procora::platform::canonicalize(&service_root).unwrap();
+    fs::write(
+        &config,
+        "version: 1\nproject: upload-demo\nuploads:\n  release:\n    path: new\n    kind: directory\ntasks: {}\n",
+    )
+    .unwrap();
+
+    let selector = ServiceSelectorDto::Name("upload-demo".to_owned());
+    let listed = center.handle(CenterRequest::ListUploadTargets);
+    assert!(matches!(
+        listed,
+        CenterResponse::UploadTargets(targets)
+            if targets.len() == 1 && targets[0].selector == "upload-demo::release"
+    ));
+    let old = center.handle(CenterRequest::ResolveUploadTarget {
+        selector: selector.clone(),
+        target: "release".to_owned(),
+    });
+    assert!(
+        matches!(
+            &old,
+            CenterResponse::UploadTarget(target) if target.path == canonical_root.join("old")
+        ),
+        "{old:?}"
+    );
+    let CenterResponse::ConfigCandidate(candidate) = center.handle(CenterRequest::PreviewConfig {
+        selector: selector.clone(),
+    }) else {
+        panic!("应返回上传目标配置候选");
+    };
+    assert_eq!(
+        candidate.message.as_deref(),
+        Some("上传目标声明变化，不影响运行中 Task")
+    );
+    center.handle(CenterRequest::ApplyConfig {
+        selector: selector.clone(),
+        revision: candidate.revision.unwrap(),
+    });
+    let new = center.handle(CenterRequest::ResolveUploadTarget {
+        selector,
+        target: "release".to_owned(),
+    });
+    assert!(matches!(
+        new,
+        CenterResponse::UploadTarget(target) if target.path == canonical_root.join("new")
+    ));
+    center.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 // 服务列表聚合全部活动Task进程树的资源占用。

@@ -183,6 +183,7 @@ fn overlay_task(target: &mut RawTask, mut higher: RawTask) {
     replace_if_some(&mut target.healthcheck, higher.healthcheck);
     replace_if_some(&mut target.success_exit_codes, higher.success_exit_codes);
     target.depends_on.extend(higher.depends_on);
+    target.uploads.extend(higher.uploads);
     replace_if_some(&mut target.restart, higher.restart);
     replace_if_some(&mut target.restart_delay_ms, higher.restart_delay_ms);
     replace_if_some(&mut target.max_restarts, higher.max_restarts);

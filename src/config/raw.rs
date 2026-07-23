@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ConfigDiagnostic;
 use super::health::normalize_healthcheck;
+use super::upload::RawUploadTarget;
 pub(crate) use profile::RawProfile;
 use restart::{
     default_restart_delay_ms, default_restart_reset_after_ms, default_shutdown_timeout_ms,
@@ -62,6 +63,9 @@ pub(crate) struct RawProject {
     task_templates: BTreeMap<String, RawTask>,
     #[serde(default)]
     dependencies: BTreeMap<String, RawManagedDependency>,
+    /// Service 级上传目标。
+    #[serde(default)]
+    uploads: BTreeMap<String, RawUploadTarget>,
     #[serde(default)]
     tasks: BTreeMap<String, RawTask>,
     #[serde(skip)]
@@ -84,6 +88,8 @@ pub(crate) struct RawProject {
     declared_profiles: BTreeMap<String, profile::RawProfile>,
     #[serde(skip)]
     declared_task_templates: BTreeMap<String, RawTask>,
+    #[serde(skip)]
+    declared_uploads: BTreeMap<String, RawUploadTarget>,
     #[serde(skip)]
     declared_tasks: BTreeMap<String, RawTask>,
 }

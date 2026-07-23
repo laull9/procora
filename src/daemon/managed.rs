@@ -6,7 +6,7 @@ use crate::protocol::{
 };
 use crate::storage::{StoredService, StoredServiceStatus};
 use crate::{
-    config::{CompiledProject, ManagedDependencies, ProjectDiff, discover_path},
+    config::{CompiledProject, ManagedDependencies, ProjectDiff, UploadTargetSpec, discover_path},
     core::ProjectSpec,
 };
 
@@ -18,6 +18,7 @@ pub(crate) struct PendingConfig {
     pub(crate) revision: String,
     pub(crate) compiled: CompiledProject,
     pub(crate) diff: ProjectDiff,
+    pub(crate) upload_targets_changed: bool,
 }
 
 /// 当前宿主对应、尚未替换管理依赖占位符的有效定义。
@@ -25,6 +26,7 @@ pub(crate) struct PendingConfig {
 pub(crate) struct ActiveDefinition {
     pub(crate) spec: ProjectSpec,
     pub(crate) dependencies: ManagedDependencies,
+    pub(crate) upload_targets: std::collections::BTreeMap<String, UploadTargetSpec>,
 }
 
 impl ActiveDefinition {
@@ -33,6 +35,7 @@ impl ActiveDefinition {
         Self {
             spec: compiled.spec.clone(),
             dependencies: compiled.dependencies.clone(),
+            upload_targets: compiled.upload_targets.clone(),
         }
     }
 }

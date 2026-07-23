@@ -155,12 +155,21 @@ impl Center {
             ),
             Ok(compiled) => {
                 let mut diff = self.diff_candidate(name, &compiled);
-                let message = diff.is_empty().then(|| "配置语义没有变化".to_owned());
+                let upload_targets_changed = self.services[name]
+                    .active_definition
+                    .as_ref()
+                    .is_none_or(|active| active.upload_targets != compiled.upload_targets);
+                let message = if diff.is_empty() && upload_targets_changed {
+                    Some("上传目标声明变化，不影响运行中 Task".to_owned())
+                } else {
+                    diff.is_empty().then(|| "配置语义没有变化".to_owned())
+                };
                 let revision = revision.expect("可读配置应当具有修订值");
                 let pending = PendingConfig {
                     revision: revision.clone(),
                     compiled,
                     diff: diff.clone(),
+                    upload_targets_changed,
                 };
                 (
                     ConfigCandidateDto {
@@ -240,7 +249,7 @@ impl Center {
             .take()
             .ok_or_else(|| CenterError::CandidateUnavailable(name.to_owned()))?;
         let active_definition = ActiveDefinition::from_compiled(&pending.compiled);
-        if pending.diff.is_empty() && !force_restart {
+        if pending.diff.is_empty() && !pending.upload_targets_changed && !force_restart {
             self.services
                 .get_mut(name)
                 .expect("名称已经解析")

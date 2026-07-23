@@ -8,7 +8,7 @@
 
 Procora 的配置会启动本机代码，IPC 会执行生命周期控制，SQLite 会跨版本恢复服务运行期望。这三种边界的兼容错误都可能比普通解析失败更危险：旧字段被猜错会改变进程语义，旧客户端误发控制请求会破坏状态，降级程序误读新数据库会覆盖无法理解的数据。
 
-项目当前分别使用配置顶层 `version: 1`、`PROTOCOL_VERSION = 4` 和 SQLite `PRAGMA user_version = 1`。配置候选的 SHA-256 是内容身份，不是模式版本，不能替代其中任何一个版本号。
+项目当前分别使用配置顶层 `version: 1`、`PROTOCOL_VERSION = 7` 和 SQLite `PRAGMA user_version = 1`。配置候选的 SHA-256 是内容身份，不是模式版本，不能替代其中任何一个版本号。
 
 ## 决策
 

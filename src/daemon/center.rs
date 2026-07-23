@@ -25,6 +25,7 @@ use super::{
 
 mod registry;
 mod reload;
+mod upload_targets;
 
 /// 中心服务器注册、恢复和服务解析错误。
 #[derive(Debug, Error)]
@@ -92,6 +93,14 @@ pub enum CenterError {
         /// 应用前重新读取到的修订或缺失状态。
         actual: String,
     },
+    /// 当前有效定义没有声明请求的上传目标。
+    #[error("服务 `{service}` 没有声明上传目标 `{target}`")]
+    UploadTargetNotFound {
+        /// 服务稳定名称。
+        service: String,
+        /// `name` 或 `task::name` 目标键。
+        target: String,
+    },
 }
 
 /// 管理本机多个服务宿主的中心服务器状态。
@@ -150,6 +159,12 @@ impl Center {
             CenterRequest::Ping => return CenterResponse::Pong,
             CenterRequest::Open { path } => self.open(&path).map(CenterResponse::Service),
             CenterRequest::List => return CenterResponse::Services(self.list()),
+            CenterRequest::ListUploadTargets => {
+                return CenterResponse::UploadTargets(self.list_upload_targets());
+            }
+            CenterRequest::ResolveUploadTarget { selector, target } => self
+                .resolve_upload_target(&selector, &target)
+                .map(CenterResponse::UploadTarget),
             CenterRequest::Events { after_sequence } => {
                 self.tick();
                 return CenterResponse::Events(self.events_after(after_sequence));

@@ -88,6 +88,7 @@ impl RawProject {
         self.declared_task_defaults = self.task_defaults.clone();
         self.declared_profiles = self.profiles.clone();
         self.declared_task_templates = self.task_templates.clone();
+        self.declared_uploads = self.uploads.clone();
         self.declared_tasks = self.tasks.clone();
     }
 }

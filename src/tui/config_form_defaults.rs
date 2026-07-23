@@ -18,6 +18,7 @@ impl FormTask {
             healthcheck: None,
             success_exit_codes: vec![0],
             depends_on: BTreeMap::new(),
+            uploads: BTreeMap::new(),
             restart: "never".to_owned(),
             restart_delay_ms: 500,
             max_restarts: 0,

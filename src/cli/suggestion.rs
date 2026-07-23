@@ -19,6 +19,7 @@ pub(crate) const TOP_LEVEL: &[&str] = &[
     "start",
     "restart",
     "preview",
+    "push",
     "apply",
     "stop",
     "remove",
