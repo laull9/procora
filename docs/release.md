@@ -19,22 +19,36 @@ Unix 目标发布 `procora-<target>.tar.gz`，Windows 目标发布 `procora-<tar
 macOS/Linux 安装脚本检测系统和架构，下载对应 tar.gz，验证 SHA-256，并默认安装到 `$HOME/.local/bin/procora`：
 
 ```bash
-curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/laull/procora/main/scripts/install.sh | sh
+curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/laull9/procora/main/scripts/install.sh | sh
 ```
 
 Windows PowerShell 脚本使用运行时架构选择 zip，验证 SHA-256，并默认安装到 `%LOCALAPPDATA%\Procora\bin\procora.exe`：
 
 ```powershell
-irm https://raw.githubusercontent.com/laull/procora/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/laull9/procora/main/scripts/install.ps1 | iex
 ```
 
 两个脚本都支持以下环境变量：
 
 - `PROCORA_VERSION`：默认 `latest`；可设为 `v0.3.0` 等固定标签。
 - `PROCORA_INSTALL_DIR`：覆盖默认安装目录。
-- `PROCORA_REPO`：覆盖默认 GitHub 仓库 `laull/procora`，用于 fork 或发布演练。
+- `PROCORA_REPO`：覆盖默认 GitHub 仓库 `laull9/procora`，用于 fork 或发布演练。
 
 安装脚本不会自动修改 PATH，也不会擅自注册后台托管。首次安装后若命令不可见，用户需要把安装目录加入自己的 PATH；需要登录后自动运行 Center 时，由用户显式执行 `procora enable`，卸载前可执行 `procora disable`。
+
+## 一键卸载
+
+卸载脚本先运行 `procora disable`，成功后只删除安装目录中的命令，保留数据库、运行状态和各 Service 日志：
+
+```bash
+curl --fail --location --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/laull9/procora/main/scripts/uninstall.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/laull9/procora/main/scripts/uninstall.ps1 | iex
+```
+
+自定义安装目录时必须向卸载脚本传入同一个 `PROCORA_INSTALL_DIR`。如果停用开机自启动失败，脚本默认中止；仅在确认无需保留后台托管时设置 `PROCORA_FORCE_UNINSTALL=1` 强制删除命令。
 
 ## 发布操作
 
