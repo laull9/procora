@@ -59,7 +59,7 @@ fn unix_install_and_uninstall_scripts_form_offline_lifecycle() {
 
     let payload_binary = payload.join("procora");
     write_executable(&payload_binary, "#!/bin/sh\nprintf 'procora fixture\\n'\n");
-    let asset_name = "procora-x86_64-unknown-linux-gnu.tar.gz";
+    let asset_name = "procora-x86_64-unknown-linux-musl.tar.gz";
     let asset = assets.join(asset_name);
     let archived = Command::new("tar")
         .args(["-C", payload.to_str().unwrap(), "-czf"])

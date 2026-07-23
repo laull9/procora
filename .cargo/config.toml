@@ -1,0 +1,17 @@
+# Linux 发布目标显式静态链接 musl C 运行时。
+[target.x86_64-unknown-linux-musl]
+linker = "musl-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Linux ARM64 发布目标显式静态链接 musl C 运行时。
+[target.aarch64-unknown-linux-musl]
+linker = "musl-gcc"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Windows 发布目标静态链接 MSVC/UCRT 运行时。
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# Windows ARM64 发布目标静态链接 MSVC/UCRT 运行时。
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

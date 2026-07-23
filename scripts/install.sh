@@ -30,7 +30,7 @@ case "$version" in
 esac
 
 case "$(uname -s)" in
-  Linux) platform=unknown-linux-gnu ;;
+  Linux) platform=unknown-linux-musl ;;
   Darwin) platform=apple-darwin ;;
   *) fail "不支持的系统：$(uname -s)" ;;
 esac

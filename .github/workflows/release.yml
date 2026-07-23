@@ -102,10 +102,10 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             archive: tar.gz
           - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
+            target: aarch64-unknown-linux-musl
             archive: tar.gz
           - runner: macos-15-intel
             target: x86_64-apple-darwin
@@ -128,8 +128,28 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - name: 安装 musl 构建工具
+        if: endsWith(matrix.target, '-linux-musl')
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          target="${{ matrix.target }}"
+          echo "CC_${target//-/_}=musl-gcc" >> "$GITHUB_ENV"
+      - name: 固定 macOS 最低部署版本
+        if: runner.os == 'macOS'
+        shell: bash
+        run: echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
       - name: 构建发布二进制
         run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: 校验 Unix 动态库依赖
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: scripts/check-runtime-deps.sh "target/${{ matrix.target }}/release/procora"
+      - name: 校验 Windows 动态运行时依赖
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: scripts/check-runtime-deps.ps1 -Binary "target/${{ matrix.target }}/release/procora.exe"
       - name: 打包 Unix 二进制
         if: matrix.archive == 'tar.gz'
         shell: bash

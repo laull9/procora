@@ -79,3 +79,13 @@ Procora 自己管理的任务不默认转换成 systemd unit。systemd 适配器
 - `zeroize` 或 `secrecy`：敏感配置值的内存与 Debug 防护。
 
 新增依赖前需要回答：哪个 crate 是唯一消费者、能否保持 feature 最小化、三平台是否编译、是否引入 C/系统库、最低 Rust 版本是否变化，以及如何通过 `tests/` 契约测试限制其行为。
+
+## 6. 发布链接依赖
+
+当前目标依赖图中会编译本地代码的运行时组件只有 bundled SQLite 的 `libsqlite3-sys` 与 rustls 使用的 `ring`；两者都作为静态归档进入最终可执行文件。`flate2` 使用 Rust 后端，`syntect` 使用 `fancy-regex`，HTTP TLS 使用 rustls 和内嵌 Web PKI 根证书，因此不链接系统 zlib、Oniguruma、OpenSSL 或系统 SQLite。
+
+- Linux Release 使用 `*-unknown-linux-musl` 并静态链接 musl、SQLite 和 ring；最终 ELF 不允许动态加载器或任何 `NEEDED` 共享库。
+- Windows Release 使用 MSVC ABI，但以 `crt-static` 静态链接 MSVC/UCRT、SQLite 和 ring；最终 PE 不允许导入 Microsoft C/C++ Redistributable 运行时。Kernel32、Bcrypt、Ws2_32 等 Windows 系统 API 仍按平台 ABI 动态调用。
+- macOS Release 静态包含 SQLite 和 ring，只允许动态链接 `/usr/lib` 与 `/System/Library` 下的系统库和框架；不随包携带第三方 dylib。
+
+这些是二进制链接依赖，不代表所有功能都不调用外部命令。Git 来源需要 `git`，SSH/SCP 来源与传输需要 `ssh`/`scp`，开机自启动分别调用 Linux `systemctl`、macOS `launchctl` 与 Windows `schtasks.exe`；除 `git` 和 OpenSSH 客户端外，其余命令属于对应系统的标准管理接口。

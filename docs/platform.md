@@ -4,11 +4,11 @@
 
 Procora 的三个目标平台为：
 
-- Linux：主流 glibc 发行版作为首要开发目标，musl 兼容后续验证。
+- Linux：使用静态 musl 发布二进制，不依赖发行版提供 glibc 或 musl 共享库。
 - macOS：当前受支持的 Apple Silicon 与 Intel 系统版本。
 - Windows：Windows 10/11 与对应 Windows Server，原生控制台环境。
 
-Release 固定构建六个目标 triple：`x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu`、`x86_64-apple-darwin`、`aarch64-apple-darwin`、`x86_64-pc-windows-msvc`、`aarch64-pc-windows-msvc`。项目不维护平台原生安装包；WSL 视为 Linux 环境，不与原生 Windows 进程混合管理。实际最低操作系统版本需要在发布流水线持续验证后固定。
+Release 固定构建六个目标 triple：`x86_64-unknown-linux-musl`、`aarch64-unknown-linux-musl`、`x86_64-apple-darwin`、`aarch64-apple-darwin`、`x86_64-pc-windows-msvc`、`aarch64-pc-windows-msvc`。Windows 静态链接 MSVC/UCRT 运行时，macOS 只链接 Apple 系统库并以 macOS 11.0 为最低部署版本。项目不维护平台原生安装包；WSL 视为 Linux 环境，不与原生 Windows 进程混合管理。
 
 ## 2. 平台层边界
 
