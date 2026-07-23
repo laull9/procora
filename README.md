@@ -1,6 +1,6 @@
 <div align="center">
 
-# Procora: 一个带TUI、跨平台的进程、服务管理工具
+# Procora: 一个带TUI、跨平台的进程与服务管理工具
 
 面向本机开发环境的任务编排与服务管理器<br>
 用一个跨平台 TUI 管理多个项目、任务依赖、进程树和日志
@@ -143,4 +143,3 @@ procora
 | [配置说明](docs/configuration.md) | 配置格式、任务图与热更新 |
 | [发布与安装](docs/release.md) | 支持平台、产物与发布流程 |
 | [安全策略](SECURITY.md) | 信任边界与漏洞报告 |
-| [路线图](docs/roadmap.md) | 当前范围与后续计划 |

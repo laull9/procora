@@ -9,6 +9,15 @@ const CI_WORKFLOW: &str = include_str!("../../.github/workflows/ci.yml");
 /// 安全工作流文本，用于锁定审计动作的运行时版本。
 const SECURITY_WORKFLOW: &str = include_str!("../../.github/workflows/security.yml");
 
+/// Cargo 目标链接配置。
+const CARGO_CONFIG: &str = include_str!("../../.cargo/config.toml");
+
+/// Unix 发布二进制依赖检查脚本。
+const UNIX_DEPENDENCY_CHECK: &str = include_str!("../../scripts/check-runtime-deps.sh");
+
+/// Windows 发布二进制依赖检查脚本。
+const WINDOWS_DEPENDENCY_CHECK: &str = include_str!("../../scripts/check-runtime-deps.ps1");
+
 /// Node 24 版 checkout 的固定提交。
 const CHECKOUT_NODE24: &str = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0";
 
@@ -76,4 +85,44 @@ fn release_reuses_successful_main_ci() {
     assert!(RELEASE_WORKFLOW.contains("needs: prepare"));
     assert!(!RELEASE_WORKFLOW.contains("cargo test"));
     assert!(!RELEASE_WORKFLOW.contains("cargo clippy"));
+}
+
+#[test]
+// Linux发布目标使用musl并拒绝动态加载器和共享库。
+fn linux_release_is_static_musl() {
+    for target in ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"] {
+        assert!(RELEASE_WORKFLOW.contains(target));
+        assert!(CARGO_CONFIG.contains(&format!("[target.{target}]")));
+    }
+    assert_eq!(CARGO_CONFIG.matches("linker = \"musl-gcc\"").count(), 2);
+    assert!(!RELEASE_WORKFLOW.contains("unknown-linux-gnu"));
+    assert!(RELEASE_WORKFLOW.contains("musl-tools"));
+    assert!(RELEASE_WORKFLOW.contains("CC_${target//-/_}=musl-gcc"));
+    assert!(RELEASE_WORKFLOW.contains("scripts/check-runtime-deps.sh"));
+    assert!(UNIX_DEPENDENCY_CHECK.contains("grep -q '(NEEDED)'"));
+    assert!(UNIX_DEPENDENCY_CHECK.contains("grep -q 'INTERP'"));
+}
+
+#[test]
+// Windows发布目标静态链接C运行时并检查最终导入表。
+fn windows_release_uses_static_crt() {
+    for target in ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"] {
+        assert!(CARGO_CONFIG.contains(&format!("[target.{target}]")));
+    }
+    assert_eq!(
+        CARGO_CONFIG.matches("target-feature=+crt-static").count(),
+        4
+    );
+    assert!(RELEASE_WORKFLOW.contains("scripts/check-runtime-deps.ps1"));
+    for runtime in ["msvcp", "vcruntime", "ucrtbase.dll", "api-ms-win-crt"] {
+        assert!(WINDOWS_DEPENDENCY_CHECK.contains(runtime));
+    }
+}
+
+#[test]
+// macOS发布目标只允许链接Apple系统动态库。
+fn macos_release_allows_only_system_libraries() {
+    assert!(RELEASE_WORKFLOW.contains("MACOSX_DEPLOYMENT_TARGET=11.0"));
+    assert!(UNIX_DEPENDENCY_CHECK.contains("otool -L"));
+    assert!(UNIX_DEPENDENCY_CHECK.contains("^(/usr/lib/|/System/Library/)"));
 }
