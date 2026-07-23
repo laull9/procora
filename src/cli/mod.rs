@@ -117,7 +117,7 @@ pub enum Command {
         /// SSH config 别名或 `[user@]host`；省略时依次使用环境变量和服务名推断。
         #[arg(long, value_name = "SSH_TARGET")]
         ssh: Option<String>,
-        /// 远端 Procora 命令名或无空格路径。
+        /// 远端 Procora 命令名或 Unix/Windows 无空格路径。
         #[arg(long, value_name = "PATH", default_value = "procora")]
         remote_bin: String,
         /// 禁止人工目标与密码登录回退，适合 CI。

@@ -92,7 +92,7 @@ fn upload_target_resolution_uses_active_definition() {
     center.handle(CenterRequest::Open {
         path: service_root.clone(),
     });
-    let canonical_root = fs::canonicalize(&service_root).unwrap();
+    let canonical_root = procora::platform::canonicalize(&service_root).unwrap();
     fs::write(
         &config,
         "version: 1\nproject: upload-demo\nuploads:\n  release:\n    path: new\n    kind: directory\ntasks: {}\n",

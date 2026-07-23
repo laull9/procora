@@ -101,7 +101,7 @@ TUI 只在输入、终端尺寸或数据发生变化时重绘，状态默认每 
 
 顶层 `vars` 可集中声明可复用字符串，显式支持字段用 `${vars.NAME}` 引用；变量可链式引用，`$${vars.NAME}` 输出字面量 `${vars.NAME}`。解析不读取宿主环境、不执行 Go/Python 模板或 shell，普通 `$HOME` 和管理依赖的 `${dependency.tool}` 保持原样。变量可用于项目/profile/默认环境、默认工作目录，以及 Task/模板的命令、argv、工作目录、环境文件、环境和健康检查字符串；argv 数组内插值不会改变参数边界。`procora config` 同时输出声明值、解析值和字段到变量的直接引用，TUI 项目弹窗可编辑变量并立即刷新有效预览，保存仍保留原始表达式。
 
-Service 和 Task 可声明只位于服务根目录内的 `uploads` 目标，本机无需知道服务器路径即可使用 `service::name` 或 `service::task::name` 上传。省略 `--target` 时，远端按来源类型和大小筛选当前活动目标：只有一个便自动选择，多个则在本机列出供选择。当前版本支持单文件或目录完整替换；内容先以 gzip tar 经 SSH 发送，远端验证类型、未压缩大小和 SHA-256，再用同目录备份与重命名提交。符号链接、特殊文件、父目录逃逸和 `.procora` 都会被拒绝。目标协商与传输共用一条 SSH 会话；SSH 先使用 BatchMode 自动认证，只有连接或认证失败且处于交互终端时才允许修改 SSH 目标，并由 OpenSSH 自己请求主机确认或密码，Procora 不读取或保存密码。CI 使用 `--batch` 禁止交互回退。完整配置与命令见[配置说明](docs/configuration.md#声明式远端上传目标)。
+Service 和 Task 可声明只位于服务根目录内的 `uploads` 目标，本机无需知道服务器路径即可使用 `service::name` 或 `service::task::name` 上传。省略 `--target` 时，远端按来源类型和大小筛选当前活动目标：只有一个便自动选择，多个则在本机列出供选择。SSH 地址依次取自 `--ssh`、非空的 `PROCORA_SSH_TARGET` 和选择器中的服务名；非标准端口、跳板机和私钥优先写入 OpenSSH config 后使用别名。当前版本支持单文件或目录完整替换；内容先以 gzip tar 经 SSH 发送，远端验证类型、未压缩大小和 SHA-256，再用同目录备份与重命名提交。符号链接、特殊文件、父目录逃逸和 `.procora` 都会被拒绝。目标协商与传输共用一条 SSH 会话；SSH 先使用 BatchMode 自动认证，只有连接或认证失败且处于交互终端时才允许修改 SSH 目标，并由 OpenSSH 自己请求主机确认或密码，Procora 不读取或保存密码。CI 使用 `--batch` 禁止交互回退。远端命令不在 `PATH` 时可用 `--remote-bin ~/.local/bin/procora`；Windows OpenSSH 服务端也可使用 `--remote-bin C:/Tools/procora.exe` 这类无空格路径。完整配置与命令见[配置说明](docs/configuration.md#声明式远端上传目标)。
 
 顶层 `task_defaults` 可集中声明所有 Task 共用的 `cwd`、`env`、成功退出码和生命周期策略。Task 标量或列表一旦显式声明便整体替换默认值，环境 map 则按键覆盖；`procora config` 会把来源报告为 `task_defaults`，TUI 项目弹窗可直接编辑默认层，保存和新建 Task 都不会把继承值复制进每个条目。Task 弹窗中的覆盖字段留空、或把重启策略切到 `inherit`，即可删除本地声明并恢复项目/内建默认。
 
