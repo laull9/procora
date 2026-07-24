@@ -87,6 +87,18 @@ fn release_reuses_successful_main_ci() {
     assert!(!RELEASE_WORKFLOW.contains("cargo clippy"));
 }
 
+/// 校验跳过 main CI 只能由带布尔输入的手动发布显式启用。
+#[test]
+// 手动发布可显式跳过main CI校验。
+fn manual_release_can_explicitly_skip_main_ci() {
+    assert!(RELEASE_WORKFLOW.contains("skip_main_ci:"));
+    assert!(RELEASE_WORKFLOW.contains("type: boolean"));
+    assert!(RELEASE_WORKFLOW.contains(
+        "SKIP_MAIN_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_main_ci || false }}"
+    ));
+    assert!(RELEASE_WORKFLOW.contains("if [[ \"$SKIP_MAIN_CI\" == \"true\" ]]"));
+}
+
 #[test]
 // Linux发布目标使用musl并拒绝动态加载器和共享库。
 fn linux_release_is_static_musl() {
