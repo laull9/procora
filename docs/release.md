@@ -63,3 +63,9 @@ irm https://raw.githubusercontent.com/laull9/procora/main/scripts/uninstall.ps1 
 5. 仅在 `main` 最新提交创建并单独推送与 `Cargo.toml` 版本一致的 `v*` 标签；发布工作流校验已成功的 `main` CI 后直接打包。
 6. 确认六组构建产物和校验文件全部进入同一个 GitHub Release。
 7. 至少在每个平台各验证一次脚本安装、`procora --help`、`procora up/status/down`。
+
+若本次提交已经完整通过本地格式、Clippy 和全量测试，并明确决定跳过 GitHub CI，
+可在 `dev` 与 `main` 提交信息中使用 `[skip ci]`，推送标签后通过
+`workflow_dispatch` 手动运行 `release`，传入对应 `tag` 并显式启用
+`skip_main_ci`。该输入只对手动发布生效；普通标签发布仍必须复用成功的
+`main` CI。

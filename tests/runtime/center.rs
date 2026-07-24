@@ -71,6 +71,7 @@ fn handshake_events_and_history_form_consistent_session() {
     };
     assert_eq!(history.len(), 1);
     assert_eq!(history[0].status, ServiceStatusDto::Running);
+    center.handle(CenterRequest::Shutdown);
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -197,6 +198,7 @@ fn expired_event_cursor_requires_snapshot_refresh() {
     };
     assert!(batch.resync_required);
     assert!(batch.events.is_empty());
+    center.handle(CenterRequest::Shutdown);
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -511,6 +513,7 @@ fn same_service_name_cannot_point_to_two_directories() {
         path: directory.join("two"),
     });
     assert!(matches!(response, CenterResponse::Error { .. }));
+    center.handle(CenterRequest::Shutdown);
     fs::remove_dir_all(directory).unwrap();
 }
 

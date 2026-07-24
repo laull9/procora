@@ -10,6 +10,11 @@ on:
         description: 要创建或更新的 Release 标签，例如 v0.3.0
         required: true
         type: string
+      skip_main_ci:
+        description: 已在本地完成门禁，显式跳过 main CI 校验
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -56,6 +61,7 @@ jobs:
       - name: 校验标签位于已通过 CI 的 main 提交
         env:
           GH_TOKEN: ${{ github.token }}
+          SKIP_MAIN_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_main_ci || false }}
         shell: bash
         run: |
           git fetch origin main
@@ -64,6 +70,11 @@ jobs:
           if [[ "$release_commit" != "$main_commit" ]]; then
             echo "发布标签必须指向 main 最新提交" >&2
             exit 1
+          fi
+
+          if [[ "$SKIP_MAIN_CI" == "true" ]]; then
+            echo "已通过 workflow_dispatch 显式跳过 main CI 校验"
+            exit 0
           fi
 
           for attempt in {1..60}; do

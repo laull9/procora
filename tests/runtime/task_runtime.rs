@@ -30,6 +30,83 @@ fn temporary_service() -> PathBuf {
     directory
 }
 
+#[cfg(unix)]
+#[test]
+// 未声明cwd的Task始终以包含非ASCII字符的service根目录运行。
+fn task_without_cwd_runs_from_unicode_service_root() {
+    let parent = temporary_service();
+    let service = parent.join("下载 目录");
+    fs::create_dir_all(&service).unwrap();
+    let compiled = load_str(
+        "version: 1\nproject: runtime\ntasks:\n  pwd:\n    command: pwd\n",
+        ConfigFormat::Yaml,
+    )
+    .unwrap();
+    let mut host = ServiceHost::from_compiled_at(compiled, &service);
+
+    host.start().unwrap();
+    wait_until_stopped(&mut host);
+
+    let output = fs::read_to_string(service.join(".procora/logs/tasks/pwd.log")).unwrap();
+    assert_eq!(
+        fs::canonicalize(output.trim()).unwrap(),
+        fs::canonicalize(&service).unwrap()
+    );
+    fs::remove_dir_all(parent).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+// Task显式cwd优先于service根目录默认值。
+fn explicit_task_cwd_overrides_service_root() {
+    let service = temporary_service();
+    let working_directory = service.join("明确工作目录");
+    fs::create_dir_all(&working_directory).unwrap();
+    let configuration = serde_json::json!({
+        "version": 1,
+        "project": "runtime",
+        "tasks": {
+            "pwd": {
+                "command": "pwd",
+                "cwd": working_directory,
+            }
+        }
+    })
+    .to_string();
+    let compiled = load_str(&configuration, ConfigFormat::Json).unwrap();
+    let mut host = ServiceHost::from_compiled_at(compiled, &service);
+
+    host.start().unwrap();
+    wait_until_stopped(&mut host);
+
+    let output = fs::read_to_string(service.join(".procora/logs/tasks/pwd.log")).unwrap();
+    assert_eq!(
+        fs::canonicalize(output.trim()).unwrap(),
+        fs::canonicalize(&working_directory).unwrap()
+    );
+    fs::remove_dir_all(service).unwrap();
+}
+
+/// 等待一次性 Task 全部退出并刷新日志。
+fn wait_until_stopped(host: &mut ServiceHost) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let snapshot = host.snapshot(SnapshotSourceDto::CenterLive, true);
+        if snapshot
+            .tasks
+            .iter()
+            .all(|task| task.status == TaskStatusDto::Stopped)
+        {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Task 没有在期限内退出"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 // completed依赖会运行真实进程并写入service本地日志。
 fn completed_dependency_runs_real_process_and_writes_logs() {

@@ -264,6 +264,61 @@ fn dependent_task_starts_after_consecutive_health_successes() {
 }
 
 #[test]
+// 未声明cwd的exec健康检查继承包含非ASCII字符的service根目录。
+fn exec_health_check_without_cwd_uses_unicode_service_root() {
+    let parent = temporary_directory();
+    let directory = parent.join("下载 目录");
+    fs::create_dir_all(&directory).expect("应能创建非 ASCII 服务目录");
+    let executable = std::env::current_exe().expect("应能读取当前测试二进制路径");
+    let configuration = json!({
+        "version": 1,
+        "project": "health-cwd",
+        "tasks": {
+            "server": {
+                "command": executable,
+                "args": ["--exact", "health_checks::long_running_task_helper", "--nocapture"],
+                "env": {
+                    "PROCORA_HEALTH_TEST": "1",
+                    "PROCORA_READY_FILE": directory.join("ready"),
+                    "PROCORA_EXPECTED_CWD": directory,
+                },
+                "shutdown_timeout_ms": 500,
+                "healthcheck": {
+                    "command": executable,
+                    "args": [
+                        "--exact",
+                        "health_checks::health_check_cwd_helper",
+                        "--nocapture"
+                    ],
+                    "period_ms": 20,
+                    "timeout_ms": 500
+                }
+            }
+        }
+    })
+    .to_string();
+    let compiled = load_str(&configuration, ConfigFormat::Json).expect("运行配置应有效");
+    let mut host = ServiceHost::from_compiled_at(compiled, &directory);
+    host.start().expect("服务应能启动");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshot = host.snapshot(SnapshotSourceDto::CenterLive, true);
+        if snapshot.tasks[0].health == TaskHealthDto::Healthy {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "exec 健康检查没有在 service 根目录成功执行"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    host.stop().expect("服务应能停止并取消检查");
+    fs::remove_dir_all(parent).expect("应能清理测试目录");
+}
+
+#[test]
 // HTTP连续就绪结果会放行healthy依赖并携带声明的请求头。
 fn http_readiness_releases_dependent_after_threshold() {
     let directory = temporary_directory();
@@ -404,6 +459,22 @@ fn health_check_helper() {
     }
     let ready = std::env::var_os("PROCORA_READY_FILE").expect("应传入就绪文件");
     assert!(Path::new(&ready).exists(), "服务尚未就绪");
+}
+
+/// 被健康检查子进程调用：验证未显式配置时继承服务工作目录。
+#[test]
+// 健康检查工作目录辅助进程。
+fn health_check_cwd_helper() {
+    if std::env::var_os("PROCORA_HEALTH_TEST").is_none() {
+        return;
+    }
+    let expected =
+        PathBuf::from(std::env::var_os("PROCORA_EXPECTED_CWD").expect("应传入预期工作目录"));
+    assert_eq!(
+        fs::canonicalize(std::env::current_dir().expect("应能读取当前工作目录"))
+            .expect("当前工作目录应可规范化"),
+        fs::canonicalize(expected).expect("预期工作目录应可规范化")
+    );
 }
 
 /// 被下游 Task 子进程调用：记录依赖已经放行。
