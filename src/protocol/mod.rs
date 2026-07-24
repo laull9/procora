@@ -393,6 +393,37 @@ pub enum TaskHealthDto {
     NotConfigured,
 }
 
+/// Task 运行诊断的稳定类别。
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskDiagnosticKindDto {
+    /// Task 进程创建失败。
+    Spawn,
+    /// Task 以失败状态退出。
+    Exit,
+    /// 健康检查达到失败阈值。
+    Health,
+    /// Task 进程查询、清理或停止失败。
+    Process,
+    /// stdout 或 stderr 排空失败。
+    Output,
+    /// 自动重启策略已经耗尽。
+    Restart,
+}
+
+/// 快照中一条经过聚合的 Task 运行诊断。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TaskDiagnosticDto {
+    /// 诊断所属稳定类别。
+    pub kind: TaskDiagnosticKindDto,
+    /// 已归一化且适合直接展示的错误说明。
+    pub message: String,
+    /// 可选的下一步处理建议。
+    pub suggestion: Option<String>,
+    /// 当前宿主生命周期内相同诊断出现的次数。
+    pub occurrences: u32,
+}
+
 /// 状态快照中的单任务视图。
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TaskView {
@@ -411,6 +442,9 @@ pub struct TaskView {
     pub resources: Option<ResourceUsageDto>,
     /// 对失败、阻塞或过期状态的简短解释。
     pub message: Option<String>,
+    /// 当前宿主生命周期内最近的有界运行诊断。
+    #[serde(default)]
+    pub diagnostics: Vec<TaskDiagnosticDto>,
 }
 
 /// TUI 首次渲染使用的一致性项目快照。

@@ -5,8 +5,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use ratatui::Frame;
 
 use super::{
+    help_ui::HelpVisibility,
     overview_collection::{self, OverviewSort},
     overview_ui, text_view,
+    transition::{TransitionDirection, UiTransition},
     ui_environment::terminal_plain_mode,
 };
 
@@ -40,6 +42,8 @@ pub struct OverviewApp {
     services: Vec<ServiceViewDto>,
     visible_services: Vec<ServiceViewDto>,
     selected: usize,
+    help_visibility: HelpVisibility,
+    transition: UiTransition,
     exit: Option<OverviewExit>,
     pending_action: Option<(String, OverviewAction)>,
     remove_confirmation: Option<String>,
@@ -61,6 +65,8 @@ impl OverviewApp {
             services,
             visible_services: Vec::new(),
             selected: 0,
+            help_visibility: HelpVisibility::default(),
+            transition: UiTransition::default(),
             exit: None,
             pending_action: None,
             remove_confirmation: None,
@@ -85,6 +91,9 @@ impl OverviewApp {
 
     /// 处理一次不带额外语义的按键。
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
+        if self.help_visibility.visible() {
+            return self.close_help_with(key);
+        }
         if self.filter_input.is_some() {
             return self.handle_filter_input(key);
         }
@@ -93,6 +102,7 @@ impl OverviewApp {
             self.cancel_remove_confirmation();
         }
         match key {
+            KeyCode::Char('?') => self.help_visibility.show(),
             KeyCode::Char('q') | KeyCode::Esc => self.exit = Some(OverviewExit::Quit),
             KeyCode::Enter => {
                 self.exit = self
@@ -210,6 +220,31 @@ impl OverviewApp {
             .unwrap_or(0)
             .saturating_sub(1);
         self.horizontal_scroll.advance(elapsed, maximum)
+    }
+
+    /// 推进短时页面转场。
+    pub fn advance_transition(&mut self, elapsed: Duration) -> bool {
+        self.transition.advance(elapsed)
+    }
+
+    /// 从右侧开始一次页面进入转场。
+    pub(crate) const fn begin_entry_transition(&mut self) {
+        self.transition.start(TransitionDirection::Forward);
+    }
+
+    /// 返回当前帧主内容应使用的转场区域。
+    pub(crate) fn transition_area(&self, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
+        self.transition.content_area(area)
+    }
+
+    /// 返回快捷键帮助是否正在显示。
+    pub const fn help_visible(&self) -> bool {
+        self.help_visibility.visible()
+    }
+
+    /// 返回页面转场是否尚未结束。
+    pub const fn transition_active(&self) -> bool {
+        self.transition.active()
     }
 
     /// 设置当前会话是否允许控制服务。
@@ -368,6 +403,16 @@ impl OverviewApp {
     fn cancel_remove_confirmation(&mut self) {
         if self.remove_confirmation.take().is_some() {
             self.feedback = None;
+        }
+    }
+
+    /// 帮助浮层打开时仅处理关闭键。
+    fn close_help_with(&mut self, key: KeyCode) -> bool {
+        if matches!(key, KeyCode::Char('?' | 'q') | KeyCode::Esc) {
+            self.help_visibility.hide();
+            true
+        } else {
+            false
         }
     }
 

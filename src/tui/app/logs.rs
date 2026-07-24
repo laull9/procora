@@ -3,9 +3,30 @@
 use crate::{core::TaskId, tui::log_view};
 use crossterm::event::KeyCode;
 
-use super::App;
+use super::{ActiveTab, App};
 
 impl App {
+    /// 处理仅在日志页生效的翻页、搜索、过滤与清空按键。
+    pub(super) fn handle_log_key(&mut self, key: KeyCode, page_lines: usize) -> bool {
+        if self.active_tab != ActiveTab::Logs {
+            return false;
+        }
+        match key {
+            KeyCode::PageUp => self.scroll_log_up(page_lines),
+            KeyCode::PageDown => self.scroll_log_down(page_lines),
+            KeyCode::Home => self.scroll_log_to_start(),
+            KeyCode::End => self.scroll_log_to_end(),
+            KeyCode::Char('/') => self.log_search_input = Some(self.log_query.clone()),
+            KeyCode::Char('f') => self.toggle_log_filter(),
+            KeyCode::Char('v') => self.cycle_log_source_filter(),
+            KeyCode::Char('n') => self.select_log_match(true),
+            KeyCode::Char('N') => self.select_log_match(false),
+            KeyCode::Char('C') => self.confirm_log_clear(),
+            _ => return false,
+        }
+        true
+    }
+
     /// 追加一批 Task 日志并保留本次 TUI 会话读取到的完整历史。
     pub fn append_log(&mut self, task_id: TaskId, bytes: &[u8], gap: bool) -> bool {
         let gap_changed = gap && !self.log_gaps.contains(&task_id);
@@ -16,8 +37,13 @@ impl App {
         let has_gap = gap || self.has_log_gap(&task_id);
         let buffer = self.log_buffers.entry(task_id.clone()).or_default();
         buffer.extend_from_slice(bytes);
-        let content_lines =
-            log_view::visible_lines(buffer, &self.log_query, self.log_filter_mode.enabled()).len();
+        let content_lines = log_view::visible_lines(
+            buffer,
+            &self.log_query,
+            self.log_filter_mode.enabled(),
+            self.log_source_filter,
+        )
+        .len();
         let current_lines = content_lines + usize::from(has_gap) * 2;
         if let Some(distance) = self.log_scrolls.get_mut(&task_id)
             && *distance > 0
@@ -41,11 +67,16 @@ impl App {
     /// 返回指定 Task 当前可见日志行的最大字符宽度。
     pub(crate) fn log_maximum_width(&self, task_id: &TaskId) -> usize {
         self.log_buffers.get(task_id).map_or(0, |bytes| {
-            log_view::visible_lines(bytes, &self.log_query, self.log_filter_mode.enabled())
-                .iter()
-                .map(|line| line.chars().count())
-                .max()
-                .unwrap_or(0)
+            log_view::visible_lines(
+                bytes,
+                &self.log_query,
+                self.log_filter_mode.enabled(),
+                self.log_source_filter,
+            )
+            .iter()
+            .map(|line| line.chars().count())
+            .max()
+            .unwrap_or(0)
         })
     }
 
@@ -57,6 +88,7 @@ impl App {
                 bytes,
                 &self.log_query,
                 self.log_filter_mode.enabled(),
+                self.log_source_filter,
                 active_match,
                 self.plain_mode,
             )
@@ -76,6 +108,11 @@ impl App {
     /// 返回日志是否只显示匹配行。
     pub const fn log_filter_enabled(&self) -> bool {
         self.log_filter_mode.enabled()
+    }
+
+    /// 返回当前日志来源过滤器。
+    pub const fn log_source_filter(&self) -> super::LogSourceFilter {
+        self.log_source_filter
     }
 
     /// 返回当前 Task 的搜索匹配位置与匹配总数。
@@ -107,6 +144,20 @@ impl App {
             || self.log_gaps.remove(task_id)
             || self.log_scrolls.remove(task_id).is_some()
             || self.log_match_indices.remove(task_id).is_some()
+    }
+
+    /// 推进当前 Task 的日志清空二次确认。
+    fn confirm_log_clear(&mut self) {
+        let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
+            return;
+        };
+        if self.log_clear_confirmation.as_ref() == Some(&task_id) {
+            self.log_clear_confirmation = None;
+            self.pending_log_clear = Some(task_id);
+        } else {
+            self.feedback = Some(format!("再次按 C 确认清空 Task `{task_id}` 的全部日志"));
+            self.log_clear_confirmation = Some(task_id);
+        }
     }
 
     /// 返回指定 Task 是否曾跨越不可恢复的日志间隙。
@@ -212,6 +263,16 @@ impl App {
         }
     }
 
+    /// 在全部、Procora 与子进程日志之间循环切换。
+    pub(super) fn cycle_log_source_filter(&mut self) {
+        self.log_source_filter = self.log_source_filter.next();
+        self.log_scrolls.clear();
+        self.log_match_indices.clear();
+        if let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) {
+            self.focus_log_match(&task_id);
+        }
+    }
+
     /// 循环选择当前 Task 的下一条或上一条匹配行。
     pub(super) fn select_log_match(&mut self, forward: bool) {
         let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
@@ -233,7 +294,13 @@ impl App {
     /// 返回日志正文和间隙提示合计占用的逻辑行数。
     fn log_total_lines(&self, task_id: &TaskId) -> usize {
         let content_lines = self.log_buffers.get(task_id).map_or(0, |buffer| {
-            log_view::visible_lines(buffer, &self.log_query, self.log_filter_mode.enabled()).len()
+            log_view::visible_lines(
+                buffer,
+                &self.log_query,
+                self.log_filter_mode.enabled(),
+                self.log_source_filter,
+            )
+            .len()
         });
         content_lines + usize::from(self.has_log_gap(task_id)) * 2
     }
@@ -257,7 +324,12 @@ impl App {
         self.log_buffers
             .get(task_id)
             .map_or_else(Vec::new, |bytes| {
-                log_view::match_lines(bytes, &self.log_query, self.log_filter_mode.enabled())
+                log_view::match_lines(
+                    bytes,
+                    &self.log_query,
+                    self.log_filter_mode.enabled(),
+                    self.log_source_filter,
+                )
             })
     }
 

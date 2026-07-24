@@ -64,6 +64,8 @@ pub enum RuntimeEvent {
         identity: TaskRunIdentity,
         /// 新健康状态。
         health: HealthState,
+        /// 触发当前状态的有界检查结果说明。
+        detail: Option<String>,
     },
 }
 

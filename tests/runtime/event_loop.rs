@@ -81,6 +81,7 @@ fn healthy_dependency_waits_for_matching_run() {
                 task_id: task_id.clone(),
                 identity,
                 health: HealthState::Starting,
+                detail: None,
             })
             .is_empty()
     );
@@ -97,6 +98,7 @@ fn healthy_dependency_waits_for_matching_run() {
         task_id: task_id.clone(),
         identity,
         health: HealthState::Healthy,
+        detail: None,
     });
     assert_eq!(spawn(&next[0]).0.as_str(), "second");
 }

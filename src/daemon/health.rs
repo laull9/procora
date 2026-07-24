@@ -165,6 +165,7 @@ impl HealthRuntime {
                         task_id: task_id.clone(),
                         identity: entry.identity,
                         health,
+                        detail: Some(result.detail),
                     });
                 }
             }

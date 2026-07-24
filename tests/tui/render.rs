@@ -2,9 +2,16 @@
 
 use crossterm::event::KeyCode;
 use procora::core::TaskId;
-use procora::protocol::{ResourceUsageDto, SnapshotSourceDto};
+use procora::protocol::{
+    ResourceUsageDto, SnapshotSourceDto, TaskDiagnosticDto, TaskDiagnosticKindDto,
+};
 use procora::tui::App;
-use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
+use ratatui::{
+    Terminal,
+    backend::TestBackend,
+    buffer::Cell,
+    style::{Color, Modifier},
+};
 use std::time::Duration;
 use std::{fmt::Write as _, str::FromStr};
 
@@ -89,6 +96,25 @@ fn wide_task_view_shows_details_and_connection_state() {
     assert!(text.contains("预览"));
     assert!(text.contains("api"));
     assert!(text.contains("等待database启动"));
+}
+
+#[test]
+// Task运行诊断在详情页汇总为综合分析并给出处理建议。
+fn task_details_render_diagnostic_analysis() {
+    let mut snapshot = support::snapshot();
+    snapshot.tasks[0].diagnostics = vec![TaskDiagnosticDto {
+        kind: TaskDiagnosticKindDto::Spawn,
+        message: "Task 启动失败：未找到文件或目录".to_owned(),
+        suggestion: Some("检查 command 和工作目录".to_owned()),
+        occurrences: 2,
+    }];
+    let app = App::new(snapshot);
+
+    let text = render_text(&app, 100, 24);
+
+    assert!(text.contains("综合分析·1类·2次"));
+    assert!(text.contains("启动Task启动失败：未找到文件或目录（2次）"));
+    assert!(text.contains("建议检查command和工作目录"));
 }
 
 #[test]
@@ -183,6 +209,22 @@ fn minimal_terminal_preserves_project_source_task_and_exit() {
 }
 
 #[test]
+// 窄底栏优先保留帮助与退出入口，且帮助快捷键能打开完整说明。
+fn narrow_footer_keeps_help_and_renders_overlay() {
+    let mut app = App::new(support::snapshot());
+
+    let narrow = render_text(&app, 32, 12);
+    assert!(narrow.contains("?帮助"));
+    assert!(narrow.contains("q退出"));
+
+    app.handle_key(KeyCode::Char('?'));
+    let help = render_text(&app, 80, 20);
+    assert!(help.contains("快捷键帮助·任务"));
+    assert!(help.contains("直达任务、依赖、日志页"));
+    assert!(help.contains("关闭帮助"));
+}
+
+#[test]
 // 从总览进入的服务详情把退出键提示为返回上一级。
 fn overview_detail_uses_back_navigation_label() {
     let mut app = App::new(support::snapshot());
@@ -249,6 +291,48 @@ fn ansi_log_colors_render_as_terminal_styles() {
             .any(|cell| cell.symbol() == "R" && cell.fg == ratatui::style::Color::Red)
     );
     assert!(!render_text(&app, 80, 16).contains("[31m"));
+}
+
+#[test]
+// 日志来源标签低调着色，v键会过滤内容且保留诊断斜体样式。
+fn log_source_filters_separate_procora_and_child_output() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(
+        task_id,
+        b"CHILD-ONLY\n\x1b[2;3;91m[Procora \xe8\xaf\x8a\xe6\x96\xad \xc2\xb7 \xe5\x90\xaf\xe5\x8a\xa8] PROCORA-ONLY\x1b[0m\n",
+        false,
+    );
+    app.set_plain_mode(false);
+    app.handle_key(KeyCode::Char('3'));
+
+    let all = render_text(&app, 120, 16);
+    assert!(all.contains("CHILD-ONLY"));
+    assert!(all.contains("PROCORA-ONLY"));
+
+    app.handle_key(KeyCode::Char('v'));
+    let procora = render_text(&app, 120, 16);
+    assert!(!procora.contains("CHILD-ONLY"));
+    assert!(procora.contains("PROCORA-ONLY"));
+    let backend = TestBackend::new(120, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    assert!(terminal.backend().buffer().content.iter().any(|cell| {
+        cell.symbol() == "P"
+            && cell.fg == Color::LightRed
+            && cell.modifier.contains(Modifier::ITALIC)
+    }));
+
+    app.handle_key(KeyCode::Char('v'));
+    let child = render_text(&app, 120, 16);
+    assert!(child.contains("CHILD-ONLY"));
+    assert!(!child.contains("PROCORA-ONLY"));
+    let backend = TestBackend::new(120, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    assert!(terminal.backend().buffer().content.iter().any(|cell| {
+        cell.symbol() == "子" && cell.fg == Color::Green && cell.modifier.contains(Modifier::BOLD)
+    }));
 }
 
 #[test]

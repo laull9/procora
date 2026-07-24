@@ -8,11 +8,15 @@ use crate::protocol::{ProjectSnapshot, ServiceActionDto, TaskView};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::Frame;
 
+use super::help_ui::HelpVisibility;
+use super::log_source::LogSourceFilter;
 use super::text_view;
+use super::transition::UiTransition;
 use super::ui;
 
 mod config;
 mod logs;
+mod navigation;
 
 /// 单次日志翻页移动的逻辑行数。
 const LOG_PAGE_LINES: usize = 20;
@@ -110,6 +114,8 @@ pub struct App {
     snapshot: ProjectSnapshot,
     selected: usize,
     active_tab: ActiveTab,
+    help_visibility: HelpVisibility,
+    transition: UiTransition,
     should_quit: bool,
     pending_action: Option<ServiceActionDto>,
     config_edit: config::ConfigEditState,
@@ -124,6 +130,7 @@ pub struct App {
     log_query: String,
     log_search_input: Option<String>,
     log_filter_mode: LogFilterMode,
+    log_source_filter: LogSourceFilter,
     log_match_indices: BTreeMap<TaskId, usize>,
     log_clear_confirmation: Option<TaskId>,
     pending_log_clear: Option<TaskId>,
@@ -137,6 +144,8 @@ impl App {
             snapshot,
             selected: 0,
             active_tab: ActiveTab::default(),
+            help_visibility: HelpVisibility::default(),
+            transition: UiTransition::default(),
             should_quit: false,
             pending_action: None,
             config_edit: config::ConfigEditState::default(),
@@ -155,6 +164,7 @@ impl App {
             log_query: String::new(),
             log_search_input: None,
             log_filter_mode: LogFilterMode::default(),
+            log_source_filter: LogSourceFilter::default(),
             log_match_indices: BTreeMap::new(),
             log_clear_confirmation: None,
             pending_log_clear: None,
@@ -174,65 +184,47 @@ impl App {
 
     /// 使用当前终端的实际日志页高处理一次按键输入。
     pub(crate) fn handle_key_with_log_page(&mut self, key: KeyCode, page_lines: usize) -> bool {
+        if self.help_visibility.visible() {
+            return self.close_help_with(key);
+        }
         if self.log_search_input.is_some() {
             return self.handle_log_search_input(key);
         }
         let previous_config_edit = self.config_edit;
-        let previous = (
+        let previous_navigation = (
             self.selected,
             self.active_tab,
+            self.help_visibility,
+            self.transition,
             self.should_quit,
+        );
+        let previous = (
             self.pending_action,
             self.current_log_scroll(),
             self.horizontal_scroll,
             self.log_query.clone(),
             self.log_search_input.clone(),
             self.log_filter_mode,
+            self.log_source_filter,
             self.log_clear_confirmation.clone(),
             self.pending_log_clear.clone(),
             self.current_log_match_index(),
         );
-        if key != KeyCode::Char('C') {
-            self.cancel_log_clear_confirmation();
-        }
+        self.prepare_key(key);
         match key {
+            KeyCode::Char('?') => self.help_visibility.show(),
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
-            KeyCode::Tab => self.switch_tab(self.active_tab.next()),
-            KeyCode::BackTab => self.switch_tab(self.active_tab.previous()),
+            KeyCode::Tab => self.switch_adjacent_tab(true),
+            KeyCode::BackTab => self.switch_adjacent_tab(false),
             KeyCode::Left => self.scroll_horizontal(false),
             KeyCode::Right => self.scroll_horizontal(true),
             KeyCode::F(3) => self.toggle_auto_scroll(),
-            KeyCode::Char('1') => self.switch_tab(ActiveTab::Tasks),
-            KeyCode::Char('2') => self.switch_tab(ActiveTab::Dependencies),
-            KeyCode::Char('3') => self.switch_tab(ActiveTab::Logs),
-            KeyCode::PageUp if self.active_tab == ActiveTab::Logs => self.scroll_log_up(page_lines),
-            KeyCode::PageDown if self.active_tab == ActiveTab::Logs => {
-                self.scroll_log_down(page_lines);
-            }
-            KeyCode::Home if self.active_tab == ActiveTab::Logs => self.scroll_log_to_start(),
-            KeyCode::End if self.active_tab == ActiveTab::Logs => self.scroll_log_to_end(),
-            KeyCode::Char('/') if self.active_tab == ActiveTab::Logs => {
-                self.log_search_input = Some(self.log_query.clone());
-            }
-            KeyCode::Char('f') if self.active_tab == ActiveTab::Logs => self.toggle_log_filter(),
-            KeyCode::Char('n') if self.active_tab == ActiveTab::Logs => self.select_log_match(true),
-            KeyCode::Char('N') if self.active_tab == ActiveTab::Logs => {
-                self.select_log_match(false);
-            }
-            KeyCode::Char('C') if self.active_tab == ActiveTab::Logs => {
-                if let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) {
-                    if self.log_clear_confirmation.as_ref() == Some(&task_id) {
-                        self.log_clear_confirmation = None;
-                        self.pending_log_clear = Some(task_id);
-                    } else {
-                        self.feedback =
-                            Some(format!("再次按 C 确认清空 Task `{task_id}` 的全部日志"));
-                        self.log_clear_confirmation = Some(task_id);
-                    }
-                }
-            }
+            KeyCode::Char('1') => self.switch_to_tab(ActiveTab::Tasks),
+            KeyCode::Char('2') => self.switch_to_tab(ActiveTab::Dependencies),
+            KeyCode::Char('3') => self.switch_to_tab(ActiveTab::Logs),
+            key if self.handle_log_key(key, page_lines) => {}
             KeyCode::Char('s') if self.control_allowed => {
                 self.pending_action = Some(ServiceActionDto::Start);
             }
@@ -248,17 +240,23 @@ impl App {
             _ => {}
         }
         previous_config_edit != self.config_edit
-            || previous
+            || previous_navigation
                 != (
                     self.selected,
                     self.active_tab,
+                    self.help_visibility,
+                    self.transition,
                     self.should_quit,
+                )
+            || previous
+                != (
                     self.pending_action,
                     self.current_log_scroll(),
                     self.horizontal_scroll,
                     self.log_query.clone(),
                     self.log_search_input.clone(),
                     self.log_filter_mode,
+                    self.log_source_filter,
                     self.log_clear_confirmation.clone(),
                     self.pending_log_clear.clone(),
                     self.current_log_match_index(),
@@ -450,51 +448,5 @@ impl App {
     /// 返回输入循环是否应该退出。
     pub const fn should_quit(&self) -> bool {
         self.should_quit
-    }
-
-    /// 选择下一个任务并在末尾回到开头。
-    fn select_next(&mut self) {
-        self.cancel_log_clear_confirmation();
-        if !self.snapshot.tasks.is_empty() {
-            self.selected = (self.selected + 1) % self.snapshot.tasks.len();
-            self.horizontal_scroll.reset_position();
-        }
-    }
-
-    /// 选择上一个任务并在开头回到末尾。
-    fn select_previous(&mut self) {
-        self.cancel_log_clear_confirmation();
-        if !self.snapshot.tasks.is_empty() {
-            self.selected = self
-                .selected
-                .checked_sub(1)
-                .unwrap_or(self.snapshot.tasks.len() - 1);
-            self.horizontal_scroll.reset_position();
-        }
-    }
-
-    /// 切换页签并让新页面从文本起点开始显示。
-    fn switch_tab(&mut self, tab: ActiveTab) {
-        self.cancel_log_clear_confirmation();
-        self.active_tab = tab;
-        self.horizontal_scroll.reset_position();
-    }
-
-    /// 在当前页面最长的相关文本范围内移动水平视口。
-    fn scroll_horizontal(&mut self, forward: bool) {
-        let maximum = super::app_horizontal::page_text_maximum(self, false).saturating_sub(1);
-        self.horizontal_scroll.scroll_manual(forward, maximum);
-    }
-
-    /// 切换全局自动滚动并让新模式从文本起点开始。
-    fn toggle_auto_scroll(&mut self) {
-        self.horizontal_scroll.toggle_auto();
-    }
-
-    /// 取消尚未二次确认的日志清空操作和对应反馈。
-    fn cancel_log_clear_confirmation(&mut self) {
-        if self.log_clear_confirmation.take().is_some() {
-            self.feedback = None;
-        }
     }
 }
