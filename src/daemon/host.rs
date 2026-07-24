@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, VecDeque},
+    path::PathBuf,
     sync::{Arc, Mutex, atomic::AtomicU64},
     time::{Duration, Instant},
 };
@@ -74,6 +75,7 @@ struct PendingSpawn {
 pub struct ServiceHost {
     spec: ProjectSpec,
     dependencies: ManagedDependencies,
+    default_working_directory: Option<PathBuf>,
     engine: Engine,
     monitor: SystemMonitor,
     resource_cache: ResourceCache,
@@ -89,17 +91,21 @@ pub struct ServiceHost {
 impl ServiceHost {
     /// 根据已验证的项目配置建立服务宿主。
     pub fn from_compiled(compiled: CompiledProject) -> Self {
-        Self::build(compiled, None)
+        Self::build(compiled, None, None)
     }
 
-    /// 根据已验证配置建立把日志保存在所属服务目录的宿主。
+    /// 根据已验证配置建立以服务目录保存日志并作为默认工作路径的宿主。
     pub fn from_compiled_at(compiled: CompiledProject, service_root: &std::path::Path) -> Self {
         let file_logs = Arc::new(FileLogStore::for_service(service_root));
-        Self::build(compiled, Some(file_logs))
+        Self::build(compiled, Some(file_logs), Some(service_root.to_path_buf()))
     }
 
     /// 组合共享组件和可选的服务目录文件日志存储。
-    fn build(compiled: CompiledProject, file_logs: Option<Arc<FileLogStore>>) -> Self {
+    fn build(
+        compiled: CompiledProject,
+        file_logs: Option<Arc<FileLogStore>>,
+        default_working_directory: Option<PathBuf>,
+    ) -> Self {
         let engine = Engine::new(&compiled.spec, compiled.graph);
         let log_writer = file_logs
             .as_ref()
@@ -107,6 +113,7 @@ impl ServiceHost {
         Self {
             spec: compiled.spec,
             dependencies: compiled.dependencies,
+            default_working_directory,
             engine,
             monitor: SystemMonitor::new(),
             resource_cache: ResourceCache::default(),
@@ -347,7 +354,8 @@ impl ServiceHost {
 
     /// 创建一个 Task 进程并启动 stdout/stderr 排空线程。
     fn spawn(&mut self, task_id: &TaskId, identity: TaskRunIdentity) -> std::io::Result<()> {
-        let mut child = spawn_task(&self.spec.tasks[task_id])?;
+        let task = self.runtime_task(task_id);
+        let mut child = spawn_task(&task)?;
         let pid = child.id();
         let sequence = Arc::new(AtomicU64::new(0));
         let mut readers = Vec::new();
@@ -390,9 +398,17 @@ impl ServiceHost {
                 readers,
             },
         );
-        self.health
-            .start(task_id, identity, &self.spec.tasks[task_id]);
+        self.health.start(task_id, identity, &task);
         Ok(())
+    }
+
+    /// 返回应用服务目录默认工作路径后的单次运行 Task。
+    fn runtime_task(&self, task_id: &TaskId) -> crate::core::TaskSpec {
+        let mut task = self.spec.tasks[task_id].clone();
+        if task.cwd.is_none() {
+            task.cwd.clone_from(&self.default_working_directory);
+        }
+        task
     }
 
     /// 停止匹配身份的实例，并把最终退出事件送回引擎。
