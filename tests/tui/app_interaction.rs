@@ -6,7 +6,7 @@ use std::time::Duration;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use procora::core::TaskId;
 use procora::protocol::ServiceActionDto;
-use procora::tui::{ActiveTab, App};
+use procora::tui::{ActiveTab, App, LogSourceFilter};
 
 use crate::support;
 
@@ -133,6 +133,33 @@ fn ctrl_c_requests_clean_exit() {
 }
 
 #[test]
+// 问号打开帮助，帮助层会吞掉业务键并由退出键优先关闭。
+fn help_overlay_blocks_actions_until_closed() {
+    let mut app = App::new(support::snapshot());
+    app.set_control_allowed(true);
+
+    assert!(app.handle_key(KeyCode::Char('?')));
+    assert!(app.help_visible());
+    assert!(!app.handle_key(KeyCode::Char('r')));
+    assert_eq!(app.take_pending_action(), None);
+    assert!(app.handle_key(KeyCode::Char('q')));
+    assert!(!app.help_visible());
+    assert!(!app.should_quit());
+}
+
+#[test]
+// 页面切换会启动短时转场并可由事件循环推进到完成。
+fn tab_transition_advances_to_completion() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_key(KeyCode::Tab);
+    assert!(app.transition_active());
+    assert!(app.advance_transition(Duration::from_secs(1)));
+    assert!(!app.transition_active());
+    assert!(!app.advance_transition(Duration::from_millis(50)));
+}
+
+#[test]
 // task日志会保留间隙标记和最新内容。
 fn task_logs_keep_gap_marker_and_latest_content() {
     let mut app = App::new(support::snapshot());
@@ -186,6 +213,21 @@ fn log_search_filter_navigation_and_clear_are_stateful() {
     assert_eq!(app.take_pending_log_clear(), Some(task_id.clone()));
     assert!(app.clear_log(&task_id));
     assert!(app.log_text(&task_id).is_none());
+}
+
+#[test]
+// v键按全部、Procora、子进程顺序循环日志来源。
+fn log_source_filter_cycles_with_v_key() {
+    let mut app = App::new(support::snapshot());
+    app.handle_key(KeyCode::Char('3'));
+
+    assert_eq!(app.log_source_filter(), LogSourceFilter::All);
+    assert!(app.handle_key(KeyCode::Char('v')));
+    assert_eq!(app.log_source_filter(), LogSourceFilter::Procora);
+    assert!(app.handle_key(KeyCode::Char('v')));
+    assert_eq!(app.log_source_filter(), LogSourceFilter::Child);
+    assert!(app.handle_key(KeyCode::Char('v')));
+    assert_eq!(app.log_source_filter(), LogSourceFilter::All);
 }
 
 #[test]

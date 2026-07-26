@@ -15,8 +15,10 @@ impl Center {
                         definition.upload_targets.iter().map(move |(key, target)| {
                             UploadTargetViewDto {
                                 selector: format!("{service_name}::{key}"),
+                                path: target.path.clone(),
                                 kind: target.kind,
                                 max_bytes: target.max_bytes,
+                                restart: target.restart,
                             }
                         })
                     })
@@ -47,6 +49,7 @@ impl Center {
             path: service.root.join(&upload.path),
             kind: upload.kind,
             max_bytes: upload.max_bytes,
+            restart: upload.restart,
         })
     }
 }

@@ -127,6 +127,21 @@ fn create_key_requires_control_capability() {
 }
 
 #[test]
+// 总览帮助层会阻止服务动作，并由问号或退出键优先关闭。
+fn overview_help_blocks_actions_until_closed() {
+    let mut app = OverviewApp::new(vec![service("api", ServiceStatusDto::Running)]);
+    app.set_control_allowed(true);
+
+    assert!(app.handle_key(KeyCode::Char('?')));
+    assert!(app.help_visible());
+    assert!(!app.handle_key(KeyCode::Char('x')));
+    assert_eq!(app.take_pending_action(), None);
+    assert!(app.handle_key(KeyCode::Esc));
+    assert!(!app.help_visible());
+    assert_eq!(app.take_exit(), None);
+}
+
+#[test]
 // 服务刷新后按稳定名称保持选择，已删除项回退到有效索引。
 fn refresh_preserves_stable_selection() {
     let mut app = OverviewApp::new(vec![
@@ -245,4 +260,20 @@ fn empty_and_compact_overview_keep_recovery_hints() {
     assert!(compact.contains("服务总览"));
     assert!(compact.contains("n新建"));
     assert!(compact.contains("q/Esc退出"));
+}
+
+#[test]
+// 总览窄底栏保留帮助入口，帮助层展示当前页面操作。
+fn overview_narrow_footer_and_help_are_discoverable() {
+    let mut app = OverviewApp::new(vec![service("api", ServiceStatusDto::Running)]);
+
+    let narrow = render_text(&app, 32, 12);
+    assert!(narrow.contains("?帮助"));
+    assert!(narrow.contains("q退出"));
+
+    app.handle_key(KeyCode::Char('?'));
+    let help = render_text(&app, 80, 20);
+    assert!(help.contains("快捷键帮助·服务总览"));
+    assert!(help.contains("打开当前服务详情"));
+    assert!(help.contains("关闭帮助"));
 }

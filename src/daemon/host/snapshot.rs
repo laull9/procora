@@ -17,6 +17,10 @@ impl ServiceHost {
             .map(|instance| instance.pid)
             .collect();
         let resources = self.resource_cache.snapshots(&mut self.monitor, roots);
+        let diagnostics = self
+            .diagnostics
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let tasks =
             self.engine
                 .states()
@@ -25,6 +29,11 @@ impl ServiceHost {
                     let resources = self.instances.get(task_id).and_then(|instance| {
                         resources.get(&instance.pid).copied().map(resource_usage)
                     });
+                    let diagnostics = diagnostics.task(task_id);
+                    let message = diagnostics
+                        .last()
+                        .map(|diagnostic| diagnostic.message.clone())
+                        .or_else(|| task_message(*state));
                     TaskView {
                         task_id: task_id.clone(),
                         command: command_label(task),
@@ -32,7 +41,8 @@ impl ServiceHost {
                         health: task_health(state.health),
                         dependencies: task.depends_on.keys().cloned().collect(),
                         resources,
-                        message: task_message(*state),
+                        message,
+                        diagnostics,
                     }
                 })
                 .collect();

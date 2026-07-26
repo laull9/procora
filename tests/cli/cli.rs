@@ -403,16 +403,17 @@ fn push_arguments_remain_stable() {
     assert!(matches!(
         parsed.command,
         Some(Command::Push {
-            source,
+            source: Some(source),
             target: Some(target),
             ssh: Some(ssh),
             remote_bin,
             batch: true,
+            restart: false,
         })
             if source == std::path::Path::new("./dist")
                 && target == "demo::api::release"
                 && ssh == "prod"
-                && remote_bin == "procora"
+                && remote_bin.is_none()
     ));
 }
 
@@ -436,7 +437,75 @@ fn push_target_is_optional_for_remote_discovery() {
             target: None,
             remote_bin,
             ..
-        }) if remote_bin == "~/.local/bin/procora"
+        }) if remote_bin.as_deref() == Some("~/.local/bin/procora")
+    ));
+}
+
+#[test]
+// push允许完全省略来源，以便交互引导接管。
+fn push_source_is_optional_for_interactive_wizard() {
+    let parsed = Cli::try_parse_from(["procora", "push"]).unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Push {
+            source: None,
+            target: None,
+            ssh: None,
+            restart: false,
+            ..
+        })
+    ));
+}
+
+#[test]
+// uploads命令可选择本机清单或远端JSON清单。
+fn uploads_arguments_are_stable() {
+    let local = Cli::try_parse_from(["procora", "uploads"]).unwrap();
+    let remote = Cli::try_parse_from([
+        "procora",
+        "uploads",
+        "--ssh",
+        "prod",
+        "--remote-bin",
+        "~/.local/bin/procora",
+        "--batch",
+        "--json",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        local.command,
+        Some(Command::Uploads {
+            ssh: None,
+            json: false,
+            ..
+        })
+    ));
+    assert!(matches!(
+        remote.command,
+        Some(Command::Uploads {
+            ssh: Some(ssh),
+            remote_bin,
+            batch: true,
+            json: true,
+        }) if ssh == "prod" && remote_bin.as_deref() == Some("~/.local/bin/procora")
+    ));
+}
+
+#[test]
+// update默认安装，check参数只做版本查询。
+fn update_arguments_are_stable() {
+    let install = Cli::try_parse_from(["procora", "update"]).unwrap();
+    let check = Cli::try_parse_from(["procora", "update", "--check"]).unwrap();
+
+    assert!(matches!(
+        install.command,
+        Some(Command::Update { check: false })
+    ));
+    assert!(matches!(
+        check.command,
+        Some(Command::Update { check: true })
     ));
 }
 

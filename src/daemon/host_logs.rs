@@ -12,6 +12,9 @@ use std::{
 use crate::core::TaskId;
 use crate::engine::TaskRunIdentity;
 use crate::log::{FileLogStore, LogFrame, LogStream, TailBuffer};
+use crate::protocol::TaskDiagnosticKindDto;
+
+use super::host::diagnostics;
 
 /// 单条发送给异步磁盘写入器的受限日志消息。
 #[derive(Debug)]
@@ -51,6 +54,10 @@ pub(crate) struct LogReaderContext {
     pub(crate) tail: Arc<Mutex<TailBuffer>>,
     /// 可选的有界磁盘日志队列。
     pub(crate) disk: Option<SyncSender<LogWrite>>,
+    /// 用于综合分析的共享诊断集合。
+    pub(crate) diagnostics: Arc<Mutex<diagnostics::TaskDiagnostics>>,
+    /// 可选的持久日志存储，用于保证读取器诊断能够落盘。
+    pub(crate) files: Option<Arc<FileLogStore>>,
     /// 因磁盘队列拥塞而丢弃的分片计数。
     pub(crate) dropped_chunks: Arc<AtomicU64>,
 }
@@ -176,6 +183,7 @@ pub(crate) fn spawn_log_reader<R: Read + Send + 'static>(
                     );
                 }
                 Err(error) => {
+                    record_output_failure(&context, stream, &error);
                     tracing::warn!(task = %context.task_id, %error, "Task 输出读取失败");
                     break;
                 }
@@ -186,6 +194,36 @@ pub(crate) fn spawn_log_reader<R: Read + Send + 'static>(
     OutputReader {
         handle: Some(handle),
         done,
+    }
+}
+
+/// 把输出管道读取失败同步写入综合分析、内存尾部与文件日志。
+fn record_output_failure(context: &LogReaderContext, stream: LogStream, error: &std::io::Error) {
+    let (message, suggestion) = diagnostics::process_io_error("Task 输出读取失败", error);
+    let recorded = diagnostics::record_shared(
+        &context.diagnostics,
+        &context.task_id,
+        TaskDiagnosticKindDto::Output,
+        message,
+        suggestion,
+    );
+    if !recorded.emit_log {
+        return;
+    }
+    let bytes = diagnostics::styled_log(&recorded.diagnostic);
+    if let Ok(mut tail) = context.tail.lock() {
+        tail.push(LogFrame {
+            task_id: context.task_id.clone(),
+            run_id: context.identity.run_id,
+            sequence: context.sequence.fetch_add(1, Ordering::Relaxed),
+            stream,
+            bytes: bytes.clone(),
+        });
+    }
+    if let Some(files) = &context.files
+        && let Err(error) = files.append_task(&context.task_id, &bytes)
+    {
+        tracing::warn!(task = %context.task_id, %error, "Task 输出诊断日志写入失败");
     }
 }
 

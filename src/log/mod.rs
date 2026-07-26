@@ -10,6 +10,9 @@ use uuid::Uuid;
 
 pub use file_store::{FileLogBatch, FileLogCursor, FileLogError, FileLogPolicy, FileLogStore};
 
+/// Procora 写入 Task 文件日志的结构化诊断行前缀。
+pub const TASK_DIAGNOSTIC_PREFIX: &str = "[Procora 诊断 ·";
+
 /// 删除文本中的 ANSI/ECMA-48 CSI、OSC 和单字符转义序列。
 pub fn strip_ansi(text: &str) -> String {
     let characters = text.chars().collect::<Vec<_>>();
@@ -56,6 +59,11 @@ pub fn strip_ansi(text: &str) -> String {
         }
     }
     output
+}
+
+/// 判断一行日志是否由 Procora 的 Task 诊断管线生成。
+pub fn is_task_diagnostic_line(text: &str) -> bool {
+    strip_ansi(text).starts_with(TASK_DIAGNOSTIC_PREFIX)
 }
 
 /// 日志来源流。

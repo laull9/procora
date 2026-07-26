@@ -10,7 +10,7 @@ use std::{
 
 use procora::config::{ConfigFormat, load_str};
 use procora::daemon::ServiceHost;
-use procora::protocol::{SnapshotSourceDto, TaskStatusDto};
+use procora::protocol::{SnapshotSourceDto, TaskDiagnosticKindDto, TaskStatusDto};
 
 /// 同一进程并行测试使用的临时目录序号。
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -163,6 +163,44 @@ fn retryable_spawn_failure_does_not_break_service_host() {
     host.start().unwrap();
     host.stop().unwrap();
 
+    fs::remove_dir_all(service).unwrap();
+}
+
+#[test]
+// 不可重试的启动错误会进入快照综合分析与带特殊样式的Task日志。
+fn spawn_failure_is_persisted_as_structured_task_diagnostic() {
+    let service = temporary_service();
+    let compiled = load_str(
+        "version: 1\nproject: runtime\ntasks:\n  app:\n    command: procora-command-that-definitely-does-not-exist\n",
+        ConfigFormat::Yaml,
+    )
+    .unwrap();
+    let mut host = ServiceHost::from_compiled_at(compiled, &service);
+
+    let error = host.start().unwrap_err();
+    assert!(error.to_string().contains("启动失败"));
+    let snapshot = host.snapshot(SnapshotSourceDto::CenterLive, true);
+    let task = &snapshot.tasks[0];
+    assert_eq!(task.status, TaskStatusDto::Failed);
+    assert!(
+        task.message
+            .as_deref()
+            .is_some_and(|message| message.contains("未找到文件或目录"))
+    );
+    assert_eq!(task.diagnostics.len(), 1);
+    assert_eq!(task.diagnostics[0].kind, TaskDiagnosticKindDto::Spawn);
+    assert_eq!(task.diagnostics[0].occurrences, 1);
+    assert!(
+        task.diagnostics[0]
+            .suggestion
+            .as_deref()
+            .is_some_and(|suggestion| suggestion.contains("command"))
+    );
+
+    let log = fs::read_to_string(service.join(".procora/logs/tasks/app.log")).unwrap();
+    assert!(log.contains("\u{1b}[2;3;91m"));
+    assert!(log.contains("[Procora 诊断 · 启动]"));
+    assert!(log.contains("未找到文件或目录"));
     fs::remove_dir_all(service).unwrap();
 }
 

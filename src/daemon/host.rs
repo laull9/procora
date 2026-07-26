@@ -11,7 +11,7 @@ use crate::engine::{Engine, EngineCommand, EngineEffect, RuntimeEvent, TaskRunId
 use crate::log::{FileLogStore, LogStream, TailBuffer};
 use crate::monitor::SystemMonitor;
 use crate::process::{ManagedChild, spawn_task};
-use crate::protocol::{LogBatchDto, LogCursorDto};
+use crate::protocol::TaskDiagnosticKindDto;
 use thiserror::Error;
 
 use super::{
@@ -20,7 +20,10 @@ use super::{
     resources::ResourceCache,
 };
 
+pub(super) mod diagnostics;
+mod log_access;
 mod reconfigure;
+mod refresh;
 mod snapshot;
 
 /// 单个 `ServiceHost` 的真实 Task 运行错误。
@@ -80,6 +83,8 @@ pub struct ServiceHost {
     monitor: SystemMonitor,
     resource_cache: ResourceCache,
     logs: Arc<Mutex<TailBuffer>>,
+    diagnostics: Arc<Mutex<diagnostics::TaskDiagnostics>>,
+    diagnostic_sequence: u64,
     file_logs: Option<Arc<FileLogStore>>,
     log_writer: Option<LogWriter>,
     dropped_log_chunks: Arc<AtomicU64>,
@@ -118,6 +123,8 @@ impl ServiceHost {
             monitor: SystemMonitor::new(),
             resource_cache: ResourceCache::default(),
             logs: Arc::new(Mutex::new(TailBuffer::new(4096))),
+            diagnostics: Arc::new(Mutex::new(diagnostics::TaskDiagnostics::default())),
+            diagnostic_sequence: 0,
             file_logs,
             log_writer,
             dropped_log_chunks: Arc::new(AtomicU64::new(0)),
@@ -163,6 +170,10 @@ impl ServiceHost {
     /// 当任一已就绪 Task 无法创建且没有自动重试策略时返回错误。
     pub fn start(&mut self) -> Result<(), ServiceHostError> {
         self.pending_spawns.clear();
+        self.diagnostics
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         let effects = self.engine.command(EngineCommand::StartAll);
         self.execute_effects(effects)
     }
@@ -187,127 +198,6 @@ impl ServiceHost {
         first_error.map_or(Ok(()), Err)
     }
 
-    /// 轮询退出事件与重启退避，返回 Task 状态是否发生变化。
-    ///
-    /// # Panics
-    ///
-    /// 仅当内部 Task 索引在一次同步轮询中违反一致性不变量时 panic。
-    pub fn refresh(&mut self) -> bool {
-        let mut changed = self.start_due_spawns();
-        let task_ids = self.instances.keys().cloned().collect::<Vec<_>>();
-        for task_id in task_ids {
-            let result = self
-                .instances
-                .get_mut(&task_id)
-                .expect("Task 实例仍存在")
-                .child
-                .try_wait();
-            match result {
-                Ok(Some(status)) => {
-                    let mut instance = self.instances.remove(&task_id).expect("实例仍存在");
-                    self.resource_cache.invalidate();
-                    self.health.stop(&task_id, instance.identity);
-                    if let Err(error) = instance.child.cleanup_after_exit() {
-                        tracing::warn!(task = %task_id, %error, "顶层进程退出后清理剩余进程树失败");
-                    }
-                    join_readers(instance.readers);
-                    let effects = self.engine.event(RuntimeEvent::Exited {
-                        task_id: task_id.clone(),
-                        identity: instance.identity,
-                        exit_code: status.code(),
-                        success: exit_succeeded(&self.spec.tasks[&task_id], status),
-                        run_duration_ms: elapsed_millis(instance.started_at),
-                    });
-                    if let Err(error) = self.execute_effects(effects) {
-                        tracing::warn!(%error, "Task 退出后的调度失败");
-                    }
-                    changed = true;
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    tracing::warn!(task = %task_id, %error, "Task 退出状态查询失败");
-                }
-            }
-        }
-        let health_events = self.health.refresh();
-        changed |= !health_events.is_empty();
-        for event in health_events {
-            let effects = self.engine.event(event);
-            if let Err(error) = self.execute_effects(effects) {
-                tracing::warn!(%error, "健康状态变化后的调度失败");
-            }
-        }
-        if changed {
-            self.flush_logs();
-        }
-        changed
-    }
-
-    /// 向所属服务目录中的服务级日志追加内容。
-    ///
-    /// # Errors
-    ///
-    /// 当持久日志已配置但文件写入或压缩失败时返回错误。
-    pub fn append_service_log(&self, bytes: &[u8]) -> Result<(), crate::log::FileLogError> {
-        self.file_logs
-            .as_ref()
-            .map_or(Ok(()), |logs| logs.append_service(bytes))
-    }
-
-    /// 从 Service 本地文件续读指定 Task 日志。
-    ///
-    /// # Errors
-    ///
-    /// 当嵌入模式没有文件存储，或文件与索引无法读取时返回错误。
-    pub fn read_task_log(
-        &self,
-        task_id: &TaskId,
-        cursor: Option<LogCursorDto>,
-        max_bytes: usize,
-    ) -> Result<LogBatchDto, crate::log::FileLogError> {
-        let files = self.file_logs.as_ref().ok_or_else(|| {
-            crate::log::FileLogError::Io(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "嵌入模式没有持久文件日志",
-            ))
-        })?;
-        let batch = files.read_task(
-            task_id,
-            cursor.map(|cursor| crate::log::FileLogCursor {
-                generation: cursor.generation,
-                offset: cursor.offset,
-            }),
-            max_bytes,
-        )?;
-        Ok(LogBatchDto {
-            task_id: task_id.clone(),
-            bytes: batch.bytes,
-            next_cursor: LogCursorDto {
-                generation: batch.next_cursor.generation,
-                offset: batch.next_cursor.offset,
-            },
-            gap: batch.gap,
-        })
-    }
-
-    /// 刷新待写内容并清空指定 Task 的文件日志。
-    ///
-    /// # Errors
-    ///
-    /// 当嵌入模式没有文件存储或日志文件无法更新时返回错误。
-    pub fn clear_task_log(&self, task_id: &TaskId) -> Result<(), crate::log::FileLogError> {
-        self.flush_logs();
-        self.file_logs
-            .as_ref()
-            .ok_or_else(|| {
-                crate::log::FileLogError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "嵌入模式没有持久文件日志",
-                ))
-            })?
-            .clear_task(task_id)
-    }
-
     /// 执行一组引擎副作用并把结果事件送回同一写者。
     fn execute_effects(&mut self, effects: Vec<EngineEffect>) -> Result<(), ServiceHostError> {
         let mut effects = VecDeque::from(effects);
@@ -330,10 +220,32 @@ impl ServiceHost {
                             .event(RuntimeEvent::Spawned { task_id, identity }),
                     ),
                     Err(error) => {
+                        let task = self.runtime_task(&task_id);
+                        let (message, suggestion) = diagnostics::spawn_error(&task, &error);
+                        self.record_task_diagnostic(
+                            &task_id,
+                            Some(identity),
+                            TaskDiagnosticKindDto::Spawn,
+                            message,
+                            suggestion,
+                        );
                         let retry = self.engine.event(RuntimeEvent::SpawnFailed {
                             task_id: task_id.clone(),
                             identity,
                         });
+                        if self
+                            .engine
+                            .state(&task_id)
+                            .is_some_and(|state| state.restart_exhausted)
+                        {
+                            self.record_task_diagnostic(
+                                &task_id,
+                                Some(identity),
+                                TaskDiagnosticKindDto::Restart,
+                                format!("已达到 {} 次自动重启上限", task.max_restarts),
+                                Some("修复启动错误后手动重启，或检查 max_restarts 配置".to_owned()),
+                            );
+                        }
                         if retry.is_empty() {
                             return Err(ServiceHostError::Spawn {
                                 task_id,
@@ -369,6 +281,8 @@ impl ServiceHost {
                     sequence: Arc::clone(&sequence),
                     tail: Arc::clone(&self.logs),
                     disk: self.log_writer.as_ref().map(LogWriter::sender),
+                    diagnostics: Arc::clone(&self.diagnostics),
+                    files: self.file_logs.as_ref().map(Arc::clone),
                     dropped_chunks: Arc::clone(&self.dropped_log_chunks),
                 },
             ));
@@ -383,6 +297,8 @@ impl ServiceHost {
                     sequence,
                     tail: Arc::clone(&self.logs),
                     disk: self.log_writer.as_ref().map(LogWriter::sender),
+                    diagnostics: Arc::clone(&self.diagnostics),
+                    files: self.file_logs.as_ref().map(Arc::clone),
                     dropped_chunks: Arc::clone(&self.dropped_log_chunks),
                 },
             ));
@@ -435,13 +351,24 @@ impl ServiceHost {
         self.resource_cache.invalidate();
         self.health.stop(task_id, identity);
         let timeout = Duration::from_millis(self.spec.tasks[task_id].shutdown_timeout_ms);
-        let outcome = instance
-            .child
-            .stop(timeout)
-            .map_err(|source| ServiceHostError::Process {
-                task_id: task_id.clone(),
-                source,
-            })?;
+        let outcome = match instance.child.stop(timeout) {
+            Ok(outcome) => outcome,
+            Err(source) => {
+                let (message, suggestion) =
+                    diagnostics::process_io_error("Task 进程停止失败", &source);
+                self.record_task_diagnostic(
+                    task_id,
+                    Some(identity),
+                    TaskDiagnosticKindDto::Process,
+                    message,
+                    suggestion,
+                );
+                return Err(ServiceHostError::Process {
+                    task_id: task_id.clone(),
+                    source,
+                });
+            }
+        };
         join_readers(instance.readers);
         Ok(self.engine.event(RuntimeEvent::Exited {
             task_id: task_id.clone(),
@@ -476,13 +403,6 @@ impl ServiceHost {
             }
         }
         changed
-    }
-
-    /// 在限定时间内刷新此前成功进入有界队列的文件日志。
-    fn flush_logs(&self) {
-        if let Some(writer) = &self.log_writer {
-            writer.flush();
-        }
     }
 }
 

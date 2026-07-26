@@ -8,7 +8,7 @@ use ratatui::{
 };
 
 use super::{
-    OverviewApp, text_view,
+    OverviewApp, help_ui, key_hints, text_view,
     ui_support::{bordered_for, detail_label, detail_label_width, display_color_for, format_bytes},
 };
 
@@ -20,12 +20,18 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &OverviewApp) {
     let area = frame.area();
     if area.width < 16 || area.height < 4 {
         render_too_small(frame, area, app);
-        return;
-    }
-    if area.width < 30 || area.height < 10 {
+    } else if area.width < 30 || area.height < 10 {
         render_compact(frame, area, app);
-        return;
+    } else {
+        render_full(frame, area, app);
     }
+    if app.help_visible() {
+        render_help(frame, area, app);
+    }
+}
+
+/// 绘制可以容纳页头、主内容和底栏的完整总览。
+fn render_full(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -35,7 +41,12 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &OverviewApp) {
         ])
         .split(area);
     render_header(frame, sections[0], app);
-    render_services(frame, sections[1], app);
+    render_services(
+        frame,
+        app.transition_area(sections[1]),
+        sections[1].width,
+        app,
+    );
     render_footer(frame, sections[2], app);
 }
 
@@ -90,8 +101,8 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
 }
 
 /// 绘制服务列表与选中服务详情。
-fn render_services(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
-    let direction = if area.width >= 80 {
+fn render_services(frame: &mut Frame<'_>, area: Rect, layout_width: u16, app: &OverviewApp) {
+    let direction = if layout_width >= 80 {
         Direction::Horizontal
     } else {
         Direction::Vertical
@@ -210,23 +221,7 @@ fn render_service_details(
 
 /// 绘制总览操作提示和反馈。
 fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
-    let controls = if area.width < 72 && app.control_allowed() {
-        "j/k 选  Enter 详情  n 新建  / 筛选  s/x/r 控制  d 移除  q 退出"
-    } else if area.width < 72 {
-        "j/k 选择  Enter 详情  / 筛选  o 排序  q 退出"
-    } else if app.control_allowed() {
-        "↑↓/jk 选择  Enter 详情  n 新建  / 筛选  o 排序  O 方向  s/x/r 控制  d 移除  ←→ 横移  q/Esc 退出"
-    } else {
-        "↑↓/jk 选择  Enter 详情  / 筛选  o 排序  O 方向  ←→ 横移  q/Esc 退出"
-    };
-    let auto_scroll = if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
-        "开·高亮冻结"
-    } else if app.auto_scroll_enabled() {
-        "开"
-    } else {
-        "关"
-    };
-    let controls = format!("{controls}  F3 自动横移:{auto_scroll}");
+    let controls = overview_controls(app, area.width);
     let width = usize::from(area.width);
     let mut lines = vec![Line::from(text_view::clipped(&controls, 0, width))];
     if let Some(input) = app.filter_input() {
@@ -247,6 +242,92 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
             .style(Style::default().fg(display_color_for(app.plain_mode(), Color::DarkGray))),
         area,
     );
+}
+
+/// 返回按终端宽度逐级收敛的总览按键提示。
+fn overview_controls(app: &OverviewApp, width: u16) -> String {
+    let auto_scroll = if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
+        "开·冻结"
+    } else if app.auto_scroll_enabled() {
+        "开"
+    } else {
+        "关"
+    };
+    let detailed = if app.control_allowed() {
+        key_hints::join(&[
+            "↑↓/jk 选择",
+            "Enter 详情",
+            "n 新建",
+            "/ 筛选",
+            "o 排序",
+            "O 方向",
+            "s/x/r 控制",
+            "d 移除",
+            "←→ 横移",
+            &format!("F3 自动:{auto_scroll}"),
+            "? 帮助",
+            "q/Esc 退出",
+        ])
+    } else {
+        key_hints::join(&[
+            "↑↓/jk 选择",
+            "Enter 详情",
+            "/ 筛选",
+            "o 排序",
+            "O 方向",
+            "←→ 横移",
+            &format!("F3 自动:{auto_scroll}"),
+            "? 帮助",
+            "q/Esc 退出",
+        ])
+    };
+    let medium = if app.control_allowed() {
+        key_hints::join(&[
+            "j/k 选",
+            "Enter 详情",
+            "n 新建",
+            "/ 筛选",
+            "o 排序",
+            "s/x/r 控制",
+            "? 帮助",
+            "q 退出",
+        ])
+    } else {
+        key_hints::join(&[
+            "j/k 选",
+            "Enter 详情",
+            "/ 筛选",
+            "o 排序",
+            "? 帮助",
+            "q 退出",
+        ])
+    };
+    let standard = if app.control_allowed() {
+        key_hints::join(&[
+            "j/k选",
+            "Enter详情",
+            "n新建",
+            "/筛选",
+            "o排序",
+            "s启动",
+            "x停止",
+            "r重启",
+            "?帮助",
+            "q退出",
+        ])
+    } else {
+        key_hints::join(&["j/k选", "Enter详情", "/筛选", "o排序", "?帮助", "q退出"])
+    };
+    key_hints::adaptive(
+        &[
+            detailed,
+            medium,
+            standard,
+            key_hints::join(&["j/k 选", "Enter", "? 帮助", "q 退出"]),
+            key_hints::join(&["? 帮助", "q 退出"]),
+        ],
+        width,
+    )
 }
 
 /// 绘制受限终端中的服务摘要。
@@ -273,15 +354,41 @@ fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
         }));
     }
     lines.push(Line::from(if app.control_allowed() {
-        "n 新建 · q/Esc 退出"
+        "n新建 · ?帮助 · q/Esc退出"
     } else {
-        "Enter 详情 · q/Esc 退出"
+        "Enter详情 · ?帮助 · q/Esc退出"
     }));
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
             .block(bordered_for(app.plain_mode())),
         area,
+    );
+}
+
+/// 绘制总览页面的完整快捷键帮助。
+fn render_help(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
+    let mut lines = vec![
+        help_ui::key_line("↑↓ / j k", "切换服务", app.plain_mode()),
+        help_ui::key_line("Enter", "打开当前服务详情", app.plain_mode()),
+        help_ui::key_line("/", "按名称、路径或状态筛选", app.plain_mode()),
+        help_ui::key_line("o / O", "切换排序字段 / 方向", app.plain_mode()),
+        help_ui::key_line("← / →", "水平移动折叠文本", app.plain_mode()),
+        help_ui::key_line("F3", "切换全局自动横移", app.plain_mode()),
+    ];
+    if app.control_allowed() {
+        lines.extend([
+            help_ui::key_line("n", "新建托管服务", app.plain_mode()),
+            help_ui::key_line("s / x / r", "启动、停止、重启服务", app.plain_mode()),
+            help_ui::key_line("d d", "二次确认移除服务注册", app.plain_mode()),
+        ]);
+    }
+    help_ui::render(
+        frame,
+        area,
+        "快捷键帮助 · 服务总览",
+        lines,
+        app.plain_mode(),
     );
 }
 

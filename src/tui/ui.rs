@@ -1,6 +1,6 @@
 use std::fmt::Write as _;
 
-use crate::protocol::{SnapshotSourceDto, TaskView};
+use crate::protocol::{SnapshotSourceDto, TaskDiagnosticKindDto, TaskView};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -13,7 +13,7 @@ use super::ui_support::{
     bordered, detail_label, detail_label_width, display_color, resource_labels, source_label,
     status_label, status_visual,
 };
-use super::{ActiveTab, App, text_view};
+use super::{ActiveTab, App, log_filter_ui, text_view, ui_controls};
 
 /// TUI 的强调色。
 const ACCENT: Color = Color::Cyan;
@@ -23,13 +23,18 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
     if area.width < 16 || area.height < 4 {
         render_too_small(frame, area, app);
-        return;
-    }
-    if area.width < 30 || area.height < 10 {
+    } else if area.width < 30 || area.height < 10 {
         render_compact_summary(frame, area, app);
-        return;
+    } else {
+        render_full(frame, area, app);
     }
+    if app.help_visible() {
+        ui_controls::render_help(frame, area, app);
+    }
+}
 
+/// 绘制可以容纳页头、主内容和底栏的完整页面。
+fn render_full(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -39,12 +44,13 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
         ])
         .split(area);
     render_header(frame, sections[0], app);
+    let content = app.transition_area(sections[1]);
     match app.active_tab() {
-        ActiveTab::Tasks => render_tasks(frame, sections[1], app),
-        ActiveTab::Dependencies => render_dependencies(frame, sections[1], app),
-        ActiveTab::Logs => render_logs(frame, sections[1], app),
+        ActiveTab::Tasks => render_tasks(frame, content, sections[1].width, app),
+        ActiveTab::Dependencies => render_dependencies(frame, content, app),
+        ActiveTab::Logs => render_logs(frame, content, app),
     }
-    render_footer(frame, sections[2], app);
+    ui_controls::render_footer(frame, sections[2], app);
 }
 
 /// 绘制项目标题、连接来源和页签。
@@ -84,8 +90,8 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &App) {
 }
 
 /// 绘制任务主从详情页面。
-fn render_tasks(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let direction = if area.width >= 80 {
+fn render_tasks(frame: &mut Frame<'_>, area: Rect, layout_width: u16, app: &App) {
+    let direction = if layout_width >= 80 {
         Direction::Horizontal
     } else {
         Direction::Vertical
@@ -165,15 +171,68 @@ fn render_task_details(frame: &mut Frame<'_>, area: Rect, task: Option<&TaskView
                 detail_line("CPU", &cpu, area.width, app),
                 detail_line("内存", &memory, area.width, app),
             ];
-            if let Some(message) = &task.message {
+            if task.diagnostics.is_empty() {
+                if let Some(message) = &task.message {
+                    lines.push(Line::default());
+                    lines.push(detail_line("说明", message, area.width, app));
+                }
+            } else {
+                let occurrences = task
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.occurrences)
+                    .sum::<u32>();
                 lines.push(Line::default());
-                lines.push(detail_line("说明", message, area.width, app));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "综合分析",
+                        Style::default()
+                            .fg(display_color(app, Color::LightRed))
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" · {} 类 · {occurrences} 次", task.diagnostics.len()),
+                        Style::default().fg(display_color(app, Color::DarkGray)),
+                    ),
+                ]));
+                for diagnostic in task.diagnostics.iter().rev().take(2) {
+                    let message = if diagnostic.occurrences > 1 {
+                        format!("{}（{} 次）", diagnostic.message, diagnostic.occurrences)
+                    } else {
+                        diagnostic.message.clone()
+                    };
+                    lines.push(detail_line(
+                        diagnostic_label(diagnostic.kind),
+                        message,
+                        area.width,
+                        app,
+                    ));
+                }
+                if let Some(suggestion) = task
+                    .diagnostics
+                    .last()
+                    .and_then(|diagnostic| diagnostic.suggestion.as_deref())
+                {
+                    lines.push(detail_line("建议", suggestion, area.width, app));
+                }
             }
             Text::from(lines)
         },
     );
     let details = Paragraph::new(content).block(bordered(app).title("详情"));
     frame.render_widget(details, area);
+}
+
+/// 返回 Task 诊断类别的短标签。
+const fn diagnostic_label(kind: TaskDiagnosticKindDto) -> &'static str {
+    match kind {
+        TaskDiagnosticKindDto::Spawn => "启动",
+        TaskDiagnosticKindDto::Exit => "退出",
+        TaskDiagnosticKindDto::Health => "健康",
+        TaskDiagnosticKindDto::Process => "进程",
+        TaskDiagnosticKindDto::Output => "输出",
+        TaskDiagnosticKindDto::Restart => "重启",
+    }
 }
 
 /// 返回 Task 健康状态的中文标签。
@@ -264,7 +323,12 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
             let _ = write!(position, " · {filter} `{}` {matches}", app.log_query());
         }
         let logs = Paragraph::new(content)
-            .block(bordered(app).title(log_title(area.width, &task, Some(&position), app)))
+            .block(bordered(app).title(log_filter_ui::title(
+                area.width,
+                &task,
+                Some(&position),
+                app,
+            )))
             .scroll((
                 u16::try_from(scroll_top).unwrap_or(u16::MAX),
                 u16::try_from(app.text_offset(true)).unwrap_or(u16::MAX),
@@ -279,67 +343,9 @@ fn render_logs(frame: &mut Frame<'_>, area: Rect, app: &App) {
     };
     let logs = Paragraph::new(message)
         .alignment(Alignment::Center)
-        .block(bordered(app).title(log_title(area.width, &task, None, app)))
+        .block(bordered(app).title(log_filter_ui::title(area.width, &task, None, app)))
         .wrap(Wrap { trim: false });
     frame.render_widget(logs, area);
-}
-
-/// 绘制键盘操作提示。
-fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let live = matches!(
-        app.snapshot().source,
-        SnapshotSourceDto::EmbeddedLive | SnapshotSourceDto::CenterLive
-    );
-    let controls = if app.active_tab() == ActiveTab::Logs {
-        log_controls(app, area.width)
-    } else if area.width < 64 && live && app.control_allowed() && app.config_edit_allowed() {
-        "j/k 选择  Tab 切页  e 编辑  s/x/r 控制  q 退出"
-    } else if area.width < 64 && live && app.control_allowed() {
-        "j/k 选择  Tab 切页  s/x/r 控制  q 退出"
-    } else if area.width < 64 {
-        "j/k 选择  Tab 切页  1/2/3 直达  q 退出"
-    } else if live && app.control_allowed() && app.config_edit_allowed() {
-        "↑↓/jk 选择  Tab 切页  e 编辑配置  s 启动  x 停止  r 重启  q/Esc 退出"
-    } else if live && app.control_allowed() {
-        "↑↓/jk 选择  Tab 切页  ←→ 横移文本  s 启动  x 停止  r 重启  q/Esc 退出"
-    } else {
-        "↑↓/jk 选择任务  Tab 切页  ←→ 横移文本  1/2/3 直达  q/Esc 退出"
-    };
-    let controls = if app.back_navigation() {
-        controls.replace("退出", "返回")
-    } else {
-        controls.to_owned()
-    };
-    let auto_scroll = if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
-        "开·高亮冻结"
-    } else if app.auto_scroll_enabled() {
-        "开"
-    } else {
-        "关"
-    };
-    let controls = if app.active_tab() == ActiveTab::Logs {
-        format!("{controls}  / 搜索  n/N 匹配  f 过滤  C 清空")
-    } else {
-        format!("{controls}  F3 自动横移:{auto_scroll}")
-    };
-    let width = usize::from(area.width);
-    let mut lines = vec![Line::from(text_view::clipped(&controls, 0, width))];
-    if let Some(input) = app.log_search_input() {
-        lines.push(Line::from(text_view::clipped(
-            &format!("搜索日志：{input}_"),
-            0,
-            width,
-        )));
-    } else if let Some(feedback) = app.feedback() {
-        lines.push(Line::from(text_view::clipped(
-            feedback,
-            app.automatic_text_offset(),
-            width,
-        )));
-    }
-    let footer =
-        Paragraph::new(lines).style(Style::default().fg(display_color(app, Color::DarkGray)));
-    frame.render_widget(footer, area);
 }
 
 /// 在小终端中优先保留项目、来源、Task 状态和退出入口。
@@ -378,52 +384,16 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     }
     lines.push(Line::from(
         if app.back_navigation() && app.config_edit_allowed() {
-            "e 编辑配置 · q/Esc 返回 · 放大终端查看详情"
+            "e 编辑 · ? 帮助 · q/Esc 返回 · 放大终端查看详情"
         } else if app.back_navigation() {
-            "q/Esc 返回 · 放大终端查看详情"
+            "? 帮助 · q/Esc 返回 · 放大终端查看详情"
         } else if app.config_edit_allowed() {
-            "e 编辑配置 · q/Esc 退出 · 放大终端查看详情"
+            "e 编辑 · ? 帮助 · q/Esc 退出 · 放大终端查看详情"
         } else {
-            "q/Esc 退出 · 放大终端查看详情"
+            "? 帮助 · q/Esc 退出 · 放大终端查看详情"
         },
     ));
     frame.render_widget(Paragraph::new(lines), area);
-}
-
-/// 构造日志标题，并仅在宽度足够时附加 Task 切换提示。
-fn log_title(area_width: u16, task: &str, position: Option<&str>, app: &App) -> String {
-    let base = position.map_or_else(
-        || format!("日志 · {task}"),
-        |position| format!("日志 · {task} · {position}"),
-    );
-    let switch_hint = if app.plain_mode() {
-        "j/k 切换任务日志"
-    } else {
-        "↑/↓ 切换任务日志"
-    };
-    let expanded = position.map_or_else(
-        || format!("日志 · {task} · {switch_hint}"),
-        |position| format!("日志 · {task} · {switch_hint} · {position}"),
-    );
-    if Line::from(expanded.as_str()).width().saturating_add(4) <= usize::from(area_width) {
-        expanded
-    } else {
-        base
-    }
-}
-
-/// 返回日志页的平台键位与鼠标操作提示。
-fn log_controls(app: &App, width: u16) -> &'static str {
-    match (app.mac_key_hints(), width < 76) {
-        (true, true) => "Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  q 退出",
-        (true, false) => {
-            "↑↓/jk 换任务  ←→ 横移  Fn+↑/↓ 翻页  Fn+←/→ 首尾  滚轮滚动  Tab 切页  q/Esc 退出"
-        }
-        (false, true) => "PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  q 退出",
-        (false, false) => {
-            "↑↓/jk 换任务  ←→ 横移  PgUp/PgDn 翻页  Home/End 首尾  滚轮滚动  Tab 切页  q/Esc 退出"
-        }
-    }
 }
 
 /// 在终端无法容纳稳定布局时显示恢复提示。

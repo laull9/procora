@@ -25,6 +25,7 @@ pub fn snapshot() -> ProjectSnapshot {
                 dependencies: Vec::new(),
                 resources: None,
                 message: None,
+                diagnostics: Vec::new(),
             },
             TaskView {
                 task_id: api,
@@ -34,6 +35,7 @@ pub fn snapshot() -> ProjectSnapshot {
                 dependencies: vec![database],
                 resources: None,
                 message: Some("等待 database 启动".to_owned()),
+                diagnostics: Vec::new(),
             },
         ],
     }

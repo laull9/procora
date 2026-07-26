@@ -23,8 +23,14 @@ pub struct UploadTargetSpec {
     /// 允许上传的来源类型。
     pub kind: UploadKind,
     /// 单次上传允许包含的未压缩文件总字节数。
-    #[serde(default = "default_upload_max_bytes")]
+    #[serde(
+        default = "default_upload_max_bytes",
+        deserialize_with = "crate::config::deserialize_byte_size"
+    )]
     pub max_bytes: u64,
+    /// 目标提交后是否默认重启所属 Service。
+    #[serde(default)]
+    pub restart: bool,
 }
 
 /// 配置前端反序列化使用的上传目标声明。
@@ -33,8 +39,13 @@ pub struct UploadTargetSpec {
 pub(crate) struct RawUploadTarget {
     pub(crate) path: PathBuf,
     pub(crate) kind: UploadKind,
-    #[serde(default = "default_upload_max_bytes")]
+    #[serde(
+        default = "default_upload_max_bytes",
+        deserialize_with = "crate::config::deserialize_byte_size"
+    )]
     pub(crate) max_bytes: u64,
+    #[serde(default)]
+    pub(crate) restart: bool,
 }
 
 impl RawUploadTarget {
@@ -62,6 +73,7 @@ impl RawUploadTarget {
             path: self.path,
             kind: self.kind,
             max_bytes: self.max_bytes,
+            restart: self.restart,
         })
     }
 }

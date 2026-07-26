@@ -5,6 +5,8 @@ use ratatui::{
     text::{Line, Span, Text},
 };
 
+use super::LogSourceFilter;
+
 /// 已解析的一行日志及其不含控制序列的匹配文本。
 #[derive(Clone, Debug, Default)]
 struct StyledLine {
@@ -13,20 +15,31 @@ struct StyledLine {
 }
 
 /// 返回日志在当前搜索与过滤条件下的可见纯文本行。
-pub(crate) fn visible_lines(raw: &[u8], query: &str, filtered: bool) -> Vec<String> {
+pub(crate) fn visible_lines(
+    raw: &[u8],
+    query: &str,
+    filtered: bool,
+    source: LogSourceFilter,
+) -> Vec<String> {
     parse(raw)
         .into_iter()
+        .filter(|line| source_matches(&line.plain, source))
         .filter(|line| !filtered || line_matches(&line.plain, query))
         .map(|line| line.plain)
         .collect()
 }
 
 /// 返回搜索条件在当前可见行中的索引。
-pub(crate) fn match_lines(raw: &[u8], query: &str, filtered: bool) -> Vec<usize> {
+pub(crate) fn match_lines(
+    raw: &[u8],
+    query: &str,
+    filtered: bool,
+    source: LogSourceFilter,
+) -> Vec<usize> {
     if query.is_empty() {
         return Vec::new();
     }
-    visible_lines(raw, query, filtered)
+    visible_lines(raw, query, filtered, source)
         .iter()
         .enumerate()
         .filter_map(|(index, line)| line_matches(line, query).then_some(index))
@@ -38,6 +51,7 @@ pub(crate) fn styled_text(
     raw: &[u8],
     query: &str,
     filtered: bool,
+    source: LogSourceFilter,
     active_match_line: Option<usize>,
     plain_mode: bool,
 ) -> Text<'static> {
@@ -45,6 +59,9 @@ pub(crate) fn styled_text(
     let lines = parse(raw)
         .into_iter()
         .filter_map(|line| {
+            if !source_matches(&line.plain, source) {
+                return None;
+            }
             let matches = line_matches(&line.plain, query);
             if filtered && !matches {
                 return None;
@@ -66,6 +83,16 @@ pub(crate) fn styled_text(
         })
         .collect::<Vec<_>>();
     Text::from(lines)
+}
+
+/// 判断一行是否属于当前选中的日志来源。
+fn source_matches(line: &str, source: LogSourceFilter) -> bool {
+    let procora = crate::log::is_task_diagnostic_line(line);
+    match source {
+        LogSourceFilter::All => true,
+        LogSourceFilter::Procora => procora,
+        LogSourceFilter::Child => !procora,
+    }
 }
 
 /// 执行不区分 ASCII 大小写的日志行包含匹配。
@@ -246,7 +273,7 @@ fn extended_color(values: &[u16]) -> Option<(Color, usize)> {
 mod tests {
     use ratatui::style::Color;
 
-    use super::{parse, visible_lines};
+    use super::{LogSourceFilter, parse, visible_lines};
 
     #[test]
     // ANSI颜色不会进入搜索文本，同时会保留到渲染Span。
@@ -255,8 +282,27 @@ mod tests {
         assert_eq!(lines[0].plain, "normal error");
         assert_eq!(lines[0].spans[1].style.fg, Some(Color::Red));
         assert_eq!(
-            visible_lines(b"ok\n\x1b[31mERROR\x1b[0m\n", "error", true),
+            visible_lines(
+                b"ok\n\x1b[31mERROR\x1b[0m\n",
+                "error",
+                true,
+                LogSourceFilter::All,
+            ),
             ["ERROR"]
+        );
+    }
+
+    #[test]
+    // 来源过滤器能区分结构化诊断与普通子进程输出。
+    fn source_filter_separates_procora_and_child_lines() {
+        let raw = b"child\n\x1b[2;3;91m[Procora \xe8\xaf\x8a\xe6\x96\xad \xc2\xb7 \xe5\x90\xaf\xe5\x8a\xa8] failed\x1b[0m\n";
+        assert_eq!(
+            visible_lines(raw, "", false, LogSourceFilter::Procora),
+            ["[Procora 诊断 · 启动] failed"]
+        );
+        assert_eq!(
+            visible_lines(raw, "", false, LogSourceFilter::Child),
+            ["child"]
         );
     }
 }

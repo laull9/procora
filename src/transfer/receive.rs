@@ -9,12 +9,13 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 
 use crate::config::UploadKind;
+use crate::protocol::ServiceActionDto;
 
 use super::{
     archive,
     protocol::{
-        TRANSFER_PROTOCOL_VERSION, TransferInit, TransferResponse, TransferResult,
-        TransferSelection, TransferTarget,
+        TRANSFER_PROTOCOL_MIN_VERSION, TRANSFER_PROTOCOL_VERSION, TransferInit, TransferResponse,
+        TransferResult, TransferSelection, TransferTarget,
     },
     target,
 };
@@ -24,11 +25,18 @@ pub(crate) fn run() -> anyhow::Result<()> {
     let stdin = std::io::stdin();
     let mut input = BufReader::new(stdin.lock());
     let init: TransferInit = read_json_line(&mut input, "上传请求")?;
-    if init.protocol != TRANSFER_PROTOCOL_VERSION {
+    if !(TRANSFER_PROTOCOL_MIN_VERSION..=TRANSFER_PROTOCOL_VERSION).contains(&init.protocol) {
         bail!(
-            "不支持上传协议版本 {}，当前为 {}",
+            "不支持上传协议版本 {}，远端支持 {}..={}；请升级协议较旧的一端",
             init.protocol,
+            TRANSFER_PROTOCOL_MIN_VERSION,
             TRANSFER_PROTOCOL_VERSION
+        );
+    }
+    if init.restart && init.protocol < 2 {
+        bail!(
+            "客户端请求上传后重启，但协议版本 {} 不支持该能力",
+            init.protocol
         );
     }
     let resolved = negotiate_target(&mut input, &init)?;
@@ -70,8 +78,10 @@ fn negotiate_target(
             })
             .map(|candidate| TransferTarget {
                 selector: candidate.selector,
+                path: candidate.path,
                 kind: candidate.kind,
                 max_bytes: candidate.max_bytes,
+                restart: candidate.restart,
             })
             .collect::<Vec<_>>();
         match compatible.as_slice() {
@@ -80,7 +90,7 @@ fn negotiate_target(
                 init.source_kind,
                 init.content_bytes
             ),
-            [only] => only.selector.clone(),
+            [only] if !init.select_target => only.selector.clone(),
             _ => {
                 send_response(&TransferResponse::Choose {
                     targets: compatible.clone(),
@@ -183,11 +193,21 @@ fn receive_and_commit(
     if resolved.kind == UploadKind::File {
         let _ = fs::remove_dir_all(&stage);
     }
+    let restarted = if init.restart || resolved.restart {
+        crate::cli::api::manage_service(ServiceActionDto::Restart, &resolved.service)
+            .with_context(|| {
+                format!("上传已提交，但自动重启 Service `{}` 失败", resolved.service)
+            })?;
+        true
+    } else {
+        false
+    };
     Ok(TransferResult {
         target: resolved.selector.clone(),
         path: resolved.path.display().to_string(),
         content_bytes: unpacked,
         sha256: init.sha256.clone(),
+        restarted,
     })
 }
 

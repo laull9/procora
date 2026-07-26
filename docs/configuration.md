@@ -219,7 +219,7 @@ dependencies:
 - `mirrors`：主来源失败后按顺序尝试的最多 8 个镜像；每个来源独立应用重试策略。
 - `download.retries`：首次失败后的重试次数，默认 2，最大 10；只重试传输错误和 408、425、429、5xx 等瞬时 HTTP 状态。
 - `download.timeout`：单次 HTTP/SCP 传输的总超时，默认 `2m`，范围 `1s`–`30m`。
-- `download.max_bytes`：单次下载大小上限，默认 2 GiB，最大 64 GiB；HTTP 优先检查 `Content-Length`，并始终在流式写入时再次计数。
+- `download.max_bytes`：单次下载大小上限，默认 2 GiB，最大 64 GiB；既可写整数字节，也可写 `20MB`、`1.5GiB` 等带单位文本。`KB/MB/GB/TB` 按十进制换算，`KiB/MiB/GiB/TiB` 按二进制换算。HTTP 优先检查 `Content-Length`，并始终在流式写入时再次计数。
 - `download.headers`：最多 32 个私有 HTTP 请求头。值中的 `${env.NAME}` 在下载时读取 Procora 进程环境，秘密不会进入安装清单。携带自定义请求头时不跟随重定向，避免跨站泄露凭据。
 - `ssh.identity_file` / `ssh.known_hosts_file`：可选的 OpenSSH 私钥和主机密钥库，支持绝对路径或服务目录相对路径；省略时复用 SSH config、默认密钥和 agent。
 
@@ -491,7 +491,7 @@ uploads:
   assets:
     path: shared/assets
     kind: directory
-    max_bytes: 536870912
+    max_bytes: 512MiB
 
 tasks:
   api:
@@ -500,17 +500,18 @@ tasks:
       release:
         path: releases/api
         kind: directory
-        max_bytes: 2147483648
+        max_bytes: 2GiB
+        restart: true
       config:
         path: config/api.toml
         kind: file
-        max_bytes: 1048576
+        max_bytes: 1MB
 ```
 
-三个目标分别通过 `demo::assets`、`demo::api::release` 和 `demo::api::config` 定位。`path` 必须是 Service 根目录内的非空相对路径，不能包含父目录分量，不能是 Service 根目录本身，也不能进入 `.procora`。`kind` 必须为 `file` 或 `directory`；`max_bytes` 限制归档展开后的普通文件总字节数，默认 2 GiB。
+三个目标分别通过 `demo::assets`、`demo::api::release` 和 `demo::api::config` 定位。`path` 必须是 Service 根目录内的非空相对路径，不能包含父目录分量，不能是 Service 根目录本身，也不能进入 `.procora`。`kind` 必须为 `file` 或 `directory`；`max_bytes` 限制归档展开后的普通文件总字节数，默认 2 GiB，并可使用整数字节、十进制 `KB/MB/GB/TB` 或二进制 `KiB/MiB/GiB/TiB` 文本。带单位值在 YAML 中可直接写；JSON 和 TOML 中应写成字符串。`restart` 默认 `false`；设为 `true` 后，该目标每次成功提交都会重启所属 Service。
 
 当前版本采用完整替换语义：目录上传不会保留远端目标中的旧文件。客户端拒绝本机符号链接和特殊文件；远端完整接收并校验 gzip tar 的 SHA-256、类型和大小后，先备份旧目标，再通过同目录重命名提交，失败时恢复备份。同一目标有跨进程排他锁。
 
-`procora push ./local --ssh prod` 可以省略选择器。远端会从当前活动声明中筛选来源类型一致且大小上限足够的目标：唯一候选自动采用，多个候选由交互终端选择；脚本环境必须用 `--target` 消除歧义。目标清单只返回选择器、类型和大小上限，不向本机暴露服务器路径。
+`procora push ./local --ssh prod` 可以省略选择器。交互终端会从远端当前活动声明中筛选来源类型一致且大小上限足够的目标，并在内联 TUI 中展示选择器、Service 内相对路径、类型和大小上限；`--batch` 下唯一候选自动采用，多个候选要求用 `--target` 消除歧义。`procora uploads [--ssh SSH_TARGET] [--json]` 可独立检查本机或远端完整活动清单。
 
-上传目标属于配置语义，但不会引起 Task 重启。修改目标声明后，先执行 `procora preview demo` 并用返回的 revision 执行 `procora apply demo <revision>`，远端上传只使用 Center 当前已经生效的目标。
+上传目标属于配置语义，默认不会引起 Task 重启。目标声明的 `restart: true` 或客户端的 `procora push ... --restart` 任一开启，都会在原子覆盖成功后请求远端 Center 重新加载并重启目标所属 Service；重启失败会明确报告“上传已提交但重启失败”，避免把运行态误报为已更新。修改目标声明后，先执行 `procora preview demo` 并用返回的 revision 执行 `procora apply demo <revision>`，远端上传只使用 Center 当前已经生效的目标。
