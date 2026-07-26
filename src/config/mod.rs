@@ -1,5 +1,6 @@
 //! 多格式配置读取、校验和任务图编译。
 
+mod byte_size;
 mod dependency;
 mod diff;
 mod discovery;
@@ -14,6 +15,7 @@ mod raw;
 mod task_defaults;
 mod upload;
 
+pub(crate) use byte_size::deserialize_byte_size;
 pub use dependency::{
     DependencyDownloadSpec, DependencyKind, DependencySshSpec, DependencyVerifySpec,
     ManagedDependencies, ManagedDependencySpec, UnpackMode,

@@ -10,16 +10,30 @@ use anyhow::{Context, anyhow, bail};
 
 use super::{
     archive::{self, PreparedArchive},
-    protocol::{
-        TRANSFER_PROTOCOL_VERSION, TransferInit, TransferResponse, TransferResult,
-        TransferSelection, TransferTarget,
-    },
+    protocol::{TransferInit, TransferResponse, TransferResult, TransferSelection, protocol_for},
 };
 
 /// 一次 SSH 会话失败后的登录回退判定。
-struct SessionFailure {
-    error: anyhow::Error,
-    retryable_login: bool,
+pub(super) struct SessionFailure {
+    pub(super) error: anyhow::Error,
+    pub(super) retryable_login: bool,
+    pub(super) remote_missing: bool,
+}
+
+/// 一次成功上传后供 CLI 记忆与反馈使用的结果。
+pub(crate) struct PushOutcome {
+    pub(crate) target: String,
+    pub(crate) ssh_target: String,
+    pub(crate) remote_bin: String,
+}
+
+/// 单次 SSH 传输的交互与部署选项。
+#[derive(Clone, Copy)]
+struct TransferOptions<'a> {
+    interactive_login: bool,
+    batch_selection: bool,
+    restart: bool,
+    preferred_target: Option<&'a str>,
 }
 
 /// 准备本地内容、自动登录 SSH，并在连接或认证失败时进入人工回退。
@@ -27,10 +41,14 @@ pub(crate) fn push(
     source: &Path,
     selector: Option<&str>,
     configured_target: Option<&str>,
-    remote_bin: &str,
+    remote_bin: Option<&str>,
     batch: bool,
-) -> anyhow::Result<()> {
-    validate_remote_bin(remote_bin)?;
+    restart: bool,
+    preferred_target: Option<&str>,
+) -> anyhow::Result<PushOutcome> {
+    let configured_remote_bin = remote_bin;
+    let mut remote_bin = remote_bin.unwrap_or("procora").to_owned();
+    validate_remote_bin(&remote_bin)?;
     let archive = archive::prepare(source)?;
     println!(
         "已准备：{}，{}（压缩后 {}）",
@@ -38,45 +56,70 @@ pub(crate) fn push(
         human_bytes(archive.content_bytes),
         human_bytes(archive.archive_bytes)
     );
-    let inferred = configured_target
-        .map(str::to_owned)
-        .or_else(|| {
-            env::var("PROCORA_SSH_TARGET")
-                .ok()
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-        })
-        .or_else(|| selector.and_then(|value| value.split("::").next().map(str::to_owned)));
-    let initial_target = match inferred {
-        Some(target) => target,
-        None if batch => {
-            bail!("无法推断 SSH 目标；未指定 `--target` 时请同时提供 `--ssh <目标>`")
-        }
-        None => prompt_target(None)?,
-    };
-    validate_ssh_target(&initial_target)?;
+    let initial_target = resolve_ssh_target(configured_target, selector, batch)?;
 
-    let result = match transfer(
+    let (attempt, used_ssh_target, interactive_login) = match transfer(
         &initial_target,
         selector,
         &archive,
-        remote_bin,
-        false,
-        batch,
+        &remote_bin,
+        TransferOptions {
+            interactive_login: false,
+            batch_selection: batch,
+            restart,
+            preferred_target,
+        },
     ) {
-        Ok(result) => result,
+        Ok(result) => (Ok(result), initial_target, false),
         Err(failure) if failure.retryable_login && !batch => {
             eprintln!("SSH 自动登录失败：{:#}", failure.error);
             let target = prompt_target(Some(&initial_target))?;
             validate_ssh_target(&target)?;
             eprintln!("将由 OpenSSH 请求主机确认或密码；Procora 不读取或保存密码。");
-            transfer(&target, selector, &archive, remote_bin, true, false)
-                .map_err(|failure| failure.error)?
+            let result = transfer(
+                &target,
+                selector,
+                &archive,
+                &remote_bin,
+                TransferOptions {
+                    interactive_login: true,
+                    batch_selection: false,
+                    restart,
+                    preferred_target,
+                },
+            );
+            (result, target, true)
         }
         Err(failure) if failure.retryable_login => {
             return Err(failure
                 .error
                 .context("SSH 自动登录失败（batch 模式不会询问密码）"));
+        }
+        Err(failure) => (Err(failure), initial_target, false),
+    };
+    let result = match attempt {
+        Ok(result) => result,
+        Err(failure) if failure.remote_missing => {
+            remote_bin = super::remote_binary::resolve_after_missing(
+                &used_ssh_target,
+                configured_remote_bin,
+                batch,
+                interactive_login,
+                failure.error,
+            )?;
+            transfer(
+                &used_ssh_target,
+                selector,
+                &archive,
+                &remote_bin,
+                TransferOptions {
+                    interactive_login,
+                    batch_selection: batch,
+                    restart,
+                    preferred_target,
+                },
+            )
+            .map_err(|failure| failure.error)?
         }
         Err(failure) => return Err(failure.error),
     };
@@ -87,7 +130,40 @@ pub(crate) fn push(
         human_bytes(result.content_bytes),
         result.sha256
     );
-    Ok(())
+    if result.restarted {
+        println!("已自动重启：{}", service_from_selector(&result.target));
+    }
+    Ok(PushOutcome {
+        target: result.target,
+        ssh_target: used_ssh_target,
+        remote_bin,
+    })
+}
+
+/// 按显式参数、环境变量和上传选择器顺序确定 SSH 目标。
+fn resolve_ssh_target(
+    configured_target: Option<&str>,
+    selector: Option<&str>,
+    batch: bool,
+) -> anyhow::Result<String> {
+    let inferred = configured_target
+        .map(str::to_owned)
+        .or_else(|| {
+            env::var("PROCORA_SSH_TARGET")
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+        })
+        .or_else(|| selector.and_then(|value| value.split("::").next().map(str::to_owned)));
+    let target = match inferred {
+        Some(target) => target,
+        None if batch => {
+            bail!("无法推断 SSH 目标；未指定 `--target` 时请同时提供 `--ssh <目标>`")
+        }
+        None => prompt_target(None)?,
+    };
+    validate_ssh_target(&target)?;
+    Ok(target)
 }
 
 /// 在单条 SSH 连接中完成目标协商、正文发送和结果读取。
@@ -96,20 +172,18 @@ fn transfer(
     selector: Option<&str>,
     archive: &PreparedArchive,
     remote_bin: &str,
-    interactive_login: bool,
-    batch_selection: bool,
+    options: TransferOptions<'_>,
 ) -> Result<TransferResult, SessionFailure> {
-    let mut command = base_ssh(interactive_login);
+    let mut command = base_ssh(options.interactive_login);
     command
         .arg(ssh_target)
         .args([remote_bin, "__receive"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| SessionFailure {
-        error: anyhow!(error).context("无法启动本机 ssh；请先安装 OpenSSH 客户端"),
-        retryable_login: false,
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| local_ssh_failure(error, "无法启动本机 ssh；请先安装 OpenSSH 客户端"))?;
     let stderr = child.stderr.take().expect("SSH 子进程已配置 stderr 管道");
     let stderr_reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -125,18 +199,24 @@ fn transfer(
         send_json(
             &mut input,
             &TransferInit {
-                protocol: TRANSFER_PROTOCOL_VERSION,
+                protocol: protocol_for(options.restart),
                 target: selector.map(str::to_owned),
                 source_kind: archive.kind,
                 archive_bytes: archive.archive_bytes,
                 content_bytes: archive.content_bytes,
                 sha256: archive.sha256.clone(),
+                select_target: selector.is_none() && !options.batch_selection,
+                restart: options.restart,
             },
         )?;
         let selected = match read_response(&mut output)? {
             TransferResponse::Ready { target } => target,
             TransferResponse::Choose { targets } => {
-                let target = choose_target(&targets, batch_selection)?;
+                let target = super::remote_selection::choose_target(
+                    &targets,
+                    options.batch_selection,
+                    options.preferred_target,
+                )?;
                 send_json(
                     &mut input,
                     &TransferSelection {
@@ -167,24 +247,44 @@ fn transfer(
     drop(input);
     let status = child.wait();
     let stderr = stderr_reader.join().unwrap_or_default();
-    let status = status.map_err(|error| SessionFailure {
-        error: anyhow!(error).context("等待 SSH 上传进程失败"),
-        retryable_login: false,
-    })?;
+    let status = status.map_err(|error| local_ssh_failure(error, "等待 SSH 上传进程失败"))?;
     match (operation, status.success()) {
         (Ok(result), true) => Ok(result),
         (operation, _) => {
             let process_error = process_error(status, &stderr, remote_bin);
-            let error = match operation {
+            let mut error = match operation {
                 Ok(_) => process_error,
                 Err(error) => anyhow!("{error:#}; {process_error:#}"),
             };
+            if options.restart && transfer_protocol_incompatible(&stderr) {
+                error = error.context(
+                    "远端不支持客户端请求的上传后重启能力；可升级远端 Procora，或移除 `--restart` 仅执行兼容覆盖",
+                );
+            }
             Err(SessionFailure {
                 error,
                 retryable_login: !negotiated && status.code() == Some(255),
+                remote_missing: !negotiated
+                    && remote_command_missing(status.code(), &String::from_utf8_lossy(&stderr)),
             })
         }
     }
+}
+
+/// 把本机 SSH 进程错误转换为不会触发远端或登录回退的失败。
+fn local_ssh_failure(error: io::Error, message: &'static str) -> SessionFailure {
+    SessionFailure {
+        error: anyhow!(error).context(message),
+        retryable_login: false,
+        remote_missing: false,
+    }
+}
+
+/// 识别远端对上传协议或能力版本的明确拒绝。
+fn transfer_protocol_incompatible(stderr: &[u8]) -> bool {
+    let message = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    message.contains("不支持上传协议版本")
+        || (message.contains("unsupported") && message.contains("protocol"))
 }
 
 /// 从远端读取一条有界 JSON 协议消息。
@@ -203,46 +303,6 @@ fn send_json(output: &mut impl Write, value: &impl serde::Serialize) -> anyhow::
     output.write_all(b"\n")?;
     output.flush()?;
     Ok(())
-}
-
-/// 在交互终端列出远端候选目标并读取编号。
-fn choose_target(targets: &[TransferTarget], batch: bool) -> anyhow::Result<String> {
-    if batch || !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        let selectors = targets
-            .iter()
-            .map(|target| target.selector.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        bail!("远端有多个兼容上传目标：{selectors}；请用 `--target <选择器>` 明确指定");
-    }
-    eprintln!("发现多个兼容上传目标：");
-    for (index, target) in targets.iter().enumerate() {
-        eprintln!(
-            "  {}. {}  {:?}  上限 {}",
-            index + 1,
-            target.selector,
-            target.kind,
-            human_bytes(target.max_bytes)
-        );
-    }
-    loop {
-        eprint!("选择 [1]：");
-        io::stderr().flush()?;
-        let mut value = String::new();
-        if io::stdin().read_line(&mut value)? == 0 {
-            bail!("未选择上传目标");
-        }
-        let value = value.trim();
-        let index = if value.is_empty() {
-            Some(1)
-        } else {
-            value.parse::<usize>().ok()
-        };
-        if let Some(target) = index.and_then(|index| targets.get(index.saturating_sub(1))) {
-            return Ok(target.selector.clone());
-        }
-        eprintln!("请输入 1 到 {} 之间的编号。", targets.len());
-    }
 }
 
 /// 复制归档正文，并仅在真实终端中显示节流后的覆盖式进度。
@@ -284,7 +344,7 @@ fn copy_with_progress(
 }
 
 /// 把 SSH 退出状态和远端错误转换成可操作提示。
-fn process_error(status: ExitStatus, stderr: &[u8], remote_bin: &str) -> anyhow::Error {
+pub(super) fn process_error(status: ExitStatus, stderr: &[u8], remote_bin: &str) -> anyhow::Error {
     let message = String::from_utf8_lossy(stderr).trim().to_owned();
     let detail = if message.is_empty() {
         status.to_string()
@@ -301,7 +361,7 @@ fn process_error(status: ExitStatus, stderr: &[u8], remote_bin: &str) -> anyhow:
 }
 
 /// 同时识别 Unix、PowerShell 与 cmd 的远端命令缺失诊断。
-fn remote_command_missing(status_code: Option<i32>, message: &str) -> bool {
+pub(super) fn remote_command_missing(status_code: Option<i32>, message: &str) -> bool {
     if status_code == Some(127) {
         return true;
     }
@@ -313,7 +373,7 @@ fn remote_command_missing(status_code: Option<i32>, message: &str) -> bool {
 }
 
 /// 构造自动或交互模式共享的 OpenSSH 安全参数。
-fn base_ssh(interactive: bool) -> Command {
+pub(super) fn base_ssh(interactive: bool) -> Command {
     let mut command = Command::new("ssh");
     command.args([
         "-T",
@@ -346,7 +406,7 @@ fn base_ssh(interactive: bool) -> Command {
 }
 
 /// 允许用户输入或修改 `[user@]host` / SSH config 别名。
-fn prompt_target(default: Option<&str>) -> anyhow::Result<String> {
+pub(super) fn prompt_target(default: Option<&str>) -> anyhow::Result<String> {
     if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
         bail!("当前不是交互终端；请用 `--ssh <目标>` 指定地址，或先配置 SSH 密钥后重试");
     }
@@ -367,7 +427,7 @@ fn prompt_target(default: Option<&str>) -> anyhow::Result<String> {
 }
 
 /// 避免 SSH 目标被解释成额外命令行选项或不可见控制输入。
-fn validate_ssh_target(target: &str) -> anyhow::Result<()> {
+pub(super) fn validate_ssh_target(target: &str) -> anyhow::Result<()> {
     if target.is_empty()
         || target.starts_with('-')
         || target
@@ -380,7 +440,7 @@ fn validate_ssh_target(target: &str) -> anyhow::Result<()> {
 }
 
 /// 限制远端可执行文件参数，避免经由 SSH 远端 shell 注入命令。
-fn validate_remote_bin(value: &str) -> anyhow::Result<()> {
+pub(super) fn validate_remote_bin(value: &str) -> anyhow::Result<()> {
     if value.is_empty()
         || value.starts_with('-')
         || !value.bytes().all(|byte| {
@@ -393,8 +453,13 @@ fn validate_remote_bin(value: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 从已经过远端校验的选择器提取所属 Service。
+fn service_from_selector(selector: &str) -> &str {
+    selector.split("::").next().unwrap_or(selector)
+}
+
 /// 以紧凑二进制单位展示传输大小。
-fn human_bytes(bytes: u64) -> String {
+pub(super) fn human_bytes(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = 1024 * KIB;
     const GIB: u64 = 1024 * MIB;
@@ -417,35 +482,4 @@ fn format_unit(bytes: u64, unit: u64, label: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{remote_command_missing, validate_remote_bin};
-
-    #[test]
-    // 远端可执行文件兼容 Unix 与 Windows 的无空格绝对路径。
-    fn remote_binary_accepts_cross_platform_paths() {
-        assert!(validate_remote_bin("/home/demo/.local/bin/procora").is_ok());
-        assert!(validate_remote_bin("C:/Tools/procora.exe").is_ok());
-        assert!(validate_remote_bin(r"C:\Tools\procora.exe").is_ok());
-    }
-
-    #[test]
-    // 远端可执行文件仍拒绝会改变 shell 命令边界的字符。
-    fn remote_binary_rejects_shell_metacharacters() {
-        assert!(validate_remote_bin("procora;whoami").is_err());
-        assert!(validate_remote_bin("C:/Program Files/procora.exe").is_err());
-    }
-
-    #[test]
-    // Windows shell 不依赖 Unix 退出码也能识别命令缺失。
-    fn windows_shell_missing_command_is_recognized() {
-        assert!(remote_command_missing(
-            Some(1),
-            "CommandNotFoundException: procora was not found"
-        ));
-        assert!(remote_command_missing(
-            Some(1),
-            "'procora' is not recognized as an internal or external command"
-        ));
-        assert!(!remote_command_missing(Some(1), "Permission denied"));
-    }
-}
+mod tests;

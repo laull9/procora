@@ -1,6 +1,6 @@
 [package]
 name = "procora"
-version = "0.5.3"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.95"
 publish = false
@@ -29,6 +29,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
 serde_json = "1.0"
 serde_path_to_error = "0.1.20"
+semver = "1.0"
 sha2 = "0.10"
 strsim = "0.11"
 syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy", "yaml-load"] }

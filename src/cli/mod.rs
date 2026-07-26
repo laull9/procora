@@ -8,6 +8,8 @@ mod center_runtime;
 mod elevation;
 mod logs;
 mod project;
+mod push;
+mod push_memory;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
 pub mod session;
@@ -110,7 +112,7 @@ pub enum Command {
     /// 通过 SSH 上传本机文件或目录到远端配置声明的目标。
     Push {
         /// 本机普通文件或目录。
-        source: PathBuf,
+        source: Option<PathBuf>,
         /// `service::name` 或 `service::task::name` 上传目标。
         #[arg(long, value_name = "SELECTOR")]
         target: Option<String>,
@@ -118,11 +120,35 @@ pub enum Command {
         #[arg(long, value_name = "SSH_TARGET")]
         ssh: Option<String>,
         /// 远端 Procora 命令名或 Unix/Windows 无空格路径。
-        #[arg(long, value_name = "PATH", default_value = "procora")]
-        remote_bin: String,
+        #[arg(long, value_name = "PATH")]
+        remote_bin: Option<String>,
         /// 禁止人工目标与密码登录回退，适合 CI。
         #[arg(long)]
         batch: bool,
+        /// 为本次上传强制开启重启；省略时遵循远端目标配置。
+        #[arg(long)]
+        restart: bool,
+    },
+    /// 列出本机或远端当前可用的声明式上传目标与路径。
+    Uploads {
+        /// SSH config 别名或 `[user@]host`；省略时读取本机全局 Procora。
+        #[arg(long, value_name = "SSH_TARGET")]
+        ssh: Option<String>,
+        /// 远端 Procora 命令名或 Unix/Windows 无空格路径。
+        #[arg(long, value_name = "PATH")]
+        remote_bin: Option<String>,
+        /// 禁止 SSH 密码登录回退，适合 CI。
+        #[arg(long)]
+        batch: bool,
+        /// 以稳定 JSON 数组输出，适合脚本处理。
+        #[arg(long)]
+        json: bool,
+    },
+    /// 从 GitHub Releases 自动下载并安装当前平台的最新版本。
+    Update {
+        /// 只检查是否存在新版本，不下载或覆盖文件。
+        #[arg(long)]
+        check: bool,
     },
     /// 启动当前用户的全局 Procora 服务器。
     Up,
@@ -217,6 +243,34 @@ pub enum Command {
     /// 从 SSH 标准输入接收并提交声明式上传目标。
     #[command(name = "__receive", hide = true)]
     Receive,
+    /// 输出当前 Center 的上传目标 JSON，供 SSH 客户端调用。
+    #[command(name = "__upload-targets", hide = true)]
+    UploadTargets,
+    /// 在 Windows 原进程退出后完成可执行文件替换。
+    #[cfg(target_os = "windows")]
+    #[command(name = "__apply-update", hide = true)]
+    ApplyUpdate {
+        /// 已下载并验证的新可执行文件。
+        #[arg(long)]
+        source: PathBuf,
+        /// 当前正在运行的可执行文件。
+        #[arg(long)]
+        destination: PathBuf,
+        /// 更新前全局 Center 是否正在运行。
+        #[arg(long)]
+        restart_center: bool,
+    },
+    /// 在 Windows 更新助手退出后清理暂存文件。
+    #[cfg(target_os = "windows")]
+    #[command(name = "__cleanup-update", hide = true)]
+    CleanupUpdate {
+        /// 要在解锁后删除的更新助手。
+        #[arg(long)]
+        path: PathBuf,
+    },
+    /// 使用新版本对账此前正在运行的全局 Center。
+    #[command(name = "__reconcile-update", hide = true)]
+    ReconcileUpdate,
     /// 运行内部全局服务器进程。
     #[command(name = "__daemon", hide = true)]
     Daemon {
@@ -378,6 +432,12 @@ pub fn run_with(cli: Cli) -> anyhow::Result<()> {
         );
     }
     runtime::dispatch(cli.command, cli.target.as_deref())
+}
+
+/// 返回更新前全局 Center 是否正在运行，不隐式启动。
+pub(crate) fn center_is_running_for_update() -> anyhow::Result<bool> {
+    let paths = center_runtime::center_paths()?;
+    Ok(crate::daemon::CenterClient::new(paths.endpoint).ping())
 }
 
 /// 向 Windows 集成测试暴露稳定的 UAC 脚本契约。

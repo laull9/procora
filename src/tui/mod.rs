@@ -37,6 +37,7 @@ mod new_service_wizard;
 mod overview_app;
 mod overview_collection;
 mod overview_ui;
+mod path_picker;
 mod selection;
 mod text_view;
 mod transition;
@@ -67,6 +68,7 @@ pub use config_runner::edit_config;
 pub use log_source::LogSourceFilter;
 pub use overview_app::{OverviewAction, OverviewApp, OverviewExit};
 pub use overview_collection::OverviewSort;
+pub(crate) use path_picker::select_path_inline;
 pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline};
 
 pub(crate) use new_service_wizard::{NewServiceChoice, run as run_new_service_wizard};

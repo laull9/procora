@@ -12,7 +12,7 @@ use clap_complete::generate;
 
 use super::{
     Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, logs, project,
-    session, source, suggestion, template,
+    push, session, source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -39,13 +39,15 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             ssh,
             remote_bin,
             batch,
-        }) => crate::transfer::push(
-            &source,
-            target.as_deref(),
-            ssh.as_deref(),
-            &remote_bin,
+            restart,
+        }) => push::run(source, target.as_deref(), ssh, remote_bin, batch, restart),
+        Some(Command::Uploads {
+            ssh,
+            remote_bin,
             batch,
-        ),
+            json,
+        }) => push::list(ssh.as_deref(), remote_bin.as_deref(), batch, json),
+        Some(Command::Update { check }) => crate::update::run(check),
         Some(Command::Up) => up(),
         Some(Command::Down) => down(),
         Some(Command::Status) => status(),
@@ -91,6 +93,16 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             Ok(())
         }
         Some(Command::Receive) => crate::transfer::receive(),
+        Some(Command::UploadTargets) => crate::transfer::print_local_targets_json(),
+        #[cfg(target_os = "windows")]
+        Some(Command::ApplyUpdate {
+            source,
+            destination,
+            restart_center,
+        }) => crate::update::apply_windows(&source, &destination, restart_center),
+        #[cfg(target_os = "windows")]
+        Some(Command::CleanupUpdate { path }) => crate::update::cleanup_windows(&path),
+        Some(Command::ReconcileUpdate) => center_runtime::ensure_center().map(|_| ()),
         Some(Command::Daemon { endpoint, database }) => {
             run_center_server(&endpoint, &database).context("全局 Procora 服务器退出")
         }

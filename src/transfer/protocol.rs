@@ -2,8 +2,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::UploadKind;
 
-/// SSH 标准输入上传协议的当前主版本。
-pub(crate) const TRANSFER_PROTOCOL_VERSION: u32 = 1;
+/// SSH 接收器仍支持的最早上传协议。
+pub(crate) const TRANSFER_PROTOCOL_MIN_VERSION: u32 = 1;
+
+/// SSH 标准输入上传协议的当前最高版本。
+pub(crate) const TRANSFER_PROTOCOL_VERSION: u32 = 2;
+
+/// 根据本次请求使用的强语义选择最低兼容协议。
+pub(crate) const fn protocol_for(restart: bool) -> u32 {
+    if restart { 2 } else { 1 }
+}
 
 /// 建立上传会话时由本机发送的单行 JSON 请求头。
 #[derive(Debug, Deserialize, Serialize)]
@@ -14,14 +22,24 @@ pub(crate) struct TransferInit {
     pub(crate) archive_bytes: u64,
     pub(crate) content_bytes: u64,
     pub(crate) sha256: String,
+    /// 远端有兼容目标时仍要求客户端显式选择。
+    #[serde(default)]
+    pub(crate) select_target: bool,
+    /// 目标提交后是否重启所属 Service。
+    #[serde(default)]
+    pub(crate) restart: bool,
 }
 
 /// 远端提供给本机选择的兼容上传目标。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct TransferTarget {
     pub(crate) selector: String,
+    #[serde(default)]
+    pub(crate) path: std::path::PathBuf,
     pub(crate) kind: UploadKind,
     pub(crate) max_bytes: u64,
+    #[serde(default)]
+    pub(crate) restart: bool,
 }
 
 /// 多目标协商时由本机返回的选择。
@@ -46,4 +64,7 @@ pub(crate) struct TransferResult {
     pub(crate) path: String,
     pub(crate) content_bytes: u64,
     pub(crate) sha256: String,
+    /// 上传提交后是否已经完成所属 Service 重启。
+    #[serde(default)]
+    pub(crate) restarted: bool,
 }

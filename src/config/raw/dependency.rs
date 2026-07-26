@@ -79,7 +79,10 @@ struct RawDependencyDownload {
         deserialize_with = "crate::config::deserialize_duration"
     )]
     timeout_ms: u64,
-    #[serde(default = "default_download_max_bytes")]
+    #[serde(
+        default = "default_download_max_bytes",
+        deserialize_with = "crate::config::deserialize_byte_size"
+    )]
     max_bytes: u64,
     #[serde(default)]
     headers: BTreeMap<String, String>,

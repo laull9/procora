@@ -40,6 +40,8 @@ irm https://raw.githubusercontent.com/laull9/procora/main/scripts/install.ps1 | 
 
 安装脚本不会自动修改 PATH，也不会擅自注册后台托管。首次安装后若命令不可见，用户需要把安装目录加入自己的 PATH；需要登录后自动运行 Center 时，由用户显式执行 `procora enable`，卸载前可执行 `procora disable`。
 
+已有安装可运行 `procora update --check` 查询最新正式 Release，或运行 `procora update` 自动下载当前平台归档、验证同名 `.sha256` 并替换当前可执行文件。Linux/macOS 使用同目录原子替换；Windows 在当前进程退出后由新版本更新助手完成可恢复替换。更新前正在运行的全局 Center 会由新版本自动对账重启，原本离线则保持离线。自更新和安装脚本都支持用 `PROCORA_REPO=owner/repo` 选择 fork。
+
 ## 一键卸载
 
 卸载脚本先运行 `procora disable`，成功后只删除安装目录中的命令，保留数据库、运行状态和各 Service 日志：

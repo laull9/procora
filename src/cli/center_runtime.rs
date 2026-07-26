@@ -23,6 +23,8 @@ const CENTER_START_TIMEOUT: Duration = Duration::from_secs(5);
 /// 当前用户中心服务器使用的稳定 IPC、数据库和可执行文件位置。
 #[derive(Clone, Debug)]
 pub(super) struct CenterPaths {
+    /// 全局 Procora 数据根目录。
+    pub(super) home: PathBuf,
     /// 当前用户独立的本地 IPC 端点。
     pub(super) endpoint: String,
     /// 中心服务注册表数据库。
@@ -114,6 +116,7 @@ pub(super) fn center_paths() -> anyhow::Result<CenterPaths> {
         "procora"
     };
     Ok(CenterPaths {
+        home: home.clone(),
         endpoint: format!("procora-center-{:016x}", hasher.finish()),
         database: home.join("procora.sqlite3"),
         executable: home.join("bin").join(executable_name),

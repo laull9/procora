@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 
 /// 单个日志流分片允许携带的原始字节数，避免 JSON 编码膨胀触发 IPC 帧上限。
 pub const LOG_STREAM_CHUNK_BYTES: u32 = 64 * 1024;
@@ -201,6 +201,8 @@ pub struct UploadTargetDto {
     pub kind: UploadKind,
     /// 单次未压缩内容字节上限。
     pub max_bytes: u64,
+    /// 目标提交后是否默认重启所属 Service。
+    pub restart: bool,
 }
 
 /// Center 对客户端公开的活动上传目标摘要。
@@ -208,10 +210,16 @@ pub struct UploadTargetDto {
 pub struct UploadTargetViewDto {
     /// `service::name` 或 `service::task::name` 完整选择器。
     pub selector: String,
+    /// 相对于所属 Service 根目录的声明路径。
+    #[serde(default)]
+    pub path: PathBuf,
     /// 允许接收的来源类型。
     pub kind: UploadKind,
     /// 单次未压缩内容字节上限。
     pub max_bytes: u64,
+    /// 目标提交后是否默认重启所属 Service。
+    #[serde(default)]
+    pub restart: bool,
 }
 
 /// 尚未提交的配置候选及其相对当前有效修订的影响。

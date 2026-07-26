@@ -2,26 +2,50 @@
 
 ## 远端声明式上传
 
-服务端配置可在 Service 或 Task 下声明 `uploads`，客户端以稳定选择器上传而不暴露远端路径：
+服务端配置可在 Service 或 Task 下声明 `uploads`，客户端通过稳定选择器上传：
 
 ```bash
-# 远端只有一个兼容目标时自动选择
-procora push ./assets --ssh prod
-
-# 显式选择，SSH 别名可从 Service 名 demo 推断
-procora push ./assets --target demo::assets
+# 完整 CLI：直接执行，不打开 TUI
 procora push ./assets --target demo::assets --ssh prod
-procora push ./target/release/api --target demo::api::release --ssh user@server
+procora push ./target/release/api --target demo::api::release --ssh user@server --restart
+
+# 参数不完整：交互终端打开内联引导
+procora push
+procora push ./assets
+procora push ./assets --ssh prod
 
 # 远端非交互 shell 找不到 procora 时显式给出安装路径
 procora push ./assets --ssh prod --remote-bin ~/.local/bin/procora
+
+# 检查本机或远端当前生效的上传项、类型、上限和 Service 内路径
+procora uploads
+procora uploads --ssh prod
+procora uploads --ssh prod --json --batch
 ```
 
-SSH 目标按 `--ssh`、`PROCORA_SSH_TARGET`、选择器中的 Service 名依次推断；同时省略 `--target` 和 SSH 地址时，交互终端会直接询问 SSH 目标。省略 `--target` 后，远端根据来源是文件还是目录及未压缩大小筛选活动目标：只有一个时自动选择，多个时列出编号供本机选择；非交互环境会列出选择器并要求用 `--target` 明确指定。
+来源、`--target` 和 `--ssh` 都完整时不会打开 TUI。缺少来源时，小 TUI 可选择直接输入、终端路径浏览器或系统原生文件/文件夹选择器；缺少 SSH 目标时会列出上次使用值、`PROCORA_SSH_TARGET`、选择器推断值和 `~/.ssh/config` 中不含通配符的 Host；缺少上传选择器时，会在同一 SSH 会话中拉取与来源类型和大小兼容的活动上传项，并展示选择器、Service 内相对路径、类型、上限与远端默认重启策略。首次没有记忆时，运行行为默认遵循远端配置，不由客户端强制开启重启。
 
-目标发现、选择和归档传输在同一条 SSH 会话内完成，密码认证不会因预探测重复发生。Procora 先以 `BatchMode=yes` 和严格 known_hosts 自动认证；只有 OpenSSH 以 255 表示连接或认证失败，且标准输入/错误连接终端时，才提示用户修改 SSH 目标并启动普通 OpenSSH。远端 Procora 缺失、Center 离线或目标配置错误不会被误判为密码问题。密码提示完全由 OpenSSH 从控制终端处理，不支持密码命令行参数，也不会写入 Procora 配置或日志。`--batch` 禁止登录和目标选择交互，适合 CI。
+PATH 正常命中时，目标发现、选择和归档传输在同一条 SSH 会话内完成，不做额外预探测。Procora 先以 `BatchMode=yes` 和严格 known_hosts 自动认证；只有 OpenSSH 以 255 表示连接或认证失败，且标准输入/错误连接终端时，才提示用户确认或修改 SSH 目标并启动普通 OpenSSH。远端 Procora 命令不存在时，会用能力握手自动检查 Unix/macOS 的 `~/.local/bin`、`~/bin`、`/usr/local/bin`、Homebrew 与系统目录，以及 Windows 常见命令和用户安装位置；仍未找到时，交互终端允许用户直接输入远端路径，`--batch` 则要求显式传入 `--remote-bin <PATH>`。Center 离线或目标配置错误不会被误判为密码问题。密码完全由 OpenSSH 从控制终端读取，不支持密码命令行参数，也不会写入 Procora 配置、日志或引导记忆。
 
-远端必须运行同一用户的 Center，上传目标从当前已经 apply 的有效配置解析。只保存在磁盘、尚未 apply 的候选声明不会提前生效。默认远端命令为 `procora`；如果 SSH 非交互 shell 的 `PATH` 不包含安装目录，可用 `--remote-bin ~/.local/bin/procora` 指定不含空格的命令路径。
+成功上传后，非敏感的来源方式、上次来源、SSH 目标、远端 Procora 路径、上传选择器和重启偏好会写入全局 Procora 数据目录的 `cli-memory/push.json`，只用作下一次交互默认值；现场目录不会生成记忆文件，显式 CLI 参数始终优先。`--restart` 可为本次上传显式开启自动重启，远端上传目标也可用 `restart: true` 声明默认策略；两者任一开启时，Procora 都只在目标原子提交成功后重启所属 Service。两处都未开启时默认不重启。`--batch` 禁止登录和目标选择交互，缺少本机来源时直接报错，适合 CI。
+
+远端必须运行同一用户的 Center，上传目标从当前已经 apply 的有效配置解析。只保存在磁盘、尚未 apply 的候选声明不会提前生效。默认远端命令为 `procora`；自动查找仍无法定位时，可用 `--remote-bin ~/.local/bin/procora` 指定不含空格的命令路径。
+
+SSH 互传不要求两端 Procora 包版本完全一致，而按传输协议范围和本次使用的能力校验。当前普通覆盖使用兼容协议 1，可与旧接收端互传；CLI 显式 `--restart` 使用协议 2，旧接收端不支持时会报告所需能力和双方协议边界，不会静默忽略重启。当前接收端兼容协议 1–2，因此旧客户端仍能上传，并可由远端配置的 `restart: true` 决定是否重启。`procora __ssh-probe` 返回机器可读的协议范围和能力列表，便于部署诊断。
+
+## 自动更新
+
+```bash
+# 只检查，不下载或覆盖
+procora update --check
+
+# 下载、校验并安装当前平台的最新正式 Release
+procora update
+```
+
+`procora update` 查询 GitHub 最新正式 Release，按语义版本比较当前版本，选择与安装脚本相同的六平台发布产物，并在 128 MiB 上限内流式下载。只有同名 `.sha256` 校验通过、归档中恰好只有 `procora` 或 `procora.exe` 普通文件时才会安装。Linux/macOS 在当前可执行文件目录中暂存并原子替换；Windows 启动已验证的新版本助手，在旧进程退出后完成可恢复替换和暂存清理。安装目录不可写时会保留旧版本并提示修正权限。
+
+如果更新前全局 Center 正在运行，新版本会在可执行文件替换后自动对账并正常重启 Center；原先离线时不会因为更新而隐式启动。`PROCORA_REPO=owner/repo` 可与安装脚本一样改为 fork 的 Release 来源。
 
 ## 1. 固定层级
 

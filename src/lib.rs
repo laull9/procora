@@ -30,3 +30,5 @@ pub mod storage;
 mod transfer;
 /// 终端用户界面。
 pub mod tui;
+/// 从官方发布产物安全更新当前可执行文件。
+mod update;

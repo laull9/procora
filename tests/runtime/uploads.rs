@@ -57,22 +57,25 @@ fn file_archive(bytes: &[u8]) -> Vec<u8> {
 
 /// 向隐藏接收器发送一条完整协议流。
 fn receive(
-    binary: &str,
     home: &std::path::Path,
     target: Option<&str>,
     kind: &str,
     archive: &[u8],
     content_bytes: u64,
     selection: Option<&str>,
+    restart: bool,
 ) -> Output {
+    let binary = env!("CARGO_BIN_EXE_procora");
     let digest = format!("{:x}", Sha256::digest(archive));
     let header = serde_json::json!({
-        "protocol": 1,
+        "protocol": if restart { 2 } else { 1 },
         "target": target,
         "source_kind": kind,
         "archive_bytes": archive.len(),
         "content_bytes": content_bytes,
         "sha256": digest,
+        "select_target": false,
+        "restart": restart,
     });
     let mut child = Command::new(binary)
         .arg("__receive")
@@ -119,7 +122,7 @@ fn receiver_replaces_declared_targets_atomically() {
     let service = temporary_directory("service");
     fs::write(
         service.join("procora.yaml"),
-        "version: 1\nproject: demo\nuploads:\n  release:\n    path: deployed\n    kind: directory\n    max_bytes: 1024\n  assets:\n    path: public\n    kind: directory\n    max_bytes: 1024\n  config:\n    path: config/app.toml\n    kind: file\n    max_bytes: 1024\ntasks: {}\n",
+        "version: 1\nproject: demo\nuploads:\n  release:\n    path: deployed\n    kind: directory\n    max_bytes: 1024\n    restart: true\n  assets:\n    path: public\n    kind: directory\n    max_bytes: 1024\n  config:\n    path: config/app.toml\n    kind: file\n    max_bytes: 1024\ntasks: {}\n",
     )
     .unwrap();
     fs::create_dir(service.join("deployed")).unwrap();
@@ -141,13 +144,13 @@ fn receiver_replaces_declared_targets_atomically() {
 
     let archive = directory_archive();
     let output = receive(
-        binary,
         &home,
         None,
         "directory",
         &archive,
         11,
         Some("demo::release"),
+        false,
     );
     assert!(
         output.status.success(),
@@ -164,9 +167,10 @@ fn receiver_replaces_declared_targets_atomically() {
         "data"
     );
     assert!(!service.join("deployed/stale.txt").exists());
+    assert!(String::from_utf8_lossy(&output.stdout).contains(r#""restarted":true"#));
 
     let archive = file_archive(b"port = 8080\n");
-    let output = receive(binary, &home, None, "file", &archive, 12, None);
+    let output = receive(&home, None, "file", &archive, 12, None, true);
     assert!(
         output.status.success(),
         "stdout:\n{}\nstderr:\n{}",
@@ -177,6 +181,7 @@ fn receiver_replaces_declared_targets_atomically() {
         fs::read_to_string(service.join("config/app.toml")).unwrap(),
         "port = 8080\n"
     );
+    assert!(String::from_utf8_lossy(&output.stdout).contains(r#""restarted":true"#));
 
     let down = Command::new(binary)
         .arg("down")
@@ -186,4 +191,35 @@ fn receiver_replaces_declared_targets_atomically() {
     assert!(down.status.success());
     remove_directory_when_released(&home);
     fs::remove_dir_all(service).unwrap();
+}
+
+#[test]
+// 接收器拒绝超出兼容范围的协议并报告双方可操作的版本边界。
+fn receiver_reports_supported_protocol_range() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .arg("__receive")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(
+        child.stdin.take().unwrap(),
+        "{}",
+        serde_json::json!({
+            "protocol": 3,
+            "target": "demo::release",
+            "source_kind": "file",
+            "archive_bytes": 0,
+            "content_bytes": 0,
+            "sha256": "",
+        })
+    )
+    .unwrap();
+
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("远端支持 1..=2"));
+    assert!(stderr.contains("升级协议较旧的一端"));
 }

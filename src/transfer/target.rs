@@ -11,10 +11,12 @@ use crate::protocol::UploadTargetViewDto;
 /// 一次上传从已注册服务配置解析出的最终目标。
 pub(crate) struct ResolvedTarget {
     pub(crate) selector: String,
+    pub(crate) service: String,
     pub(crate) root: PathBuf,
     pub(crate) path: PathBuf,
     pub(crate) kind: UploadKind,
     pub(crate) max_bytes: u64,
+    pub(crate) restart: bool,
 }
 
 /// 从 `service::name` 或 `service::task::name` 解析已声明目标。
@@ -35,10 +37,12 @@ pub(crate) fn resolve(selector: &str) -> anyhow::Result<ResolvedTarget> {
     }
     Ok(ResolvedTarget {
         selector: selector.to_owned(),
+        service: service_name.to_owned(),
         root: upload.root,
         path: destination,
         kind: upload.kind,
         max_bytes: upload.max_bytes,
+        restart: upload.restart,
     })
 }
 

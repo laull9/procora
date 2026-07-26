@@ -60,6 +60,13 @@ irm https://raw.githubusercontent.com/laull9/procora/main/scripts/install.ps1 | 
 
 脚本不会修改 `PATH`。如果安装后找不到命令，请按安装器提示把目录加入 `PATH`。
 
+安装后可直接检查或拉取最新正式版本；更新会验证 Release 的 SHA-256，并在更新前全局 Center 已运行时用新版本自动对账：
+
+```bash
+procora update --check
+procora update
+```
+
 可通过环境变量自定义安装：
 
 | 变量 | 用途 | 默认值 |
@@ -121,6 +128,7 @@ procora
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |
 | `procora enable/disable` | 启用或停用用户级开机自启动 |
+| `procora update [--check]` | 检查或安装最新正式版本 |
 | `procora completions <shell>` | 生成 Shell 补全 |
 | `procora mcp` | 启动 stdio MCP 服务 |
 

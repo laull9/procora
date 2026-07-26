@@ -678,7 +678,7 @@ fn form_roundtrip_preserves_upload_targets() {
     let path = temporary_config();
     fs::write(
         &path,
-        "version: 1\nproject: demo\nuploads:\n  assets:\n    path: shared/assets\n    kind: directory\ntasks:\n  api:\n    command: api\n    uploads:\n      config:\n        path: config/api.toml\n        kind: file\n        max_bytes: 1024\n",
+        "version: 1\nproject: demo\nuploads:\n  assets:\n    path: shared/assets\n    kind: directory\ntasks:\n  api:\n    command: api\n    uploads:\n      config:\n        path: config/api.toml\n        kind: file\n        max_bytes: 1024\n        restart: true\n",
     )
     .unwrap();
     let mut editor = ConfigEditor::open(&path).unwrap();
@@ -690,6 +690,7 @@ fn form_roundtrip_preserves_upload_targets() {
     assert!(compiled.upload_targets.contains_key("assets"));
     assert!(compiled.upload_targets.contains_key("api::config"));
     assert_eq!(compiled.upload_targets["api::config"].max_bytes, 1024);
+    assert!(compiled.upload_targets["api::config"].restart);
     fs::remove_file(path).unwrap();
 }
 

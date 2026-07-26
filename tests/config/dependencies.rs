@@ -54,7 +54,7 @@ dependencies:
     download:
       retries: 4
       timeout: 45s
-      max_bytes: 4096
+      max_bytes: 20MB
       headers:
         Authorization: "Bearer ${env.PROCORA_TOKEN}"
 tasks: {}
@@ -66,7 +66,7 @@ tasks: {}
     assert_eq!(asset.mirrors.len(), 2);
     assert_eq!(asset.download.retries, 4);
     assert_eq!(asset.download.timeout_ms, 45_000);
-    assert_eq!(asset.download.max_bytes, 4096);
+    assert_eq!(asset.download.max_bytes, 20_000_000);
     assert_eq!(
         asset.download.headers["Authorization"],
         "Bearer ${env.PROCORA_TOKEN}"
