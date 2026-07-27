@@ -16,3 +16,10 @@
 - 单个代码文件原则上不超过 500 行，按职责拆分。
 - 关键行为必须有测试，集成测试统一放在 `tests/`。
 - 测试函数名使用英文 `snake_case`；中文测试意图写在函数前注释中。
+
+## Windows 路径兼容性
+
+- Windows 上不得让普通驱动器路径或 UNC 路径的 `\\?\` / `\\?\UNC\` verbatim 前缀进入配置模型、持久化数据、协议、界面文本或外部命令参数。
+- 源码不得绕过 `crate::platform` 直接调用 `std::fs::canonicalize`、`Path::canonicalize`、`std::env::current_dir`、`std::env::current_exe` 或 `std::env::temp_dir`；统一使用平台模块的对应入口。
+- 从操作系统、用户输入、旧持久化数据或第三方组件接收绝对路径时，必须在边界调用 `simplify_path`；规范化已存在路径时调用 `platform::canonicalize`。
+- 修改路径处理时必须覆盖驱动器路径、UNC 路径、非 ASCII 路径、重复清理和外部命令/持久化边界，并确认不会误改 `\\.\` 或无法安全降级的设备命名空间。

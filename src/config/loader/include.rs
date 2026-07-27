@@ -42,7 +42,8 @@ fn load_capture(path: &Path, entry_override: Option<&[u8]>) -> ConfigLoadCapture
     let root = entry
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let mut capture_root = fs::canonicalize(&root).unwrap_or(root);
+    let mut capture_root = crate::platform::canonicalize(&root)
+        .unwrap_or_else(|_| crate::platform::simplify_path(&root));
     let mut inputs = BTreeMap::new();
     let mut watched_paths = BTreeSet::from([entry.clone()]);
     let mut definition_documents = 0;
@@ -75,7 +76,7 @@ fn load_entry(
     watched_paths: &mut BTreeSet<PathBuf>,
     definition_documents: &mut usize,
 ) -> Result<crate::config::CompiledProject, ConfigError> {
-    let canonical = fs::canonicalize(entry).map_err(|source| ConfigError::Read {
+    let canonical = crate::platform::canonicalize(entry).map_err(|source| ConfigError::Read {
         path: entry.to_path_buf(),
         source,
     })?;
@@ -234,10 +235,11 @@ fn resolve_include(
     }
     let attempted = base.join(include);
     context.watched_paths.insert(attempted.clone());
-    let canonical = fs::canonicalize(&attempted).map_err(|source| ConfigError::Read {
-        path: attempted,
-        source,
-    })?;
+    let canonical =
+        crate::platform::canonicalize(&attempted).map_err(|source| ConfigError::Read {
+            path: attempted,
+            source,
+        })?;
     if !canonical.starts_with(&context.root) {
         return Err(ConfigError::Include(format!(
             "`{}` 通过符号链接越过服务根目录",
@@ -281,9 +283,9 @@ fn parse_bytes(path: &Path, bytes: &[u8]) -> Result<RawProject, ConfigError> {
 /// 返回不要求入口已经存在的绝对路径。
 fn absolute_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
-        path.to_path_buf()
+        crate::platform::simplify_path(path)
     } else {
-        std::env::current_dir()
+        crate::platform::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     }

@@ -313,6 +313,7 @@ fn process_command(program: &str, arguments: &[String]) -> Command {
         return command;
     }
 
+    let program = crate::platform::simplify_path(std::path::Path::new(program));
     let mut command = Command::new(program);
     command.args(arguments);
     command

@@ -88,6 +88,7 @@ fn explicit_task_cwd_overrides_service_root() {
 }
 
 /// 等待一次性 Task 全部退出并刷新日志。
+#[cfg(unix)]
 fn wait_until_stopped(host: &mut ServiceHost) {
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     loop {

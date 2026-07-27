@@ -406,7 +406,21 @@ fn collect_files(
 
 /// 相对本地来源以服务目录为基准解析。
 fn resolve_local_source(root: &Path, source: &str) -> String {
-    if source.contains("://") || source.contains(":/") || Path::new(source).is_absolute() {
+    if let Some(path) = source.strip_prefix("file://") {
+        let path = Path::new(path);
+        let path = if path.is_absolute() {
+            crate::platform::simplify_path(path)
+        } else {
+            root.join(path)
+        };
+        return format!("file://{}", path.display());
+    }
+    let path = Path::new(source);
+    if path.is_absolute() {
+        crate::platform::simplify_path(path)
+            .to_string_lossy()
+            .into_owned()
+    } else if source.contains("://") || source.contains(":/") {
         source.to_owned()
     } else {
         root.join(source).to_string_lossy().into_owned()
@@ -415,11 +429,12 @@ fn resolve_local_source(root: &Path, source: &str) -> String {
 
 /// 相对 SSH 辅助文件以服务目录为基准解析。
 fn resolve_service_path(root: &Path, path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
+    let path = if path.is_absolute() {
         path
     } else {
         root.join(path)
-    }
+    };
+    crate::platform::simplify_path(&path)
 }
 
 /// 按显式路径、类型和单根目录规则选择最终管理对象。

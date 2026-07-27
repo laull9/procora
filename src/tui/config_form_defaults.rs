@@ -80,7 +80,7 @@ impl FormDependency {
 /// 尽量把已规范化路径还原为相对当前入口目录的可移植写法。
 pub(super) fn form_path(path: &Path, base_directory: Option<&Path>) -> String {
     let relative = base_directory
-        .and_then(|base| std::fs::canonicalize(base).ok())
+        .and_then(|base| crate::platform::canonicalize(base).ok())
         .and_then(|base| path.strip_prefix(base).ok())
         .unwrap_or(path);
     let text = relative.to_string_lossy().into_owned();

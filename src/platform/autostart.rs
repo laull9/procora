@@ -52,10 +52,12 @@ impl DaemonAutostart {
         endpoint: impl Into<String>,
         database: impl Into<PathBuf>,
     ) -> Self {
+        let executable = executable.into();
+        let database = database.into();
         Self {
-            executable: executable.into(),
+            executable: crate::platform::simplify_path(&executable),
             endpoint: endpoint.into(),
-            database: database.into(),
+            database: crate::platform::simplify_path(&database),
         }
     }
 

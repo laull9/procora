@@ -122,7 +122,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::platform::temp_dir().join(format!(
             "procora-verify-busy-{}-{nonce}",
             std::process::id()
         ));

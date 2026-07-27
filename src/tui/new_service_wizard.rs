@@ -1,6 +1,6 @@
 //! 总览页新建托管服务的目录与名称向导。
 
-use std::{fs, io, path::PathBuf};
+use std::{io, path::PathBuf};
 
 use crate::core::ServiceName;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -88,7 +88,8 @@ impl NewServiceWizard {
             DirectoryPickerEvent::Cancel => self.result = WizardResult::Cancelled,
             DirectoryPickerEvent::Selected { value, .. } => {
                 let directory = self.base_directory.join(value);
-                let directory = fs::canonicalize(&directory).unwrap_or(directory);
+                let directory = crate::platform::canonicalize(&directory)
+                    .unwrap_or_else(|_| crate::platform::simplify_path(&directory));
                 if contains_config_entry(&directory) {
                     self.result = WizardResult::Created(NewServiceChoice {
                         directory,

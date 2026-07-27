@@ -12,11 +12,14 @@ use std::{
 #[cfg(windows)]
 use interprocess::local_socket::Stream;
 use interprocess::local_socket::{GenericNamespaced, ListenerOptions, prelude::*};
+#[cfg(unix)]
 use procora::core::TaskId;
 use procora::daemon::{CenterClient, IpcError, run_center_server};
+#[cfg(unix)]
+use procora::protocol::LOG_STREAM_CHUNK_BYTES;
 use procora::protocol::{
-    CenterRequest, CenterResponse, ClientHello, LOG_STREAM_CHUNK_BYTES, PROTOCOL_VERSION,
-    ServiceActionDto, ServiceSelectorDto, ServiceStatusDto,
+    CenterRequest, CenterResponse, ClientHello, PROTOCOL_VERSION, ServiceActionDto,
+    ServiceSelectorDto, ServiceStatusDto,
 };
 
 /// 同一进程并行测试使用的临时端点去重序列。

@@ -534,6 +534,7 @@ impl ConfigEditor {
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| std::path::Path::new("."));
-        fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf())
+        crate::platform::canonicalize(parent)
+            .unwrap_or_else(|_| crate::platform::simplify_path(parent))
     }
 }

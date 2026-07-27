@@ -29,7 +29,7 @@ pub(super) fn run_center_overview(
         match crate::tui::run_overview_live(&mut app, control_allowed, &mut overview_session)? {
             OverviewExit::Quit => return Ok(()),
             OverviewExit::CreateService => {
-                let current = std::env::current_dir().map_err(anyhow::Error::from)?;
+                let current = crate::platform::current_dir().map_err(anyhow::Error::from)?;
                 if let Some(choice) = crate::tui::run_new_service_wizard(current)?
                     && let Err(error) = new_service::create(client, choice)
                 {

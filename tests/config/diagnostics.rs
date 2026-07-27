@@ -76,7 +76,7 @@ fn relative_working_directory_uses_config_directory() {
     assert_eq!(
         cwd,
         Some(
-            fs::canonicalize(&directory)
+            procora::platform::canonicalize(&directory)
                 .unwrap()
                 .join(PathBuf::from("app"))
         )

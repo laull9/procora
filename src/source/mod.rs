@@ -26,7 +26,10 @@ pub struct LocalFileSource {
 impl LocalFileSource {
     /// 创建指向指定配置入口的定义源。
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        let path = path.into();
+        Self {
+            path: crate::platform::simplify_path(&path),
+        }
     }
 
     /// 返回配置入口路径。
@@ -75,9 +78,9 @@ impl LocalFileSource {
 /// 返回不要求目标已经存在的绝对监听路径。
 fn absolute_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
-        path.to_path_buf()
+        crate::platform::simplify_path(path)
     } else {
-        std::env::current_dir()
+        crate::platform::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     }

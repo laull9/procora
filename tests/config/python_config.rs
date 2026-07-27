@@ -75,7 +75,7 @@ fn explicit_python_entry_uses_shared_validation_and_script_directory() {
     assert_eq!(compiled.spec.project, "demo");
     assert_eq!(
         compiled.spec.tasks.values().next().unwrap().cwd.as_deref(),
-        Some(fs::canonicalize(&root).unwrap().as_path())
+        Some(procora::platform::canonicalize(&root).unwrap().as_path())
     );
     fs::remove_dir_all(root).unwrap();
 }
