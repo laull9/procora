@@ -18,7 +18,10 @@ use anyhow::{Context, bail};
 use directories::ProjectDirs;
 
 /// 全新安装或版本替换后等待中心服务就绪的最长时间。
-const CENTER_START_TIMEOUT: Duration = Duration::from_secs(5);
+///
+/// Windows 首次复制并启动可执行文件时可能经过实时防护扫描，CI 与低速磁盘上
+/// 五秒不足以覆盖冷启动，但轮询仍会在服务就绪后立即返回。
+const CENTER_START_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 当前用户中心服务器使用的稳定 IPC、数据库和可执行文件位置。
 #[derive(Clone, Debug)]
