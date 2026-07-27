@@ -131,7 +131,12 @@ fn up_status_down_form_center_lifecycle() {
         &home,
         "up",
     );
-    assert!(up.status.success());
+    assert!(
+        up.status.success(),
+        "中心启动失败\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&up.stdout),
+        String::from_utf8_lossy(&up.stderr)
+    );
     assert!(String::from_utf8_lossy(&up.stdout).contains("全局 Procora：运行中"));
     let installed = if cfg!(windows) {
         home.join("bin/procora.exe")
@@ -270,7 +275,12 @@ fn add_and_remove_form_top_level_service_lifecycle() {
         &home,
         "add",
     );
-    assert!(opened.status.success());
+    assert!(
+        opened.status.success(),
+        "服务注册失败\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&opened.stdout),
+        String::from_utf8_lossy(&opened.stderr)
+    );
     let removed = ProcessCommand::new(binary)
         .args(["remove", "removable"])
         .env("PROCORA_HOME", &home)
@@ -317,7 +327,12 @@ fn relative_add_uses_client_working_directory() {
         &home,
         "relative-add-up",
     );
-    assert!(up.status.success());
+    assert!(
+        up.status.success(),
+        "中心启动失败\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&up.stdout),
+        String::from_utf8_lossy(&up.stderr)
+    );
 
     let opened = ProcessCommand::new(binary)
         .args(["add", "."])

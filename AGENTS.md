@@ -6,6 +6,8 @@
 - `dev` 禁止强推；`main` 只保存可发布版本，禁止直接提交或强推。
 - 发布时由 `dev` 向 `main` 提 PR 并使用 merge commit；合入后仅在 `main` 创建与 `Cargo.toml` 版本一致的 `vX.Y.Z` 标签。
 - 紧急修复同样直接在 `dev` 完成并按正常发布流程进入 `main`，不从 `main` 或其他分支回合到 `dev`。
+- `Cargo.toml` 的 `[package].version` 是当前 Procora 版本的唯一事实来源；代码、测试、工作流和文档凡需引用当前版本，必须通过 `env!("CARGO_PKG_VERSION")`、`cargo metadata` 或由清单动态读取，禁止在 User-Agent、标签和输出断言中硬编码当前发布版本。
+- 调整版本时只直接修改 `Cargo.toml` 并同步 `Cargo.lock`，随后搜索旧版本号，确认剩余命中仅为有明确测试语义的历史版本或协议夹具。
 - 推送前必须通过 `cargo fmt --all -- --check`、`cargo clippy --locked --all-targets --all-features -- -D warnings` 和 `cargo test --locked --all-features`。
 
 ## 代码规范

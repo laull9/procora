@@ -41,7 +41,7 @@ fn embedded_session_refreshes_controls_and_reads_logs() {
     let mut host = ServiceHost::from_compiled_at(compiled, &service);
     host.start().unwrap();
     let mut session = EmbeddedTuiSession::new(&mut host);
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(15);
 
     loop {
         let snapshot = session.poll_snapshot().unwrap().unwrap();

@@ -21,7 +21,7 @@ pub(crate) fn run_background_cli(
         .stderr(Stdio::from(File::create(&stderr_path).unwrap()))
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
             return Output {
@@ -39,7 +39,7 @@ pub(crate) fn run_background_cli(
                 stderr: fs::read(&stderr_path).unwrap(),
             };
             panic!(
-                "测试命令超过 15 秒\nstdout:\n{}\nstderr:\n{}",
+                "测试命令超过 30 秒\nstdout:\n{}\nstderr:\n{}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr),
             );

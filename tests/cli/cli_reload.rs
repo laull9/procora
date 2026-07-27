@@ -39,7 +39,12 @@ fn preview_and_apply_form_revision_confirmation_flow() {
         &home,
         "open",
     );
-    assert!(opened.status.success());
+    assert!(
+        opened.status.success(),
+        "服务注册失败\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&opened.stdout),
+        String::from_utf8_lossy(&opened.stderr)
+    );
 
     fs::write(
         &config,

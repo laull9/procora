@@ -88,8 +88,7 @@ impl SystemMonitor {
                     read_bytes: 0,
                     written_bytes: 0,
                 };
-                let mut pending = vec![root];
-                while let Some(process_pid) = pending.pop() {
+                for process_pid in process_tree_members(root, &children) {
                     let Some(process) = self.system.process(process_pid) else {
                         continue;
                     };
@@ -100,9 +99,6 @@ impl SystemMonitor {
                     snapshot.written_bytes = snapshot
                         .written_bytes
                         .saturating_add(disk.total_written_bytes);
-                    if let Some(descendants) = children.get(&process_pid) {
-                        pending.extend(descendants);
-                    }
                 }
                 snapshot.cpu_percent =
                     normalize_cpu_percent(snapshot.cpu_percent, self.logical_cpu_count);
@@ -110,6 +106,23 @@ impl SystemMonitor {
             })
             .collect()
     }
+}
+
+/// 返回根进程的去重子树成员，容忍 PID 复用形成的循环父子关系。
+fn process_tree_members(root: Pid, children: &BTreeMap<Pid, Vec<Pid>>) -> Vec<Pid> {
+    let mut members = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut pending = vec![root];
+    while let Some(pid) = pending.pop() {
+        if !visited.insert(pid) {
+            continue;
+        }
+        members.push(pid);
+        if let Some(descendants) = children.get(&pid) {
+            pending.extend(descendants);
+        }
+    }
+    members
 }
 
 /// 把 sysinfo 以单核为 100% 的进程值换算为整机可用 CPU 容量占比。
@@ -125,7 +138,11 @@ impl Default for SystemMonitor {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_cpu_percent;
+    use std::collections::BTreeMap;
+
+    use sysinfo::Pid;
+
+    use super::{normalize_cpu_percent, process_tree_members};
 
     #[test]
     // 多核进程值按可用逻辑CPU总容量归一化并限制在百分之百以内。
@@ -138,5 +155,15 @@ mod tests {
         ] {
             assert!((normalize_cpu_percent(raw, cores) - expected).abs() < f32::EPSILON);
         }
+    }
+
+    #[test]
+    // PID复用形成循环父子关系时每个进程只会被遍历一次。
+    fn process_tree_cycle_visits_each_pid_once() {
+        let root = Pid::from_u32(10);
+        let child = Pid::from_u32(20);
+        let children = BTreeMap::from([(root, vec![child]), (child, vec![root])]);
+
+        assert_eq!(process_tree_members(root, &children), vec![root, child]);
     }
 }
