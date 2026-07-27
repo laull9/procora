@@ -366,11 +366,10 @@ fn native_path_dialog(kind: NativePathKind) -> anyhow::Result<Option<PathBuf>> {
                 "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; if($d.ShowDialog() -eq 'OK'){[Console]::Write($d.SelectedPath)}"
             }
         };
-        return dialog_output(
-            Command::new("powershell")
-                .args(["-NoProfile", "-STA", "-Command", script])
-                .output()?,
-        );
+        let mut command = Command::new("powershell");
+        command.args(["-NoProfile", "-STA", "-Command", script]);
+        crate::process::configure_background_command(&mut command);
+        return dialog_output(command.output()?);
     }
     #[allow(unreachable_code)]
     {

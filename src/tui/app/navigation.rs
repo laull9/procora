@@ -1,12 +1,8 @@
-//! 服务详情页的选择、页签切换、帮助层与转场导航。
-
-use std::time::Duration;
+//! 服务详情页的选择、页签切换与帮助层导航。
 
 use crossterm::event::KeyCode;
-use ratatui::layout::Rect;
 
 use super::{ActiveTab, App};
-use crate::tui::transition::TransitionDirection;
 
 impl App {
     /// 新按键进入前取消与其无关的日志清空确认。
@@ -16,29 +12,9 @@ impl App {
         }
     }
 
-    /// 推进短时页面转场。
-    pub fn advance_transition(&mut self, elapsed: Duration) -> bool {
-        self.transition.advance(elapsed)
-    }
-
-    /// 从右侧开始一次页面进入转场。
-    pub(crate) const fn begin_entry_transition(&mut self) {
-        self.transition.start(TransitionDirection::Forward);
-    }
-
-    /// 返回当前帧主内容应使用的转场区域。
-    pub(crate) fn transition_area(&self, area: Rect) -> Rect {
-        self.transition.content_area(area)
-    }
-
     /// 返回快捷键帮助是否正在显示。
     pub const fn help_visible(&self) -> bool {
         self.help_visibility.visible()
-    }
-
-    /// 返回页面转场是否尚未结束。
-    pub const fn transition_active(&self) -> bool {
-        self.transition.active()
     }
 
     /// 选择下一个任务并在末尾回到开头。
@@ -63,33 +39,27 @@ impl App {
     }
 
     /// 切换页签并让新页面从文本起点开始显示。
-    pub(super) fn switch_tab(&mut self, tab: ActiveTab, direction: TransitionDirection) {
+    pub(super) fn switch_tab(&mut self, tab: ActiveTab) {
         self.cancel_log_clear_confirmation();
         if self.active_tab == tab {
             return;
         }
         self.active_tab = tab;
         self.horizontal_scroll.reset_position();
-        self.transition.start(direction);
     }
 
-    /// 循环切换相邻页签并匹配进入方向。
+    /// 循环切换相邻页签。
     pub(super) fn switch_adjacent_tab(&mut self, forward: bool) {
         if forward {
-            self.switch_tab(self.active_tab.next(), TransitionDirection::Forward);
+            self.switch_tab(self.active_tab.next());
         } else {
-            self.switch_tab(self.active_tab.previous(), TransitionDirection::Backward);
+            self.switch_tab(self.active_tab.previous());
         }
     }
 
-    /// 依据目标页签相对位置选择转场方向。
+    /// 切换到指定页签。
     pub(super) fn switch_to_tab(&mut self, tab: ActiveTab) {
-        let direction = if tab.index() >= self.active_tab.index() {
-            TransitionDirection::Forward
-        } else {
-            TransitionDirection::Backward
-        };
-        self.switch_tab(tab, direction);
+        self.switch_tab(tab);
     }
 
     /// 在当前页面最长的相关文本范围内移动水平视口。

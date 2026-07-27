@@ -148,18 +148,6 @@ fn help_overlay_blocks_actions_until_closed() {
 }
 
 #[test]
-// 页面切换会启动短时转场并可由事件循环推进到完成。
-fn tab_transition_advances_to_completion() {
-    let mut app = App::new(support::snapshot());
-
-    app.handle_key(KeyCode::Tab);
-    assert!(app.transition_active());
-    assert!(app.advance_transition(Duration::from_secs(1)));
-    assert!(!app.transition_active());
-    assert!(!app.advance_transition(Duration::from_millis(50)));
-}
-
-#[test]
 // task日志会保留间隙标记和最新内容。
 fn task_logs_keep_gap_marker_and_latest_content() {
     let mut app = App::new(support::snapshot());

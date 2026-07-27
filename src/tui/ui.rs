@@ -44,7 +44,7 @@ fn render_full(frame: &mut Frame<'_>, area: Rect, app: &App) {
         ])
         .split(area);
     render_header(frame, sections[0], app);
-    let content = app.transition_area(sections[1]);
+    let content = sections[1];
     match app.active_tab() {
         ActiveTab::Tasks => render_tasks(frame, content, sections[1].width, app),
         ActiveTab::Dependencies => render_dependencies(frame, content, app),

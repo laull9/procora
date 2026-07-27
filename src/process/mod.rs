@@ -1,5 +1,6 @@
 //! 跨平台受管进程的创建、输出管道、等待和整树回收。
 
+mod background;
 mod helper;
 
 use std::{
@@ -12,12 +13,15 @@ use std::{
 use std::{thread, time::Instant};
 
 use crate::core::TaskSpec;
-#[cfg(windows)]
-use process_wrap::std::JobObject;
 #[cfg(unix)]
 use process_wrap::std::ProcessGroup;
 use process_wrap::std::{ChildWrapper, CommandWrap};
+#[cfg(windows)]
+use process_wrap::std::{CreationFlags, JobObject};
 
+pub(crate) use background::configure_background_command;
+#[cfg(windows)]
+pub(crate) use background::configure_background_process_group;
 pub(crate) use helper::{
     BoundedCommandError, BoundedCommandOutput, run_bounded_command, run_bounded_command_monitored,
 };
@@ -256,7 +260,7 @@ fn spawn_task_with_environment(
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
     #[cfg(windows)]
-    command.wrap(JobObject);
+    wrap_background_job(&mut command);
     command.spawn().map(|inner| ManagedChild { inner })
 }
 
@@ -287,8 +291,17 @@ pub fn spawn_health_check(
     #[cfg(unix)]
     command.wrap(ProcessGroup::leader());
     #[cfg(windows)]
-    command.wrap(JobObject);
+    wrap_background_job(&mut command);
     command.spawn().map(|inner| ManagedChild { inner })
+}
+
+/// 在 Windows Job Object 创建流程中保留无窗口标志。
+#[cfg(windows)]
+fn wrap_background_job(command: &mut CommandWrap) {
+    use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    command.wrap(CreationFlags(CREATE_NO_WINDOW));
+    command.wrap(JobObject);
 }
 
 /// 创建直接执行的命令，并在 Windows 上适配受支持的系统内建命令。

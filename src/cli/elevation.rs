@@ -16,7 +16,8 @@ pub(super) fn request(action: &str) -> anyhow::Result<String> {
     let result_path = env::temp_dir().join(format!("procora-uac-{}.result", Uuid::new_v4()));
     let _ = fs::remove_file(&result_path);
 
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -26,9 +27,9 @@ pub(super) fn request(action: &str) -> anyhow::Result<String> {
         ])
         .env("PROCORA_UAC_EXECUTABLE", &executable)
         .env("PROCORA_UAC_ACTION", action)
-        .env("PROCORA_UAC_RESULT", &result_path)
-        .output()
-        .context("无法启动 Windows UAC 提权请求")?;
+        .env("PROCORA_UAC_RESULT", &result_path);
+    crate::process::configure_background_command(&mut command);
+    let output = command.output().context("无法启动 Windows UAC 提权请求")?;
 
     let result = fs::read_to_string(&result_path).ok();
     let _ = fs::remove_file(&result_path);

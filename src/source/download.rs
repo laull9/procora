@@ -209,18 +209,18 @@ fn fetch_ssh(
             .arg("-o")
             .arg(format!("UserKnownHostsFile={}", known_hosts.display()));
     }
-    let mut child = command
+    command
         .arg("--")
         .arg(&scp_source)
         .arg(destination)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| FetchFailure {
-            message: format!("无法启动 scp：{error}"),
-            retryable: false,
-        })?;
+        .stderr(Stdio::piped());
+    crate::process::configure_background_command(&mut command);
+    let mut child = command.spawn().map_err(|error| FetchFailure {
+        message: format!("无法启动 scp：{error}"),
+        retryable: false,
+    })?;
     let deadline = Instant::now() + Duration::from_millis(policy.timeout_ms);
     let status = loop {
         match child.try_wait() {

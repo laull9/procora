@@ -11,7 +11,6 @@ use ratatui::Frame;
 use super::help_ui::HelpVisibility;
 use super::log_source::LogSourceFilter;
 use super::text_view;
-use super::transition::UiTransition;
 use super::ui;
 
 mod config;
@@ -115,7 +114,6 @@ pub struct App {
     selected: usize,
     active_tab: ActiveTab,
     help_visibility: HelpVisibility,
-    transition: UiTransition,
     should_quit: bool,
     pending_action: Option<ServiceActionDto>,
     config_edit: config::ConfigEditState,
@@ -145,7 +143,6 @@ impl App {
             selected: 0,
             active_tab: ActiveTab::default(),
             help_visibility: HelpVisibility::default(),
-            transition: UiTransition::default(),
             should_quit: false,
             pending_action: None,
             config_edit: config::ConfigEditState::default(),
@@ -195,7 +192,6 @@ impl App {
             self.selected,
             self.active_tab,
             self.help_visibility,
-            self.transition,
             self.should_quit,
         );
         let previous = (
@@ -245,7 +241,6 @@ impl App {
                     self.selected,
                     self.active_tab,
                     self.help_visibility,
-                    self.transition,
                     self.should_quit,
                 )
             || previous
