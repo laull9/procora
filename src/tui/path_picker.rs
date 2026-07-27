@@ -4,18 +4,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{
-    Frame, Terminal, TerminalOptions, Viewport,
-    backend::CrosstermBackend,
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
+
+use super::inline_terminal::InlineTerminal;
 
 /// 路径浏览器中一条可执行项目。
 #[derive(Clone, Debug)]
@@ -229,24 +227,6 @@ enum PickerEvent {
     Cancelled,
 }
 
-/// 原始模式恢复守卫。
-struct RawModeGuard;
-
-impl RawModeGuard {
-    /// 进入终端原始模式。
-    fn enable() -> io::Result<Self> {
-        enable_raw_mode()?;
-        Ok(Self)
-    }
-}
-
-impl Drop for RawModeGuard {
-    /// 尽力恢复普通终端输入模式。
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-    }
-}
-
 /// 以内联小 TUI 选择普通文件或目录。
 pub(crate) fn select_path_inline(initial: Option<&Path>) -> io::Result<Option<PathBuf>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -256,15 +236,7 @@ pub(crate) fn select_path_inline(initial: Option<&Path>) -> io::Result<Option<Pa
         ));
     }
     let mut picker = PathPicker::new(initial)?;
-    let _raw_mode = RawModeGuard::enable()?;
-    let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Inline(18),
-        },
-    )?;
-    terminal.hide_cursor()?;
+    let mut terminal = InlineTerminal::new(18)?;
     let result = loop {
         terminal.draw(|frame| picker.render(frame, frame.area()))?;
         if let Event::Key(key) = event::read()?
@@ -277,7 +249,6 @@ pub(crate) fn select_path_inline(initial: Option<&Path>) -> io::Result<Option<Pa
             }
         }
     };
-    terminal.show_cursor()?;
-    terminal.clear()?;
+    terminal.finish()?;
     Ok(result)
 }

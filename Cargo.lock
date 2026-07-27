@@ -1959,6 +1959,7 @@ dependencies = [
  "ureq",
  "uuid",
  "widestring",
+ "windows",
  "zbus_systemd",
  "zip",
 ]

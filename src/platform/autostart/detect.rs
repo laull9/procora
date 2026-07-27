@@ -30,13 +30,13 @@ pub(super) fn is_enabled(definition: &DaemonAutostart) -> Result<bool, Autostart
 /// 判断 Windows 登录任务是否属于指定中心定义。
 #[cfg(target_os = "windows")]
 pub(super) fn is_enabled(definition: &DaemonAutostart) -> Result<bool, AutostartError> {
-    let query = std::process::Command::new("schtasks.exe")
-        .args(["/Query", "/TN", "Procora Center", "/V", "/FO", "LIST"])
-        .output()
-        .map_err(|source| AutostartError::Io {
-            action: "查询 Windows 自启动任务",
-            source,
-        })?;
+    let mut command = std::process::Command::new("schtasks.exe");
+    command.args(["/Query", "/TN", "Procora Center", "/V", "/FO", "LIST"]);
+    crate::process::configure_background_command(&mut command);
+    let query = command.output().map_err(|source| AutostartError::Io {
+        action: "查询 Windows 自启动任务",
+        source,
+    })?;
     Ok(query.status.success()
         && String::from_utf8_lossy(&query.stdout).contains(&definition.endpoint))
 }

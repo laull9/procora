@@ -8,7 +8,6 @@ use super::{
     help_ui::HelpVisibility,
     overview_collection::{self, OverviewSort},
     overview_ui, text_view,
-    transition::{TransitionDirection, UiTransition},
     ui_environment::terminal_plain_mode,
 };
 
@@ -43,7 +42,6 @@ pub struct OverviewApp {
     visible_services: Vec<ServiceViewDto>,
     selected: usize,
     help_visibility: HelpVisibility,
-    transition: UiTransition,
     exit: Option<OverviewExit>,
     pending_action: Option<(String, OverviewAction)>,
     remove_confirmation: Option<String>,
@@ -66,7 +64,6 @@ impl OverviewApp {
             visible_services: Vec::new(),
             selected: 0,
             help_visibility: HelpVisibility::default(),
-            transition: UiTransition::default(),
             exit: None,
             pending_action: None,
             remove_confirmation: None,
@@ -222,29 +219,9 @@ impl OverviewApp {
         self.horizontal_scroll.advance(elapsed, maximum)
     }
 
-    /// 推进短时页面转场。
-    pub fn advance_transition(&mut self, elapsed: Duration) -> bool {
-        self.transition.advance(elapsed)
-    }
-
-    /// 从右侧开始一次页面进入转场。
-    pub(crate) const fn begin_entry_transition(&mut self) {
-        self.transition.start(TransitionDirection::Forward);
-    }
-
-    /// 返回当前帧主内容应使用的转场区域。
-    pub(crate) fn transition_area(&self, area: ratatui::layout::Rect) -> ratatui::layout::Rect {
-        self.transition.content_area(area)
-    }
-
     /// 返回快捷键帮助是否正在显示。
     pub const fn help_visible(&self) -> bool {
         self.help_visibility.visible()
-    }
-
-    /// 返回页面转场是否尚未结束。
-    pub const fn transition_active(&self) -> bool {
-        self.transition.active()
     }
 
     /// 设置当前会话是否允许控制服务。

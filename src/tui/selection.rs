@@ -1,17 +1,15 @@
 use std::io::{self, IsTerminal};
 
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
-    Frame, Terminal, TerminalOptions, Viewport,
-    backend::CrosstermBackend,
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
+
+use super::inline_terminal::InlineTerminal;
 
 /// 可复用选择栏中的一个选项。
 #[derive(Clone, Debug)]
@@ -136,24 +134,6 @@ impl<T: Clone> SelectionState<T> {
     }
 }
 
-/// 原始模式恢复守卫。
-struct RawModeGuard;
-
-impl RawModeGuard {
-    /// 进入终端原始模式。
-    fn enable() -> io::Result<Self> {
-        enable_raw_mode()?;
-        Ok(Self)
-    }
-}
-
-impl Drop for RawModeGuard {
-    /// 尽力恢复普通终端输入模式。
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-    }
-}
-
 /// 在普通 CLI 输出流中运行一个不占满屏幕的选择栏。
 ///
 /// # Errors
@@ -172,15 +152,7 @@ pub fn select_inline<T: Clone>(
     }
     let mut state = SelectionState::new(items);
     let height = u16::try_from(state.len().saturating_add(5)).unwrap_or(u16::MAX);
-    let _raw_mode = RawModeGuard::enable()?;
-    let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Inline(height),
-        },
-    )?;
-    terminal.hide_cursor()?;
+    let mut terminal = InlineTerminal::new(height)?;
     let result = loop {
         terminal.draw(|frame| state.render(frame, frame.area(), title, message))?;
         match event::read()? {
@@ -192,7 +164,6 @@ pub fn select_inline<T: Clone>(
             _ => {}
         }
     };
-    terminal.show_cursor()?;
-    terminal.clear()?;
+    terminal.finish()?;
     Ok(result)
 }

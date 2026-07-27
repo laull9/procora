@@ -41,12 +41,7 @@ fn render_full(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
         ])
         .split(area);
     render_header(frame, sections[0], app);
-    render_services(
-        frame,
-        app.transition_area(sections[1]),
-        sections[1].width,
-        app,
-    );
+    render_services(frame, sections[1], sections[1].width, app);
     render_footer(frame, sections[2], app);
 }
 

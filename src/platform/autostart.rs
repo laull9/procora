@@ -133,13 +133,13 @@ pub enum AutostartError {
 
 /// 执行系统管理命令并要求成功退出。
 fn run_command(program: &str, arguments: &[OsString]) -> Result<(), AutostartError> {
-    let output = Command::new(program)
-        .args(arguments)
-        .output()
-        .map_err(|source| AutostartError::Io {
-            action: "启动系统管理命令",
-            source,
-        })?;
+    let mut command = Command::new(program);
+    command.args(arguments);
+    crate::process::configure_background_command(&mut command);
+    let output = command.output().map_err(|source| AutostartError::Io {
+        action: "启动系统管理命令",
+        source,
+    })?;
     if output.status.success() {
         return Ok(());
     }
@@ -174,7 +174,10 @@ fn command_failure_details(output: &std::process::Output) -> String {
 /// 执行允许失败的清理命令。
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn run_cleanup_command(program: &str, arguments: &[OsString]) {
-    let _ = Command::new(program).args(arguments).output();
+    let mut command = Command::new(program);
+    command.args(arguments);
+    crate::process::configure_background_command(&mut command);
+    let _ = command.output();
 }
 
 #[cfg(target_os = "linux")]
@@ -437,13 +440,13 @@ mod platform {
 
     /// 停止并删除当前用户的登录触发任务。
     pub(super) fn disable() -> Result<AutostartBackend, AutostartError> {
-        let query = Command::new("schtasks.exe")
-            .args(["/Query", "/TN", WINDOWS_TASK_NAME])
-            .output()
-            .map_err(|source| AutostartError::Io {
-                action: "查询 Windows 自启动任务",
-                source,
-            })?;
+        let mut command = Command::new("schtasks.exe");
+        command.args(["/Query", "/TN", WINDOWS_TASK_NAME]);
+        crate::process::configure_background_command(&mut command);
+        let query = command.output().map_err(|source| AutostartError::Io {
+            action: "查询 Windows 自启动任务",
+            source,
+        })?;
         if query.status.success() {
             run_cleanup_command(
                 "schtasks.exe",

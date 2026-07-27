@@ -84,14 +84,22 @@ pub(crate) fn run_version_check(
 fn run_command(command: &Path, args: &[String]) -> Result<std::process::Output, std::io::Error> {
     #[cfg(target_os = "linux")]
     for attempt in 0..EXECUTABLE_BUSY_RETRIES {
-        match Command::new(command).args(args).output() {
+        match background_command(command, args).output() {
             Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy => {
                 thread::sleep(EXECUTABLE_BUSY_RETRY_DELAY * u32::from(attempt + 1));
             }
             result => return result,
         }
     }
-    Command::new(command).args(args).output()
+    background_command(command, args).output()
+}
+
+/// 构造不会在 Windows 上闪现控制台的依赖版本检查命令。
+fn background_command(command: &Path, args: &[String]) -> Command {
+    let mut process = Command::new(command);
+    process.args(args);
+    crate::process::configure_background_command(&mut process);
+    process
 }
 
 #[cfg(all(test, target_os = "linux"))]

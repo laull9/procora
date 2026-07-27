@@ -401,6 +401,7 @@ pub(super) fn base_ssh(interactive: bool) -> Command {
         ]);
     } else {
         command.args(["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]);
+        crate::process::configure_background_command(&mut command);
     }
     command
 }

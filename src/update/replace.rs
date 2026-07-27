@@ -45,20 +45,18 @@ pub(super) fn install(
     destination: &Path,
     restart_center: bool,
 ) -> anyhow::Result<()> {
-    use std::{os::windows::process::CommandExt, process::Command};
+    use std::process::Command;
 
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    Command::new(source)
+    let mut command = Command::new(source);
+    command
         .arg("__apply-update")
         .arg("--source")
         .arg(source)
         .arg("--destination")
         .arg(destination)
-        .args(restart_center.then_some("--restart-center"))
-        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
-        .spawn()
-        .context("无法启动 Windows 更新助手")?;
+        .args(restart_center.then_some("--restart-center"));
+    crate::process::configure_background_process_group(&mut command);
+    command.spawn().context("无法启动 Windows 更新助手")?;
     Ok(())
 }
 
@@ -89,23 +87,24 @@ pub(crate) fn apply_windows(
                 }
                 let _ = fs::remove_file(&backup);
                 if restart_center {
-                    let status = Command::new(destination)
+                    let mut command = Command::new(destination);
+                    command
                         .arg("__reconcile-update")
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
-                        .stderr(Stdio::null())
+                        .stderr(Stdio::null());
+                    crate::process::configure_background_command(&mut command);
+                    let status = command
                         .status()
                         .context("Procora 已更新，但无法启动新版本对账全局 Center")?;
                     if !status.success() {
                         anyhow::bail!("Procora 已更新，但新版本无法对账全局 Center：{status}");
                     }
                 }
-                Command::new(destination)
-                    .arg("__cleanup-update")
-                    .arg("--path")
-                    .arg(source)
-                    .spawn()
-                    .context("无法启动 Windows 更新暂存清理器")?;
+                let mut command = Command::new(destination);
+                command.arg("__cleanup-update").arg("--path").arg(source);
+                crate::process::configure_background_command(&mut command);
+                command.spawn().context("无法启动 Windows 更新暂存清理器")?;
                 return Ok(());
             }
             Err(error) => last_error = Some(error),

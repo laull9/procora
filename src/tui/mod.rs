@@ -28,6 +28,7 @@ mod config_task_dialog;
 mod config_ui;
 mod config_ui_support;
 mod help_ui;
+mod inline_terminal;
 mod key_hints;
 mod live_editor;
 mod log_filter_ui;
@@ -40,7 +41,6 @@ mod overview_ui;
 mod path_picker;
 mod selection;
 mod text_view;
-mod transition;
 mod ui;
 mod ui_controls;
 mod ui_environment;
@@ -184,7 +184,6 @@ pub fn run_overview_live(
     const SERVICES_INTERVAL: Duration = Duration::from_millis(500);
 
     app.set_control_allowed(control_allowed);
-    app.begin_entry_transition();
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
@@ -232,7 +231,6 @@ pub fn run_overview_live(
             let elapsed = now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = now;
             dirty |= app.advance_auto_scroll(elapsed);
-            dirty |= app.advance_transition(elapsed);
         }
     })
 }
@@ -255,7 +253,6 @@ fn overview_action_feedback(action: OverviewAction, service_name: &str) -> Strin
 /// 当终端初始化、绘制、输入读取或终端恢复失败时返回 I/O 错误。
 pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
     let mut app = App::new(snapshot);
-    app.begin_entry_transition();
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
@@ -280,7 +277,6 @@ pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
             let elapsed = now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = now;
             dirty |= app.advance_auto_scroll(elapsed);
-            dirty |= app.advance_transition(elapsed);
             if app.should_quit() {
                 break Ok(());
             }
@@ -335,7 +331,6 @@ fn run_live_mode_with_editor(
     let mut app = App::new(snapshot);
     app.set_control_allowed(control_allowed);
     app.set_back_navigation(back_navigation);
-    app.begin_entry_transition();
     let config_path = session.config_path().map(Path::to_path_buf);
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
@@ -435,7 +430,6 @@ fn run_live_mode_with_editor(
                 || app.advance_auto_scroll(auto_elapsed),
                 |editor| editor.advance_auto_scroll(auto_elapsed),
             );
-            dirty |= app.advance_transition(auto_elapsed);
         }
     })
 }
