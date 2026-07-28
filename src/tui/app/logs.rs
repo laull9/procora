@@ -3,7 +3,7 @@
 use crate::{core::TaskId, tui::log_view};
 use crossterm::event::KeyCode;
 
-use super::{ActiveTab, App};
+use super::{ActiveTab, App, LogInputAction};
 
 impl App {
     /// 处理仅在日志页生效的翻页、搜索、过滤与清空按键。
@@ -16,7 +16,10 @@ impl App {
             KeyCode::PageDown => self.scroll_log_down(page_lines),
             KeyCode::Home => self.scroll_log_to_start(),
             KeyCode::End => self.scroll_log_to_end(),
-            KeyCode::Char('/') => self.log_search_input = Some(self.log_query.clone()),
+            KeyCode::Char('/') => {
+                self.log_input_action = LogInputAction::Search;
+                self.log_search_input = Some(self.log_query.clone());
+            }
             KeyCode::Char('f') => self.toggle_log_filter(),
             KeyCode::Char('v') => self.cycle_log_source_filter(),
             KeyCode::Char('n') => self.select_log_match(true),
@@ -98,6 +101,11 @@ impl App {
     /// 返回当前日志搜索输入；空值表示不在输入模式。
     pub fn log_search_input(&self) -> Option<&str> {
         self.log_search_input.as_deref()
+    }
+
+    /// 返回当前输入框是否会在提交后启用匹配行过滤。
+    pub const fn log_filter_input_active(&self) -> bool {
+        self.log_search_input.is_some() && matches!(self.log_input_action, LogInputAction::Filter)
     }
 
     /// 返回已经应用的日志搜索词。
@@ -228,9 +236,20 @@ impl App {
     /// 处理日志搜索输入框中的一次按键。
     pub(super) fn handle_log_search_input(&mut self, key: KeyCode) -> bool {
         match key {
-            KeyCode::Esc => self.log_search_input = None,
+            KeyCode::Esc => {
+                self.log_search_input = None;
+                self.log_input_action = LogInputAction::Search;
+            }
             KeyCode::Enter => {
                 self.log_query = self.log_search_input.take().unwrap_or_default();
+                if self.log_input_action == LogInputAction::Filter {
+                    if self.log_query.is_empty() {
+                        self.feedback = Some("过滤词不能为空".to_owned());
+                    } else {
+                        self.log_filter_mode = super::LogFilterMode::Matches;
+                    }
+                }
+                self.log_input_action = LogInputAction::Search;
                 self.log_match_indices.clear();
                 if let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) {
                     self.focus_log_match(&task_id);
@@ -254,6 +273,8 @@ impl App {
     /// 切换仅显示匹配行，并重置到当前匹配位置。
     pub(super) fn toggle_log_filter(&mut self) {
         if self.log_query.is_empty() {
+            self.log_input_action = LogInputAction::Filter;
+            self.log_search_input = Some(String::new());
             return;
         }
         self.log_filter_mode.toggle();
@@ -276,10 +297,16 @@ impl App {
     /// 循环选择当前 Task 的下一条或上一条匹配行。
     pub(super) fn select_log_match(&mut self, forward: bool) {
         let Some(task_id) = self.selected_task().map(|task| task.task_id.clone()) else {
+            self.feedback = Some("当前没有可搜索的 Task 日志".to_owned());
             return;
         };
         let count = self.log_match_lines(&task_id).len();
         if count == 0 {
+            self.feedback = Some(if self.log_query.is_empty() {
+                "请先按 / 输入日志搜索词".to_owned()
+            } else {
+                format!("当前日志没有匹配 `{}` 的内容", self.log_query)
+            });
             return;
         }
         let current = self.log_match_indices.entry(task_id.clone()).or_default();

@@ -71,8 +71,8 @@ pub(super) fn require_cache_directory(
         Err(error) if error.kind() == io::ErrorKind::NotFound => fs::create_dir(directory)?,
         Err(error) => return Err(error.into()),
     }
-    let canonical_root = fs::canonicalize(cache_root)?;
-    let canonical_directory = fs::canonicalize(directory)?;
+    let canonical_root = crate::platform::canonicalize(cache_root)?;
+    let canonical_directory = crate::platform::canonicalize(directory)?;
     if !canonical_directory.starts_with(canonical_root) {
         return Err(GitSourceError::UnsafeCheckout(directory.to_path_buf()));
     }
@@ -238,17 +238,10 @@ pub(super) fn require_unicode(path: &Path, label: &str) -> Result<(), GitSourceE
 
 /// 返回 Git 可接受的本地仓库路径文本，并移除 Windows 扩展路径前缀。
 pub(super) fn git_local_repository_text(path: &Path) -> String {
-    let text = path.to_str().expect("本地仓库路径已验证为 UTF-8");
-    #[cfg(windows)]
-    {
-        if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-            return format!(r"\\{rest}");
-        }
-        if let Some(rest) = text.strip_prefix(r"\\?\") {
-            return rest.to_owned();
-        }
-    }
-    text.to_owned()
+    crate::platform::simplify_path(path)
+        .to_str()
+        .expect("本地仓库路径已验证为 UTF-8")
+        .to_owned()
 }
 
 /// 当前平台传给 Git 的空文件和禁用 hooks 路径。

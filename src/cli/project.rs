@@ -1,4 +1,4 @@
-use std::{env, fs, io::IsTerminal, path::Path};
+use std::{fs, io::IsTerminal, path::Path};
 
 use crate::config::{DiscoveredProject, discover_path, is_python_config};
 use crate::source::DependencyManager;
@@ -12,7 +12,7 @@ pub(crate) fn edit(path: Option<&Path>) -> anyhow::Result<()> {
         bail!("`procora edit` 需要交互式终端")
     }
     let target = path.map_or_else(
-        || env::current_dir().context("无法读取当前目录"),
+        || crate::platform::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
     if is_python_config(&target) {
@@ -39,10 +39,10 @@ pub(crate) fn edit_after_init(path: &Path, no_edit: bool) -> anyhow::Result<()> 
 /// 当目标路径不可访问、不是文件或目录，或无法删除运行时目录时返回错误。
 pub(crate) fn clean(path: Option<&Path>) -> anyhow::Result<()> {
     let target = path.map_or_else(
-        || env::current_dir().context("无法读取当前目录"),
+        || crate::platform::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
-    let target = fs::canonicalize(&target)
+    let target = crate::platform::canonicalize(&target)
         .with_context(|| format!("无法访问要清理的服务路径：{}", target.display()))?;
     let root = if target.is_file() {
         target

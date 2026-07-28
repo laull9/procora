@@ -1,4 +1,4 @@
-use std::{env, io::IsTerminal, path::Path};
+use std::{io::IsTerminal, path::Path};
 
 use crate::daemon::{CenterClient, ServiceHost, run_center_server};
 use crate::platform::capabilities;
@@ -25,7 +25,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             force,
             no_edit,
         }) => {
-            let current = env::current_dir().context("无法读取当前目录")?;
+            let current = crate::platform::current_dir().context("无法读取当前目录")?;
             let path = template::initialize(&current, config, force)?;
             project::edit_after_init(&path, no_edit)
         }
@@ -170,7 +170,7 @@ enum StartupChoice {
 /// 解析 TUI 路径为不依赖后续当前目录变化的绝对路径。
 fn resolve_tui_target(target: Option<&Path>) -> anyhow::Result<std::path::PathBuf> {
     let target = target.map_or_else(
-        || env::current_dir().context("无法读取当前目录"),
+        || crate::platform::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
     api::absolute_user_path(target)
@@ -356,7 +356,7 @@ fn show(target: &str) -> anyhow::Result<()> {
 
 /// 仅当当前目录项目与名称选择器一致时返回可安全自愈的服务根目录。
 fn current_service_path(name: &str) -> Option<std::path::PathBuf> {
-    let current = env::current_dir().ok()?;
+    let current = crate::platform::current_dir().ok()?;
     let discovered = crate::config::discover_path(current).ok()?;
     (discovered.compiled.spec.project == name).then_some(discovered.root)
 }

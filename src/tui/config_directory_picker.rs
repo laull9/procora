@@ -277,11 +277,11 @@ impl Dialog {
 
 /// 把配置目录转换为绝对路径，目标暂不可规范化时仍保持可浏览。
 fn stable_absolute_path(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| {
+    crate::platform::canonicalize(path).unwrap_or_else(|_| {
         if path.is_absolute() {
-            path.to_path_buf()
+            crate::platform::simplify_path(path)
         } else {
-            std::env::current_dir()
+            crate::platform::current_dir()
                 .map_or_else(|_| path.to_path_buf(), |current| current.join(path))
         }
     })
@@ -290,7 +290,7 @@ fn stable_absolute_path(path: &Path) -> PathBuf {
 /// 将相对配置值转成用于浏览的绝对路径。
 fn absolute_path(path: &Path, base_directory: &Path) -> PathBuf {
     if path.is_absolute() {
-        path.to_path_buf()
+        crate::platform::simplify_path(path)
     } else {
         base_directory.join(path)
     }
@@ -318,9 +318,10 @@ fn compare_names(left: &str, right: &str) -> Ordering {
 
 /// 尽量生成相对配置目录的路径，不同 Windows 盘符时保留绝对路径。
 fn portable_path(path: &Path, base_directory: &Path) -> String {
-    let canonical_path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let canonical_base =
-        fs::canonicalize(base_directory).unwrap_or_else(|_| base_directory.to_path_buf());
+    let canonical_path = crate::platform::canonicalize(path)
+        .unwrap_or_else(|_| crate::platform::simplify_path(path));
+    let canonical_base = crate::platform::canonicalize(base_directory)
+        .unwrap_or_else(|_| crate::platform::simplify_path(base_directory));
     let value = relative_path(&canonical_path, &canonical_base).unwrap_or(canonical_path);
     let text = if value.as_os_str().is_empty() {
         ".".to_owned()

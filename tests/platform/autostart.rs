@@ -161,8 +161,8 @@ fn windows_task_quotes_arguments_with_spaces() {
 }
 
 #[test]
-// windows任务绑定当前交互登录会话。
-fn windows_task_targets_interactive_login() {
+// windows任务在用户登录时以非交互方式启动，避免显示控制台窗口。
+fn windows_task_runs_non_interactively_at_login() {
     let arguments = definition().windows_task_create_arguments();
     let arguments = arguments
         .iter()
@@ -170,7 +170,8 @@ fn windows_task_targets_interactive_login() {
         .collect::<Vec<_>>();
 
     assert!(arguments.windows(2).any(|pair| pair == ["/SC", "ONLOGON"]));
-    assert!(arguments.iter().any(|argument| argument == "/IT"));
+    assert!(!arguments.iter().any(|argument| argument == "/IT"));
+    assert!(arguments.iter().any(|argument| argument == "/NP"));
     assert!(arguments.windows(2).any(|pair| pair == ["/RL", "LIMITED"]));
 }
 

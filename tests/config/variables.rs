@@ -214,7 +214,7 @@ fn included_variables_merge_before_path_expansion() {
 
     let compiled = load_path(&entry).unwrap();
     let api = "api".parse().unwrap();
-    let expected = fs::canonicalize(root.join("fragment/entry-work")).unwrap();
+    let expected = procora::platform::canonicalize(root.join("fragment/entry-work")).unwrap();
     assert_eq!(
         compiled.spec.tasks[&api].cwd.as_deref(),
         Some(expected.as_path())

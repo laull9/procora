@@ -99,7 +99,7 @@ fn canonical_env_path(
         diagnostics.push(diagnostic(field, "必须位于服务根目录内"));
         return None;
     }
-    let canonical = match std::fs::canonicalize(attempted) {
+    let canonical = match crate::platform::canonicalize(attempted) {
         Ok(path) => path,
         Err(error) => {
             diagnostics.push(diagnostic(
@@ -308,5 +308,5 @@ fn normalize_path(path: &Path) -> PathBuf {
             other => normalized.push(other.as_os_str()),
         }
     }
-    normalized
+    crate::platform::simplify_path(&normalized)
 }

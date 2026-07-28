@@ -54,7 +54,7 @@ fn format_fragments_merge_in_order_with_entry_priority() {
     .unwrap();
 
     let compiled = load_path(root.join("procora.yaml")).unwrap();
-    let canonical_fragments = fs::canonicalize(&fragments).unwrap();
+    let canonical_fragments = procora::platform::canonicalize(&fragments).unwrap();
     let worker = "worker".parse().unwrap();
     let api = "api".parse().unwrap();
 

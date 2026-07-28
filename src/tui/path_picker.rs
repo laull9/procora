@@ -50,8 +50,9 @@ impl PathPicker {
                     path.parent()
                 }
             })
-            .map_or(std::env::current_dir()?, Path::to_path_buf);
-        let current = current.canonicalize().unwrap_or(current);
+            .map_or(crate::platform::current_dir()?, Path::to_path_buf);
+        let current = crate::platform::canonicalize(&current)
+            .unwrap_or_else(|_| crate::platform::simplify_path(&current));
         let mut picker = Self {
             current,
             entries: Vec::new(),

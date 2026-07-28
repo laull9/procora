@@ -70,6 +70,8 @@ pub(super) fn run(
         None if batch => bail!("batch 模式必须指定本机上传来源"),
         None => choose_source(&memory)?,
     };
+    let source = crate::platform::canonicalize(&source)
+        .with_context(|| format!("无法访问本机上传来源 `{}`", source.display()))?;
     let ssh = match ssh {
         Some(ssh) => Some(ssh),
         None if batch => None,
@@ -97,7 +99,7 @@ pub(super) fn run(
     )?;
     if !batch {
         memory.source_method = source_method;
-        memory.source = Some(source.canonicalize().unwrap_or(source));
+        memory.source = Some(source);
         memory.ssh_target = Some(outcome.ssh_target);
         memory.remote_bin = Some(outcome.remote_bin);
         memory.upload_target = Some(outcome.target);
@@ -185,7 +187,7 @@ fn prompt_path(default: Option<&Path>) -> anyhow::Result<PathBuf> {
             .map(Path::to_path_buf)
             .context("本机上传来源不能为空");
     }
-    Ok(PathBuf::from(value))
+    Ok(crate::platform::simplify_path(Path::new(&value)))
 }
 
 /// 从记忆、环境变量、选择器与 SSH config 中引导选择连接目标。
@@ -391,7 +393,7 @@ fn dialog_output(output: Output) -> anyhow::Result<Option<PathBuf>> {
         .context("系统文件选择器返回了非 UTF-8 路径")?
         .trim()
         .to_owned();
-    Ok((!value.is_empty()).then(|| PathBuf::from(value)))
+    Ok((!value.is_empty()).then(|| crate::platform::simplify_path(Path::new(&value))))
 }
 
 /// 从标准输入读取一行文本。

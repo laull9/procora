@@ -40,7 +40,8 @@ struct TemporaryDirectory(PathBuf);
 impl TemporaryDirectory {
     /// 创建权限受当前用户控制的更新暂存目录。
     fn create() -> anyhow::Result<Self> {
-        let path = env::temp_dir().join(format!("procora-update-{}", uuid::Uuid::new_v4()));
+        let path =
+            crate::platform::temp_dir().join(format!("procora-update-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&path)?;
         Ok(Self(path))
     }
@@ -102,10 +103,9 @@ pub(crate) fn run(check: bool) -> anyhow::Result<()> {
         bail!("更新归档 SHA-256 校验失败：期望 {expected}，实际 {actual}");
     }
     archive::extract(&archive_path, &executable_path)?;
-    let destination = env::current_exe()
-        .context("无法定位当前 Procora 可执行文件")?
-        .canonicalize()
-        .context("无法解析当前 Procora 可执行文件路径")?;
+    let executable = crate::platform::current_exe().context("无法定位当前 Procora 可执行文件")?;
+    let destination =
+        crate::platform::canonicalize(executable).context("无法解析当前 Procora 可执行文件路径")?;
     let restart_center = crate::cli::center_is_running_for_update()?;
     replace::install(&executable_path, &destination, restart_center)?;
     #[cfg(target_os = "windows")]

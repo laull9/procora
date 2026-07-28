@@ -112,7 +112,7 @@ fn local_repository_pins_commit_and_uses_include_pipeline() {
     assert_eq!(
         task.cwd.as_deref(),
         Some(
-            fs::canonicalize(&candidate.checkout_root)
+            procora::platform::canonicalize(&candidate.checkout_root)
                 .unwrap()
                 .join("service/fragments/work")
                 .as_path()

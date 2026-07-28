@@ -232,7 +232,7 @@ fn included_profiles_merge_and_rebase_defaults() {
     let api = "api".parse().unwrap();
     assert_eq!(compiled.spec.tasks[&api].env["FROM_FRAGMENT"], "yes");
     assert_eq!(compiled.spec.tasks[&api].env["FROM_ENTRY"], "yes");
-    let expected_cwd = fs::canonicalize(root.join("fragment/work")).unwrap();
+    let expected_cwd = procora::platform::canonicalize(root.join("fragment/work")).unwrap();
     assert_eq!(
         compiled.spec.tasks[&api].cwd.as_deref(),
         Some(expected_cwd.as_path())
@@ -264,7 +264,7 @@ fn profile_inheritance_resolves_after_include_merge() {
     assert_eq!(
         api.cwd.as_deref(),
         Some(
-            fs::canonicalize(root.join("fragment/work"))
+            procora::platform::canonicalize(root.join("fragment/work"))
                 .unwrap()
                 .as_path()
         )

@@ -87,8 +87,8 @@ mod tests {
 
     /// 创建当前测试独占目录。
     fn temporary_directory() -> std::path::PathBuf {
-        let path =
-            std::env::temp_dir().join(format!("procora-update-test-{}", uuid::Uuid::new_v4()));
+        let path = crate::platform::temp_dir()
+            .join(format!("procora-update-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&path).unwrap();
         path
     }

@@ -169,9 +169,9 @@ fn event_targets(event: &Event, targets: &RwLock<BTreeSet<PathBuf>>) -> bool {
 /// 返回不会要求目标文件已经存在的绝对路径。
 fn absolute_path(path: &Path) -> PathBuf {
     if path.is_absolute() {
-        path.to_path_buf()
+        crate::platform::simplify_path(path)
     } else {
-        std::env::current_dir()
+        crate::platform::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
     }

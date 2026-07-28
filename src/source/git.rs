@@ -143,11 +143,13 @@ impl GitSource {
     ) -> Result<Self, GitSourceError> {
         let repository = repository.into();
         validate_remote(&repository)?;
+        let cache_root = cache_root.into();
+        let cache_root = crate::platform::simplify_path(&cache_root);
         Self::build(
             Repository::Remote(repository),
             reference.into(),
             config_path.into(),
-            cache_root.into(),
+            cache_root,
         )
     }
 
@@ -162,13 +164,15 @@ impl GitSource {
         config_path: impl Into<PathBuf>,
         cache_root: impl Into<PathBuf>,
     ) -> Result<Self, GitSourceError> {
-        let repository = fs::canonicalize(repository.as_ref())?;
+        let repository = crate::platform::canonicalize(repository.as_ref())?;
         require_unicode(&repository, "本地仓库路径")?;
+        let cache_root = cache_root.into();
+        let cache_root = crate::platform::simplify_path(&cache_root);
         Self::build(
             Repository::Local(repository),
             reference.into(),
             config_path.into(),
-            cache_root.into(),
+            cache_root,
         )
     }
 

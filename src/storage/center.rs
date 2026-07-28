@@ -84,7 +84,10 @@ pub struct SqliteCenterRepository {
 impl SqliteCenterRepository {
     /// 创建使用指定 `SQLite` 文件的中心状态仓库。
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        let path = path.into();
+        Self {
+            path: crate::platform::simplify_path(&path),
+        }
     }
 
     /// 返回当前 `SQLite` 数据库路径。
@@ -166,8 +169,8 @@ impl SqliteCenterRepository {
                 updated_at_ms = excluded.updated_at_ms",
             params![
                 &service.name,
-                path_to_bytes(&service.root),
-                path_to_bytes(&service.config_path),
+                path_to_bytes(&crate::platform::simplify_path(&service.root)),
+                path_to_bytes(&crate::platform::simplify_path(&service.config_path)),
                 service.desired_running,
                 service.status.as_str(),
                 service.message.as_deref(),
@@ -335,5 +338,6 @@ fn bytes_to_path(bytes: &[u8]) -> PathBuf {
         .chunks_exact(2)
         .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
         .collect::<Vec<_>>();
-    std::ffi::OsString::from_wide(&wide).into()
+    let path: PathBuf = std::ffi::OsString::from_wide(&wide).into();
+    crate::platform::simplify_path(&path)
 }

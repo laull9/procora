@@ -131,3 +131,43 @@ fn windows_wide_path_roundtrips() {
     assert_eq!(repository.load_services().unwrap(), vec![expected]);
     fs::remove_dir_all(directory).unwrap();
 }
+
+/// Windows 旧数据库中的 verbatim 路径必须在读取边界自动修复。
+#[cfg(windows)]
+#[test]
+// windows旧扩展路径在恢复时自动清理。
+fn windows_legacy_verbatim_paths_are_simplified() {
+    use std::os::windows::ffi::OsStrExt;
+
+    let directory = temporary_directory();
+    let database = directory.join("procora.sqlite3");
+    let repository = SqliteCenterRepository::new(&database);
+    repository
+        .save_service(&service(StoredServiceStatus::Stopped))
+        .unwrap();
+    let encode = |value: &str| {
+        std::ffi::OsStr::new(value)
+            .encode_wide()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>()
+    };
+    let connection = Connection::open(&database).unwrap();
+    connection
+        .execute(
+            "UPDATE services SET root = ?1, config_path = ?2 WHERE name = 'demo'",
+            rusqlite::params![
+                encode(r"\\?\C:\Procora\服务"),
+                encode(r"\\?\C:\Procora\服务\procora.yaml")
+            ],
+        )
+        .unwrap();
+    drop(connection);
+
+    let restored = repository.load_services().unwrap().pop().unwrap();
+    assert_eq!(restored.root, PathBuf::from(r"C:\Procora\服务"));
+    assert_eq!(
+        restored.config_path,
+        PathBuf::from(r"C:\Procora\服务\procora.yaml")
+    );
+    fs::remove_dir_all(directory).unwrap();
+}

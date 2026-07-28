@@ -438,7 +438,7 @@ fn task_dialog_selects_working_directory() {
     let saved = fs::read_to_string(&path).unwrap();
     let compiled = procora::config::load_path(&path).unwrap();
     let task = compiled.spec.tasks.values().next().unwrap();
-    let canonical_work = fs::canonicalize(&work).unwrap();
+    let canonical_work = procora::platform::canonicalize(&work).unwrap();
     assert_eq!(task.cwd.as_deref(), Some(canonical_work.as_path()));
     assert!(saved.contains("cwd: \"work\""));
     fs::remove_dir_all(root).unwrap();

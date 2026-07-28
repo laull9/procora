@@ -1,6 +1,6 @@
 //! Windows 自启动命令的 UAC 提权桥接。
 
-use std::{env, fs, path::Path, process::Command};
+use std::{fs, path::Path, process::Command};
 
 use anyhow::{Context, bail};
 use uuid::Uuid;
@@ -12,8 +12,9 @@ const ERROR_PREFIX: &str = "error\n";
 
 /// 通过 PowerShell `runas` 动词唤起 UAC，并返回提权子进程的结果文本。
 pub(super) fn request(action: &str) -> anyhow::Result<String> {
-    let executable = env::current_exe().context("无法确定当前 Procora 可执行文件")?;
-    let result_path = env::temp_dir().join(format!("procora-uac-{}.result", Uuid::new_v4()));
+    let executable = crate::platform::current_exe().context("无法确定当前 Procora 可执行文件")?;
+    let result_path =
+        crate::platform::temp_dir().join(format!("procora-uac-{}.result", Uuid::new_v4()));
     let _ = fs::remove_file(&result_path);
 
     let mut command = Command::new("powershell.exe");

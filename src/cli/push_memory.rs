@@ -46,7 +46,10 @@ pub(super) fn load_memory() -> PushMemory {
         if bytes.len() > 64 * 1024 {
             bail!("记忆文件超过 64 KiB");
         }
-        serde_json::from_slice(&bytes).context("push 记忆文件不是有效 JSON")
+        let mut memory: PushMemory =
+            serde_json::from_slice(&bytes).context("push 记忆文件不是有效 JSON")?;
+        memory.source = memory.source.as_deref().map(crate::platform::simplify_path);
+        Ok(memory)
     })();
     result.unwrap_or_else(|error| {
         eprintln!("警告：无法读取 push 引导记忆，将使用默认值：{error:#}");

@@ -1,7 +1,6 @@
 //! CLI、MCP 与其他本地入口共享的程序化接口。
 
 use std::{
-    env,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -300,9 +299,11 @@ pub fn selector(target: &str) -> anyhow::Result<ServiceSelectorDto> {
 pub(crate) fn absolute_user_path(path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     let path = path.as_ref();
     if path.is_absolute() {
-        return Ok(path.to_path_buf());
+        return Ok(crate::platform::simplify_path(path));
     }
-    Ok(env::current_dir().context("无法读取当前目录")?.join(path))
+    Ok(crate::platform::current_dir()
+        .context("无法读取当前目录")?
+        .join(path))
 }
 
 /// 返回正在运行的中心客户端，否则给出稳定离线错误。

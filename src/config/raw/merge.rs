@@ -139,13 +139,17 @@ fn rebase_source(source: &str, base: &Path) -> String {
     if let Some(path) = source.strip_prefix("file://") {
         let path = Path::new(path);
         return if path.is_absolute() {
-            source.to_owned()
+            format!("file://{}", crate::platform::simplify_path(path).display())
         } else {
             format!("file://{}", rebase_path(path, base).display())
         };
     }
     let path = Path::new(source);
-    if path.is_absolute() || source.contains("://") || is_scp_source(source) {
+    if path.is_absolute() {
+        crate::platform::simplify_path(path)
+            .to_string_lossy()
+            .into_owned()
+    } else if source.contains("://") || is_scp_source(source) {
         source.to_owned()
     } else {
         rebase_path(path, base).to_string_lossy().into_owned()
@@ -176,5 +180,5 @@ fn rebase_path(path: &Path, base: &Path) -> PathBuf {
             other => normalized.push(other.as_os_str()),
         }
     }
-    normalized
+    crate::platform::simplify_path(&normalized)
 }

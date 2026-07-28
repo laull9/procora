@@ -73,14 +73,30 @@ pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline
 
 pub(crate) use new_service_wizard::{NewServiceChoice, run as run_new_service_wizard};
 
-/// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
-struct MouseCaptureGuard;
+/// 按页面切换鼠标事件捕获，并在退出或错误时自动恢复终端。
+struct MouseCaptureGuard {
+    enabled: bool,
+}
 
 impl MouseCaptureGuard {
     /// 启用终端鼠标捕获。
     fn enable() -> io::Result<Self> {
         execute!(io::stdout(), EnableMouseCapture)?;
-        Ok(Self)
+        Ok(Self { enabled: true })
+    }
+
+    /// 同步鼠标捕获状态；日志页释放捕获后可使用终端原生文本选择。
+    fn set_enabled(&mut self, enabled: bool) -> io::Result<()> {
+        if self.enabled == enabled {
+            return Ok(());
+        }
+        if enabled {
+            execute!(io::stdout(), EnableMouseCapture)?;
+        } else {
+            execute!(io::stdout(), DisableMouseCapture)?;
+        }
+        self.enabled = enabled;
+        Ok(())
     }
 }
 
@@ -254,7 +270,7 @@ fn overview_action_feedback(action: OverviewAction, service_name: &str) -> Strin
 pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
     let mut app = App::new(snapshot);
     ratatui::run(|terminal| {
-        let _mouse_capture = MouseCaptureGuard::enable()?;
+        let mut mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         let mut last_auto_scroll = Instant::now();
         loop {
@@ -273,6 +289,7 @@ pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
                     _ => {}
                 }
             }
+            mouse_capture.set_enabled(app.active_tab() != ActiveTab::Logs)?;
             let now = Instant::now();
             let elapsed = now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = now;
@@ -333,7 +350,7 @@ fn run_live_mode_with_editor(
     app.set_back_navigation(back_navigation);
     let config_path = session.config_path().map(Path::to_path_buf);
     ratatui::run(|terminal| {
-        let _mouse_capture = MouseCaptureGuard::enable()?;
+        let mut mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         let mut next_snapshot = Instant::now();
         let mut next_log = Instant::now();
@@ -423,6 +440,7 @@ fn run_live_mode_with_editor(
                 dirty |= live_editor::poll_log(&mut app, session);
             }
 
+            mouse_capture.set_enabled(editor.is_some() || app.active_tab() != ActiveTab::Logs)?;
             let auto_now = Instant::now();
             let auto_elapsed = auto_now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = auto_now;

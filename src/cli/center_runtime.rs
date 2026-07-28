@@ -111,6 +111,7 @@ pub(super) fn center_paths() -> anyhow::Result<CenterPaths> {
             .data_local_dir()
             .to_path_buf()
     };
+    let home = crate::platform::simplify_path(&home);
     let mut hasher = DefaultHasher::new();
     home.hash(&mut hasher);
     let executable_name = if cfg!(windows) {
@@ -128,7 +129,7 @@ pub(super) fn center_paths() -> anyhow::Result<CenterPaths> {
 
 /// 把当前 CLI 可执行文件通过同目录临时文件替换到中心稳定路径。
 pub(super) fn install_current_executable(destination: &Path) -> anyhow::Result<()> {
-    let source = env::current_exe().context("无法定位当前 procora 可执行文件")?;
+    let source = crate::platform::current_exe().context("无法定位当前 procora 可执行文件")?;
     if source == destination {
         return Ok(());
     }

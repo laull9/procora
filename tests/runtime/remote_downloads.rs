@@ -3,17 +3,23 @@
 use std::{
     fs,
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     path::{Path, PathBuf},
     sync::{
         Arc, Barrier,
         atomic::{AtomicUsize, Ordering},
     },
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use procora::{config::load_path, source::DependencyManager};
+
+#[cfg(unix)]
+use std::{
+    net::TcpStream,
+    time::{Duration, Instant},
+};
 
 /// 创建当前测试独占的服务目录。
 fn temporary_directory(label: &str) -> PathBuf {

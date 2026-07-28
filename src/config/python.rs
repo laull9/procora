@@ -87,7 +87,7 @@ impl PythonConfigRunner {
     ///
     /// 当入口名称不受支持、解释器失败/超时、输出越界或 JSON 无效时返回错误。
     pub fn load(&self, path: &Path) -> Result<CompiledProject, ConfigError> {
-        let absolute = std::fs::canonicalize(path).map_err(|source| ConfigError::Read {
+        let absolute = crate::platform::canonicalize(path).map_err(|source| ConfigError::Read {
             path: path.to_path_buf(),
             source,
         })?;
@@ -167,7 +167,8 @@ pub fn is_python_config(path: &Path) -> bool {
 
 /// 使用默认解释器执行并构造 `DefinitionSource` 捕获信息。
 pub(crate) fn load_capture(path: &Path) -> ConfigLoadCapture {
-    let absolute = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let absolute = crate::platform::canonicalize(path)
+        .unwrap_or_else(|_| crate::platform::simplify_path(path));
     let root = absolute
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);

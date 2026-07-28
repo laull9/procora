@@ -180,7 +180,7 @@ pub(crate) fn hash_file(path: &Path) -> anyhow::Result<String> {
 /// 生成排他创建的本机临时归档路径。
 fn temporary_archive_path() -> anyhow::Result<PathBuf> {
     for _ in 0..16 {
-        let candidate = std::env::temp_dir().join(format!(
+        let candidate = crate::platform::temp_dir().join(format!(
             "procora-upload-{}-{}.tar.gz",
             std::process::id(),
             uuid::Uuid::new_v4()

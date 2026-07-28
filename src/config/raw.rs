@@ -156,6 +156,13 @@ fn normalize_task(
         raw.validate_runtime_limits(path, diagnostics);
     }
     let (command, args) = command::normalize(raw.command, raw.args, path, diagnostics);
+    let command = if Path::new(&command).is_absolute() {
+        crate::platform::simplify_path(Path::new(&command))
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        command
+    };
     let mut depends_on = BTreeMap::new();
     for (raw_dependency, dependency) in raw.depends_on {
         let dependency_path = format!("{path}.depends_on.{raw_dependency}");
@@ -230,7 +237,7 @@ fn normalize_path(path: &Path, base_directory: Option<&Path>) -> PathBuf {
             other => normalized.push(other.as_os_str()),
         }
     }
-    normalized
+    crate::platform::simplify_path(&normalized)
 }
 
 /// 创建一条字段级配置诊断。

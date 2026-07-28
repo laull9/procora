@@ -167,6 +167,13 @@ fn normalize_probe(
         if command.trim().is_empty() {
             diagnostics.push(diagnostic(format!("{path}.command"), "命令不能为空"));
         }
+        let command = if Path::new(&command).is_absolute() {
+            crate::platform::simplify_path(Path::new(&command))
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            command
+        };
         return HealthCheckProbe::Exec {
             command,
             args,
@@ -357,7 +364,7 @@ fn normalize_path(path: &Path, base_directory: Option<&Path>) -> PathBuf {
             other => normalized.push(other.as_os_str()),
         }
     }
-    normalized
+    crate::platform::simplify_path(&normalized)
 }
 
 /// 创建健康检查字段诊断。
