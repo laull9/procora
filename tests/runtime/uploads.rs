@@ -74,7 +74,7 @@ fn receive(
         "archive_bytes": archive.len(),
         "content_bytes": content_bytes,
         "sha256": digest,
-        "select_target": false,
+        "select_target": selection.is_some(),
         "restart": restart,
     });
     let mut child = Command::new(binary)
@@ -168,6 +168,30 @@ fn receiver_replaces_declared_targets_atomically() {
     );
     assert!(!service.join("deployed/stale.txt").exists());
     assert!(String::from_utf8_lossy(&output.stdout).contains(r#""restarted":true"#));
+
+    let archive = directory_archive();
+    let output = receive(
+        &home,
+        Some("missing::release"),
+        "directory",
+        &archive,
+        11,
+        Some("demo::assets"),
+        false,
+    );
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(r#""invalid_target":"missing::release""#)
+    );
+    assert_eq!(
+        fs::read_to_string(service.join("public/app.txt")).unwrap(),
+        "new app"
+    );
 
     let archive = file_archive(b"port = 8080\n");
     let output = receive(&home, None, "file", &archive, 12, None, true);

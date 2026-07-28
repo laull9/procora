@@ -22,6 +22,7 @@ notify = "8.2"
 petgraph = { version = "0.8.3", default-features = false, features = ["graphmap", "std"] }
 process-wrap = { version = "9.1.0", default-features = false, features = ["creation-flags", "job-object", "kill-on-drop", "process-group", "process-session", "std", "tokio1", "tracing"] }
 ratatui = "0.30.2"
+rpassword = "7.5.4"
 rmcp = { version = "2.2.0", default-features = false, features = ["macros", "server", "transport-io"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 rustix = { version = "1.0", features = ["process"] }
@@ -43,6 +44,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 widestring = "1.2"
+zeroize = "1.9.0"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -1,10 +1,20 @@
-use std::{io, io::IsTerminal, path::Path};
+use std::{
+    io::{self, IsTerminal, Write},
+    path::Path,
+};
 
 use anyhow::{Context, bail};
 
 use crate::config::UploadKind;
 
 use super::{protocol::TransferTarget, remote::human_bytes};
+
+/// 远端候选列表或手动选择器输入。
+#[derive(Clone)]
+enum TargetChoice {
+    Listed(String),
+    Manual,
+}
 
 /// 在交互终端列出远端候选目标并读取选择。
 pub(super) fn choose_target(
@@ -28,7 +38,7 @@ pub(super) fn choose_target(
     {
         targets.swap(0, index);
     }
-    let items = targets
+    let mut items = targets
         .into_iter()
         .map(|target| {
             crate::tui::SelectionItem::new(
@@ -40,16 +50,37 @@ pub(super) fn choose_target(
                     human_bytes(target.max_bytes),
                     restart_label(target.restart)
                 ),
-                target.selector.clone(),
+                TargetChoice::Listed(target.selector.clone()),
             )
         })
-        .collect();
-    crate::tui::select_inline(
+        .collect::<Vec<_>>();
+    items.push(crate::tui::SelectionItem::new(
+        "手动输入选择器",
+        "输入 service::name 或 service::task::name",
+        TargetChoice::Manual,
+    ));
+    let choice = crate::tui::select_inline(
         "选择远端上传项目",
         "已从远端 Procora 拉取与本机来源兼容的活动上传项。",
         items,
     )?
-    .context("已取消上传目标选择")
+    .context("已取消上传目标选择")?;
+    match choice {
+        TargetChoice::Listed(selector) => Ok(selector),
+        TargetChoice::Manual => {
+            eprint!("远端上传目标（service::name 或 service::task::name）：");
+            io::stderr().flush()?;
+            let mut selector = String::new();
+            if io::stdin().read_line(&mut selector)? == 0 {
+                bail!("输入已结束");
+            }
+            let selector = selector.trim();
+            if selector.is_empty() {
+                bail!("远端上传目标不能为空");
+            }
+            Ok(selector.to_owned())
+        }
+    }
 }
 
 /// 兼容旧协议未返回目标路径的选择项。

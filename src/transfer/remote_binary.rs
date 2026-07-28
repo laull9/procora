@@ -6,7 +6,10 @@ use std::{
 use anyhow::{Context, bail};
 use serde::Deserialize;
 
-use super::remote::{base_ssh, validate_remote_bin};
+use super::{
+    remote::validate_remote_bin,
+    remote_auth::{SshAuth, base_ssh},
+};
 
 /// Unix 远端一次性扫描的常见 Procora 安装位置。
 const UNIX_DISCOVERY: &str = r#"for p in "$HOME/.local/bin/procora" "$HOME/bin/procora" /usr/local/bin/procora /opt/homebrew/bin/procora /usr/bin/procora; do if [ -x "$p" ] && "$p" __ssh-probe >/dev/null 2>&1; then printf '__PROCORA_PATH__%s\n' "$p"; exit 0; fi; done; exit 127"#;
@@ -29,10 +32,10 @@ pub(super) fn resolve_after_missing(
     ssh_target: &str,
     configured: Option<&str>,
     batch: bool,
-    interactive_login: bool,
+    auth: &SshAuth,
     original_error: anyhow::Error,
 ) -> anyhow::Result<String> {
-    if let Some(path) = discover_unix(ssh_target, interactive_login)? {
+    if let Some(path) = discover_unix(ssh_target, auth)? {
         eprintln!("已自动找到远端 Procora：{path}");
         return Ok(path);
     }
@@ -40,7 +43,7 @@ pub(super) fn resolve_after_missing(
         if Some(*candidate) == configured {
             continue;
         }
-        if probe_candidate(ssh_target, candidate, interactive_login)? {
+        if probe_candidate(ssh_target, candidate, auth)? {
             eprintln!("已自动找到远端 Procora：{candidate}");
             return Ok((*candidate).to_owned());
         }
@@ -73,8 +76,8 @@ pub(super) fn resolve_after_missing(
 }
 
 /// 在 Unix/macOS 常见目录中通过一次 SSH 会话查找可握手的 Procora。
-fn discover_unix(ssh_target: &str, interactive_login: bool) -> anyhow::Result<Option<String>> {
-    let mut command = base_ssh(interactive_login);
+fn discover_unix(ssh_target: &str, auth: &SshAuth) -> anyhow::Result<Option<String>> {
+    let mut command = base_ssh(auth)?;
     let output = command
         .arg(ssh_target)
         .arg(UNIX_DISCOVERY)
@@ -102,12 +105,8 @@ fn discover_unix(ssh_target: &str, interactive_login: bool) -> anyhow::Result<Op
 }
 
 /// 调用候选可执行文件的能力握手，避免把同名无关程序误判为 Procora。
-fn probe_candidate(
-    ssh_target: &str,
-    candidate: &str,
-    interactive_login: bool,
-) -> anyhow::Result<bool> {
-    let mut command = base_ssh(interactive_login);
+fn probe_candidate(ssh_target: &str, candidate: &str, auth: &SshAuth) -> anyhow::Result<bool> {
+    let mut command = base_ssh(auth)?;
     let output = command
         .arg(ssh_target)
         .args([candidate, "__ssh-probe"])

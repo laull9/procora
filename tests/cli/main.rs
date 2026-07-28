@@ -10,6 +10,7 @@ mod cli_git_source;
 mod cli_reload;
 mod cli_update;
 mod cli_uploads;
+mod cli_uploads_list;
 mod cli_usability;
 mod embedded_session;
 mod mcp;

@@ -1,4 +1,7 @@
-use super::{remote_command_missing, transfer_protocol_incompatible, validate_remote_bin};
+use super::{
+    LoginFailure, classify_login_failure, remote_command_missing, transfer_protocol_incompatible,
+    validate_remote_bin,
+};
 
 // 远端可执行文件兼容 Unix 与 Windows 的无空格绝对路径。
 #[test]
@@ -41,4 +44,31 @@ fn transfer_protocol_rejection_is_recognized() {
     assert!(!transfer_protocol_incompatible(
         "Permission denied".as_bytes()
     ));
+}
+
+// 只有认证失败与未知主机允许进入交互回退，网络错误和主机密钥变更直接失败。
+#[test]
+fn ssh_login_failures_are_safely_classified() {
+    assert_eq!(
+        classify_login_failure(Some(255), b"Permission denied (publickey,password)."),
+        LoginFailure::Authentication
+    );
+    assert_eq!(
+        classify_login_failure(
+            Some(255),
+            b"No ED25519 host key is known and you have requested strict checking.\nHost key verification failed."
+        ),
+        LoginFailure::HostKey
+    );
+    assert_eq!(
+        classify_login_failure(
+            Some(255),
+            b"WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!"
+        ),
+        LoginFailure::None
+    );
+    assert_eq!(
+        classify_login_failure(Some(255), b"Connection refused"),
+        LoginFailure::None
+    );
 }

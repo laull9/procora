@@ -113,16 +113,16 @@ pub enum Command {
     Push {
         /// 本机普通文件或目录。
         source: Option<PathBuf>,
-        /// `service::name` 或 `service::task::name` 上传目标。
+        /// 远端 Procora 中的 `service::name` 或 `service::task::name` 上传目标。
         #[arg(long, value_name = "SELECTOR")]
         target: Option<String>,
-        /// SSH config 别名或 `[user@]host`；省略时依次使用环境变量和服务名推断。
+        /// 要连接的服务器：SSH config 别名或 `[user@]host`。
         #[arg(long, value_name = "SSH_TARGET")]
         ssh: Option<String>,
         /// 远端 Procora 命令名或 Unix/Windows 无空格路径。
         #[arg(long, value_name = "PATH")]
         remote_bin: Option<String>,
-        /// 禁止人工目标与密码登录回退，适合 CI。
+        /// 禁止主机确认与密码登录回退，适合 CI。
         #[arg(long)]
         batch: bool,
         /// 为本次上传强制开启重启；省略时遵循远端目标配置。
@@ -412,6 +412,9 @@ pub enum TemplateFormat {
 ///
 /// 当配置加载、中心服务器连接或 TUI 终端操作失败时返回错误。
 pub fn run() -> anyhow::Result<()> {
+    if crate::transfer::answer_askpass_if_requested()? {
+        return Ok(());
+    }
     run_with(Cli::parse())
 }
 

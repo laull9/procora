@@ -52,9 +52,17 @@ pub(crate) struct TransferSelection {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum TransferResponse {
-    Ready { target: String },
-    Choose { targets: Vec<TransferTarget> },
-    Complete { result: TransferResult },
+    Ready {
+        target: String,
+    },
+    Choose {
+        targets: Vec<TransferTarget>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invalid_target: Option<String>,
+    },
+    Complete {
+        result: TransferResult,
+    },
 }
 
 /// 远端成功提交上传目标后的单行 JSON 结果。

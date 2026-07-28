@@ -4,7 +4,9 @@ mod archive;
 mod protocol;
 mod receive;
 mod remote;
+mod remote_auth;
 mod remote_binary;
+mod remote_error;
 mod remote_list;
 mod remote_selection;
 mod target;
@@ -13,6 +15,7 @@ mod target;
 pub(crate) use receive::run as receive;
 /// 从本机向远端声明式目标上传文件或目录。
 pub(crate) use remote::push;
+pub(crate) use remote_auth::answer_askpass_if_requested;
 pub(crate) use remote_list::list_remote;
 
 /// 返回本机 Center 当前活动上传目标。

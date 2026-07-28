@@ -75,7 +75,7 @@ pub(super) fn run(
     let ssh = match ssh {
         Some(ssh) => Some(ssh),
         None if batch => None,
-        None => Some(choose_ssh_target(target, &memory)?),
+        None => Some(choose_ssh_target(&memory)?),
     };
     let remote_bin = remote_bin.or_else(|| {
         (!complete && !batch)
@@ -190,8 +190,8 @@ fn prompt_path(default: Option<&Path>) -> anyhow::Result<PathBuf> {
     Ok(crate::platform::simplify_path(Path::new(&value)))
 }
 
-/// 从记忆、环境变量、选择器与 SSH config 中引导选择连接目标。
-fn choose_ssh_target(selector: Option<&str>, memory: &PushMemory) -> anyhow::Result<String> {
+/// 从记忆、环境变量与 SSH config 中引导选择连接目标。
+fn choose_ssh_target(memory: &PushMemory) -> anyhow::Result<String> {
     let mut candidates = Vec::<(String, String)>::new();
     let mut seen = HashSet::new();
     add_ssh_candidate(
@@ -207,8 +207,6 @@ fn choose_ssh_target(selector: Option<&str>, memory: &PushMemory) -> anyhow::Res
         environment.as_deref(),
         "PROCORA_SSH_TARGET",
     );
-    let inferred = selector.and_then(|value| value.split("::").next());
-    add_ssh_candidate(&mut candidates, &mut seen, inferred, "由上传选择器推断");
     for alias in ssh_config_aliases() {
         add_ssh_candidate(&mut candidates, &mut seen, Some(&alias), "SSH config");
     }
@@ -228,7 +226,7 @@ fn choose_ssh_target(selector: Option<&str>, memory: &PushMemory) -> anyhow::Res
     ));
     match select_inline(
         "选择 SSH 连接",
-        "密码不会写入记忆；需要密码时由 OpenSSH 在连接阶段读取。",
+        "这里选择服务器；上传目标稍后从该服务器读取。密码仅在本次命令内存中复用，绝不落盘。",
         items,
     )?
     .context("已取消 SSH 目标选择")?

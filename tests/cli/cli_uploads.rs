@@ -9,7 +9,7 @@ use std::{
 };
 
 /// 创建当前测试独占的目录。
-fn temporary_directory(label: &str) -> PathBuf {
+pub(super) fn temporary_directory(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -23,7 +23,7 @@ fn temporary_directory(label: &str) -> PathBuf {
 }
 
 /// 安装实现单连接协商协议的 ssh 测试替身。
-fn install_fake_ssh(directory: &std::path::Path) {
+pub(super) fn install_fake_ssh(directory: &std::path::Path) {
     let script = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
 case "$FAKE_SSH_MODE" in
@@ -62,6 +62,16 @@ case "$FAKE_SSH_MODE" in
   protocol-v1)
     printf '%s\n' '错误：不支持上传协议版本 2，当前为 1' >&2
     exit 1
+    ;;
+  target-missing)
+    case "$header" in
+      *'"target":null'*)
+        ;;
+      *)
+        printf '%s\n\n%s\n' '错误：找不到服务 `missing`' '运行 `procora --help` 查看用法。' >&2
+        exit 1
+        ;;
+    esac
     ;;
 esac
 case "$FAKE_SSH_MODE" in
@@ -237,7 +247,7 @@ fn batch_push_reports_automatic_login_failure_without_prompting() {
 }
 
 #[test]
-// 自动认证失败时进入人工回退边界，非终端环境则提示显式修正地址或密钥。
+// 自动认证失败时保留既定SSH地址，非终端环境提示改用密钥或交互终端。
 fn automatic_login_failure_attempts_manual_fallback() {
     let directory = temporary_directory("manual-fallback");
     install_fake_ssh(&directory);
@@ -252,9 +262,10 @@ fn automatic_login_failure_attempts_manual_fallback() {
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("SSH 自动登录失败"));
-    assert!(stderr.contains("当前不是交互终端"));
-    assert!(stderr.contains("--ssh <目标>"));
+    assert!(stderr.contains("SSH 密钥自动登录不可用"));
+    assert!(stderr.contains("SSH 密码登录需要交互终端"));
+    assert!(stderr.contains("`mock-host`"));
+    assert!(!stderr.contains("SSH 目标 ["));
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -283,6 +294,71 @@ fn remote_command_failure_does_not_trigger_login_fallback() {
             .lines()
             .count()
             > 1
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 旧远端拒绝无效选择器时，交互push重新连接并拉取兼容目标而不直接退出。
+fn invalid_target_falls_back_to_remote_candidates() {
+    let directory = temporary_directory("invalid-target");
+    install_fake_ssh(&directory);
+    let source = directory.join("payload.txt");
+    fs::write(&source, "payload").unwrap();
+
+    let output = push_command(&directory, &source)
+        .args(["--target", "missing::release"])
+        .env("FAKE_SSH_MODE", "target-missing")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("远端没有上传目标 `missing::release`，正在读取可用列表")
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("上传完成"));
+    assert_eq!(
+        fs::read_to_string(directory.join("ssh.log"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// batch模式下无效选择器保持确定性失败并解释SSH地址与服务选择器的区别。
+fn batch_invalid_target_does_not_choose_another_destination() {
+    let directory = temporary_directory("batch-invalid-target");
+    install_fake_ssh(&directory);
+    let source = directory.join("payload.txt");
+    fs::write(&source, "payload").unwrap();
+
+    let output = push_command(&directory, &source)
+        .args(["--target", "missing::release", "--batch"])
+        .env("FAKE_SSH_MODE", "target-missing")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("`missing` 是远端 Procora 服务名，不是 SSH 地址"));
+    assert_eq!(
+        stderr.matches("运行 `procora --help` 查看用法。").count(),
+        1
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("ssh.log"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
     );
     fs::remove_dir_all(directory).unwrap();
 }
@@ -358,120 +434,4 @@ fn push_restart_reports_remote_capability_mismatch() {
     assert!(stderr.contains("不支持客户端请求的上传后重启能力"));
     assert!(stderr.contains("移除 `--restart`"));
     fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-// uploads可通过SSH获取并展示远端活动选择器、类型、上限与声明路径。
-fn uploads_lists_remote_targets_and_paths() {
-    let directory = temporary_directory("list-targets");
-    install_fake_ssh(&directory);
-    let path = format!(
-        "{}:{}",
-        directory.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-
-    let output = Command::new(env!("CARGO_BIN_EXE_procora"))
-        .args(["uploads", "--ssh", "mock-host", "--batch"])
-        .env("PATH", path)
-        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
-        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("demo::release"));
-    assert!(stdout.contains("bin/release"));
-    assert!(stdout.contains("demo::assets"));
-    assert!(stdout.contains("public"));
-    assert!(stdout.contains("是"));
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-// uploads查询与push共享远端Procora常见位置发现能力。
-fn uploads_discovers_procora_in_common_remote_location() {
-    let directory = temporary_directory("list-remote-common");
-    install_fake_ssh(&directory);
-    let path = format!(
-        "{}:{}",
-        directory.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-
-    let output = Command::new(env!("CARGO_BIN_EXE_procora"))
-        .args(["uploads", "--ssh", "mock-host", "--batch"])
-        .env("PATH", path)
-        .env("FAKE_SSH_MODE", "remote-common")
-        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
-        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("已自动找到远端 Procora：/home/mock/.local/bin/procora")
-    );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("demo::release"));
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-// 成功push只把非敏感记忆写入全局Procora子目录。
-fn push_memory_is_saved_under_global_procora_home() {
-    let directory = temporary_directory("memory");
-    let procora_home = temporary_directory("memory-home");
-    install_fake_ssh(&directory);
-    let source = directory.join("payload.txt");
-    fs::write(&source, "payload").unwrap();
-
-    let output = push_command(&directory, &source)
-        .args(["--target", "demo::release"])
-        .env("PROCORA_HOME", &procora_home)
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let memory = procora_home.join("cli-memory/push.json");
-    assert!(memory.is_file());
-    assert_eq!(
-        fs::metadata(&memory).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
-    let value: serde_json::Value = serde_json::from_slice(&fs::read(memory).unwrap()).unwrap();
-    assert_eq!(value["ssh_target"], "mock-host");
-    assert_eq!(value["upload_target"], "demo::release");
-    assert!(!directory.join(".procora").exists());
-    fs::remove_dir_all(directory).unwrap();
-    fs::remove_dir_all(procora_home).unwrap();
-}
-
-#[test]
-// SSH探测返回机器可读的协议范围与能力而不是包版本硬匹配。
-fn ssh_probe_reports_protocol_capabilities() {
-    let output = Command::new(env!("CARGO_BIN_EXE_procora"))
-        .arg("__ssh-probe")
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["transfer_protocol"]["min"], 1);
-    assert_eq!(value["transfer_protocol"]["max"], 2);
-    assert!(
-        value["capabilities"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::Value::String("configured_restart".to_owned()))
-    );
 }
