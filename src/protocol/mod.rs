@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// 当前本地 IPC 协议主版本。
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 9;
 
 /// 单个日志流分片允许携带的原始字节数，避免 JSON 编码膨胀触发 IPC 帧上限。
 pub const LOG_STREAM_CHUNK_BYTES: u32 = 64 * 1024;
@@ -310,6 +310,15 @@ pub enum CenterRequest {
         action: ServiceActionDto,
         /// 要管理的服务。
         selector: ServiceSelectorDto,
+    },
+    /// 仅在当前根目录精确匹配时把服务迁移到另一份已验证配置。
+    RelocateService {
+        /// 要迁移的服务。
+        selector: ServiceSelectorDto,
+        /// 调用端观察到的当前规范化根目录。
+        expected_root: PathBuf,
+        /// 新 release 中的配置入口。
+        path: PathBuf,
     },
     /// 停止并从中心注册表删除服务。
     Remove {

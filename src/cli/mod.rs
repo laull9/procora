@@ -4,6 +4,8 @@
 pub mod api;
 mod autostart_command;
 mod center_runtime;
+mod deploy;
+pub use deploy::DeployArgs;
 #[cfg(target_os = "windows")]
 mod elevation;
 mod logs;
@@ -129,6 +131,8 @@ pub enum Command {
         #[arg(long)]
         restart: bool,
     },
+    /// 通过 SSH 全托管部署一个完整 Service，无需远端预先声明上传目标。
+    Deploy(DeployArgs),
     /// 列出本机或远端当前可用的声明式上传目标与路径。
     Uploads {
         /// SSH config 别名或 `[user@]host`；省略时读取本机全局 Procora。
@@ -243,6 +247,9 @@ pub enum Command {
     /// 从 SSH 标准输入接收并提交声明式上传目标。
     #[command(name = "__receive", hide = true)]
     Receive,
+    /// 从 SSH 标准输入接收并全托管部署完整 Service。
+    #[command(name = "__receive-deploy", hide = true)]
+    ReceiveDeploy,
     /// 输出当前 Center 的上传目标 JSON，供 SSH 客户端调用。
     #[command(name = "__upload-targets", hide = true)]
     UploadTargets,

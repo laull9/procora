@@ -1,5 +1,40 @@
 # CLI 与全局 Procora 服务器语义
 
+## 全托管裸机部署
+
+`deploy` 通过 SSH 上传一个完整 Service。远端只需安装 Procora 并允许当前 SSH 用户运行它；不需要预先创建服务目录、执行 `add` 或在配置中声明 `uploads` target：
+
+```bash
+procora deploy . --ssh prod
+procora deploy ./service --ssh user@server --service demo
+procora deploy . --ssh prod --timeout 45s --stable-for 5s --keep 5
+procora deploy . --ssh prod --batch
+```
+
+本机先发现并完整编译声明式配置，服务名取自 `project`。`--service` 只做身份一致性校验，不是远端路径或上传目标。远端在当前用户的 Procora 数据目录下保存：
+
+```text
+services/<project>/
+  releases/<archive-sha256-prefix>/
+  state.json
+  deploy.lock
+```
+
+部署接收器会再次校验 SHA-256、展开大小、配置入口和 `project`，再把 release 注册到 Center。命令行会实时显示 `[校验]`、`[切换]`、`[验活]`、`[回滚]` 和 `[恢复]` 阶段。全部 Task 必须进入运行状态；配置健康检查的 Task 还必须达到 `healthy`，并持续通过 `--stable-for` 稳定窗口。Task 启动失败、健康检查失败或 `--timeout` 到期都会停止新 release，恢复上一 release，并再次执行相同验收。首次部署失败时会停止失败服务。若旧 release 也无法恢复，命令明确报告自动回滚失败。
+
+部署和回滚是固定程序状态机，不调用 AI，也不根据日志文本猜测成功。release 切换由 Center 在同一服务身份内完成，并用旧根目录作为并发校验，避免删除注册记录和短暂的未注册窗口。切换前会把待部署 release 写入两阶段状态；若接收器或 SSH 会话在中途异常退出，下一次部署会先识别未完成事务并恢复最近一次已确认 release。没有配置健康检查的运行中 Task 以受管进程仍在运行为降级验收条件；需要强健康保证的服务应声明 exec 或 HTTP GET healthcheck。
+
+同名服务只有在其根目录确实属于上述 Procora 托管 release 目录时才能被后续 `deploy` 更新。用户通过 `add` 注册的同名普通目录不会被接管。`--keep` 默认保留最近 3 个 release，范围为 1–32；部署记录保存在 `state.json`，最多保留最近 100 条。
+
+本机与远端 Procora 都需要支持 `deploy`。远端版本过旧且缺少托管接收器时，客户端会直接提示升级远端 Procora。
+
+`deploy` 与 `push` 的边界不同：
+
+| 命令 | 内容 | 远端是否声明 target |
+| --- | --- | --- |
+| `deploy` | 包含 Procora 配置的完整 Service | 不需要 |
+| `push` | 已有 Service 的单个文件或目录 | 需要 |
+
 ## 远端声明式上传
 
 服务端配置可在 Service 或 Task 下声明 `uploads`，客户端通过稳定选择器上传：

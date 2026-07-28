@@ -51,6 +51,19 @@ case "$FAKE_SSH_MODE" in
     ;;
 esac
 case "$*" in
+  *"__receive-deploy"*)
+    if [ "$FAKE_SSH_MODE" = "old-deploy" ]; then
+      printf '%s\n' "error: unrecognized subcommand '__receive-deploy'" >&2
+      exit 2
+    fi
+    IFS= read -r header || exit 1
+    printf '%s\n' "$header" > "$FAKE_SSH_HEADER_LOG"
+    printf '%s\n' '{"type":"ready","project":"demo"}'
+    archive_bytes=$(printf '%s' "$header" | sed -n 's/.*"archive_bytes":\([0-9][0-9]*\).*/\1/p')
+    dd bs=1 count="$archive_bytes" >/dev/null 2>&1
+    printf '%s\n' '{"type":"complete","result":{"project":"demo","release":"0123456789abcdef","previous_release":null,"content_bytes":42,"sha256":"fixture"}}'
+    exit 0
+    ;;
   *"__upload-targets"*)
     printf '%s\n' '[{"selector":"demo::release","path":"bin/release","kind":"file","max_bytes":20000000,"restart":true},{"selector":"demo::assets","path":"public","kind":"directory","max_bytes":1073741824,"restart":false}]'
     exit 0

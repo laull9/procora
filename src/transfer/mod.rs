@@ -1,6 +1,12 @@
 //! 通过 OpenSSH 把本机文件安全提交到远端声明式上传目标。
 
 mod archive;
+mod deploy_health;
+mod deploy_protocol;
+mod deploy_receive;
+mod deploy_remote;
+mod deploy_state;
+mod deploy_wire;
 mod protocol;
 mod receive;
 mod remote;
@@ -11,6 +17,10 @@ mod remote_list;
 mod remote_selection;
 mod target;
 
+/// 运行只供 SSH 子进程调用的全托管部署接收器。
+pub(crate) use deploy_receive::run as receive_deploy;
+/// 从本机向远端全托管部署完整 Service。
+pub(crate) use deploy_remote::{DeployOutcome, deploy};
 /// 运行只供 SSH 子进程调用的远端接收器。
 pub(crate) use receive::run as receive;
 /// 从本机向远端声明式目标上传文件或目录。
@@ -42,9 +52,14 @@ pub(crate) fn probe() {
             },
             "capabilities": [
                 "configured_restart",
+                "managed_deploy",
                 "requested_restart",
                 "target_metadata",
             ],
+            "deploy_protocol": {
+                "min": deploy_protocol::DEPLOY_PROTOCOL_VERSION,
+                "max": deploy_protocol::DEPLOY_PROTOCOL_VERSION,
+            },
         })
     );
 }

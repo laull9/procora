@@ -474,6 +474,44 @@ fn push_source_is_optional_for_interactive_wizard() {
 }
 
 #[test]
+// deploy完整表达无target全托管、验收窗口和release保留策略。
+fn deploy_arguments_remain_stable() {
+    let parsed = Cli::try_parse_from([
+        "procora",
+        "deploy",
+        "./service",
+        "--ssh",
+        "prod",
+        "--service",
+        "demo",
+        "--timeout",
+        "1m",
+        "--stable-for",
+        "5s",
+        "--keep",
+        "5",
+        "--batch",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Deploy(procora::cli::DeployArgs {
+            source,
+            ssh: Some(ssh),
+            remote_bin: None,
+            service: Some(service),
+            timeout: 60_000,
+            stable_for: 5_000,
+            keep: 5,
+            batch: true,
+        })) if source == std::path::Path::new("./service")
+            && ssh == "prod"
+            && service == "demo"
+    ));
+}
+
+#[test]
 // uploads命令可选择本机清单或远端JSON清单。
 fn uploads_arguments_are_stable() {
     let local = Cli::try_parse_from(["procora", "uploads"]).unwrap();

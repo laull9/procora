@@ -497,6 +497,81 @@ fn live_service_with_missing_config_can_relocate() {
 }
 
 #[test]
+// 托管release迁移保持同一服务注册与既有状态历史。
+fn managed_release_relocation_preserves_service_history() {
+    let directory = temporary_directory();
+    let old_root = directory.join("releases/old");
+    let new_root = directory.join("releases/new");
+    write_service(&old_root, "demo");
+    write_service(&new_root, "demo");
+    let repository = SqliteCenterRepository::new(directory.join("procora.sqlite3"));
+    let mut center = Center::empty(repository.clone());
+    center.handle(CenterRequest::Open {
+        path: old_root.clone(),
+    });
+    let old_root = procora::platform::canonicalize(&old_root).unwrap();
+    let new_root = procora::platform::canonicalize(&new_root).unwrap();
+
+    let relocated = center.handle(CenterRequest::RelocateService {
+        selector: ServiceSelectorDto::Name("demo".to_owned()),
+        expected_root: old_root,
+        path: new_root.join("procora.yaml"),
+    });
+
+    assert!(matches!(
+        relocated,
+        CenterResponse::Service(service)
+            if service.root == new_root && service.status == ServiceStatusDto::Running
+    ));
+    assert_eq!(repository.status_history("demo").unwrap().len(), 1);
+    assert!(matches!(
+        center.handle(CenterRequest::List),
+        CenterResponse::Services(services)
+            if services.len() == 1 && services[0].root == new_root
+    ));
+    center.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 托管release迁移以旧根作为并发令牌并拒绝陈旧请求。
+fn managed_release_relocation_rejects_stale_expected_root() {
+    let directory = temporary_directory();
+    let old_root = directory.join("releases/old");
+    let new_root = directory.join("releases/new");
+    let stale_root = directory.join("releases/stale");
+    write_service(&old_root, "demo");
+    write_service(&new_root, "demo");
+    fs::create_dir_all(&stale_root).unwrap();
+    let mut center = Center::empty(SqliteCenterRepository::new(
+        directory.join("procora.sqlite3"),
+    ));
+    center.handle(CenterRequest::Open {
+        path: old_root.clone(),
+    });
+    let old_root = procora::platform::canonicalize(&old_root).unwrap();
+    let stale_root = procora::platform::canonicalize(&stale_root).unwrap();
+
+    let rejected = center.handle(CenterRequest::RelocateService {
+        selector: ServiceSelectorDto::Name("demo".to_owned()),
+        expected_root: stale_root,
+        path: new_root,
+    });
+
+    assert!(matches!(
+        rejected,
+        CenterResponse::Error { message } if message.contains("根目录已变化")
+    ));
+    assert!(matches!(
+        center.handle(CenterRequest::List),
+        CenterResponse::Services(services)
+            if services.len() == 1 && services[0].root == old_root
+    ));
+    center.handle(CenterRequest::Shutdown);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 // 同名服务不能指向两个目录。
 fn same_service_name_cannot_point_to_two_directories() {
     let directory = temporary_directory();

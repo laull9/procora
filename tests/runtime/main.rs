@@ -4,6 +4,7 @@ mod center;
 #[path = "../support/command.rs"]
 mod command_support;
 mod dependency_manager;
+mod deployments;
 mod event_loop;
 mod exit_codes;
 mod file_store;

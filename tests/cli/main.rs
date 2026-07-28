@@ -6,6 +6,7 @@ mod command_support;
 mod center_update;
 mod cli;
 mod cli_commands;
+mod cli_deploy;
 mod cli_git_source;
 mod cli_reload;
 mod cli_update;

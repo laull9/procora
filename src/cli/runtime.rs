@@ -11,8 +11,8 @@ use clap::CommandFactory;
 use clap_complete::generate;
 
 use super::{
-    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, logs, project,
-    push, session, source, suggestion, template,
+    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, deploy, logs,
+    project, push, session, source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -41,6 +41,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             batch,
             restart,
         }) => push::run(source, target.as_deref(), ssh, remote_bin, batch, restart),
+        Some(Command::Deploy(arguments)) => deploy::run(&arguments),
         Some(Command::Uploads {
             ssh,
             remote_bin,
@@ -93,6 +94,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             Ok(())
         }
         Some(Command::Receive) => crate::transfer::receive(),
+        Some(Command::ReceiveDeploy) => crate::transfer::receive_deploy(),
         Some(Command::UploadTargets) => crate::transfer::print_local_targets_json(),
         #[cfg(target_os = "windows")]
         Some(Command::ApplyUpdate {

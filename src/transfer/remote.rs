@@ -135,7 +135,10 @@ pub(crate) fn push(
 }
 
 /// 按显式参数和环境变量顺序确定 SSH 目标。
-fn resolve_ssh_target(configured_target: Option<&str>, batch: bool) -> anyhow::Result<String> {
+pub(super) fn resolve_ssh_target(
+    configured_target: Option<&str>,
+    batch: bool,
+) -> anyhow::Result<String> {
     let inferred = configured_target.map(str::to_owned).or_else(|| {
         env::var("PROCORA_SSH_TARGET")
             .ok()
@@ -305,7 +308,7 @@ fn exchange(
 }
 
 /// 把本机 SSH 进程错误转换为不会触发远端或登录回退的失败。
-fn local_ssh_failure(error: io::Error, message: &'static str) -> SessionFailure {
+pub(super) fn local_ssh_failure(error: io::Error, message: &'static str) -> SessionFailure {
     SessionFailure {
         error: anyhow!(error).context(message),
         login_failure: LoginFailure::None,
@@ -333,7 +336,7 @@ fn send_json(output: &mut impl Write, value: &impl serde::Serialize) -> anyhow::
 }
 
 /// 复制归档正文，并仅在真实终端中显示节流后的覆盖式进度。
-fn copy_with_progress(
+pub(super) fn copy_with_progress(
     input: &mut impl Read,
     output: &mut impl Write,
     total: u64,

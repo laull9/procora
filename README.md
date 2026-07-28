@@ -22,6 +22,7 @@ Procora 把每个项目视为一个 Service，把项目中的进程视为具有�
 - **真实进程托管**：Linux/macOS 使用进程组，Windows 使用 Job Object，停止时回收完整进程树。
 - **终端优先**：在 TUI 中查看状态、资源、彩色日志，并启动、停止、重启或编辑服务。
 - **可靠热更新**：先预览配置修订，再按受影响的下游闭包应用，失败时保留旧的有效定义。
+- **全托管裸机部署**：远端无需预先声明上传目标；通过 SSH 接收完整 Service，以不可变 release 启动并验活，失败时由确定性状态机自动回滚。
 - **多项目 Center**：统一注册本机服务，支持用户级开机自启动、历史状态和本地 IPC。
 - **自动化接口**：提供脚本友好的 CLI、Shell 补全和 stdio MCP 服务。
 
@@ -113,6 +114,14 @@ procora
 
 `procora init` 创建可直接运行的最小配置；`procora add .` 注册并启动当前服务；不带参数运行 `procora` 会打开全局 TUI。
 
+把当前完整 Service 部署到已安装 Procora 的 SSH 远端，不需要远端预建目录、注册 Service 或声明 `uploads` target：
+
+```bash
+procora deploy . --ssh prod
+```
+
+远端会重新校验配置和归档摘要，在 Procora 数据目录中创建不可变 release，启动后等待全部 Task 运行及已声明健康检查通过稳定窗口。命令行实时显示校验、切换、验活与回滚阶段；启动、健康或稳定窗口失败时自动恢复并重新验收上一 release。两阶段状态还能让下一次部署自动收敛上次意外中断的切换。全部判断来自配置、进程状态、退出结果、健康检查和超时。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -125,6 +134,7 @@ procora
 | `procora list` | 列出已注册服务 |
 | `procora start/stop/restart <name>` | 控制服务生命周期 |
 | `procora logs <name> <task>` | 查看、搜索或清理 Task 日志 |
+| `procora deploy [path] --ssh <host>` | 无需远端 target，全托管部署完整 Service |
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |
 | `procora enable/disable` | 启用或停用用户级开机自启动 |

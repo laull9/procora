@@ -481,6 +481,8 @@ procora.py
 
 ## 声明式远端上传目标
 
+本节 `uploads` 只用于向已有 Service 的特定文件或目录执行 `procora push`。部署完整 Service 时使用 `procora deploy`；它根据包内配置的 `project` 在远端创建全托管不可变 release，不要求也不读取 `uploads` target。完整流程见[CLI 与全局 Procora 服务器语义](cli.md#全托管裸机部署)。
+
 项目可以声明 Service 共享目标，以及位于 Task 命名空间内的目标：
 
 ```yaml

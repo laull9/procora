@@ -93,9 +93,20 @@ pub(super) fn transfer_protocol_incompatible(stderr: &[u8]) -> bool {
         || (message.contains("unsupported") && message.contains("protocol"))
 }
 
+/// 识别旧版远端Procora尚未提供全托管部署接收器。
+pub(super) fn managed_deploy_unsupported(stderr: &[u8]) -> bool {
+    let message = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    message.contains("__receive-deploy")
+        && (message.contains("unrecognized subcommand")
+            || message.contains("unknown command")
+            || message.contains("unexpected argument")
+            || message.contains("未知子命令")
+            || message.contains("无法识别"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::clean_remote_error;
+    use super::{clean_remote_error, managed_deploy_unsupported};
 
     // 远端Windows与Unix换行都只保留实际错误，不重复本机帮助尾注。
     #[test]
@@ -106,5 +117,14 @@ mod tests {
             );
             assert_eq!(clean_remote_error(&message), "找不到服务 `demo`");
         }
+    }
+
+    // 只把明确拒绝隐藏部署子命令的诊断识别为远端版本过旧。
+    #[test]
+    fn managed_deploy_receiver_version_error_is_recognized() {
+        assert!(managed_deploy_unsupported(
+            b"error: unrecognized subcommand '__receive-deploy'"
+        ));
+        assert!(!managed_deploy_unsupported(b"Permission denied"));
     }
 }
