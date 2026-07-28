@@ -204,6 +204,38 @@ fn log_search_filter_navigation_and_clear_are_stateful() {
 }
 
 #[test]
+// 没有现成搜索词时f键会直接进入过滤词输入，提交后立即过滤。
+fn log_filter_key_prompts_for_query_when_search_is_empty() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id.clone(), b"keep error\nhide ok\n", false);
+    app.handle_key(KeyCode::Char('3'));
+
+    assert!(app.handle_key(KeyCode::Char('f')));
+    assert!(app.log_filter_input_active());
+    for character in "error".chars() {
+        app.handle_key(KeyCode::Char(character));
+    }
+    app.handle_key(KeyCode::Enter);
+
+    assert_eq!(app.log_query(), "error");
+    assert!(app.log_filter_enabled());
+    assert_eq!(app.log_match_position(&task_id), Some((1, 1)));
+}
+
+#[test]
+// 没有搜索词时n和N会给出明确提示，而不是表现为快捷键无响应。
+fn log_match_keys_explain_missing_query() {
+    let mut app = App::new(support::snapshot());
+    app.handle_key(KeyCode::Char('3'));
+
+    assert!(app.handle_key(KeyCode::Char('n')));
+    assert_eq!(app.feedback(), Some("请先按 / 输入日志搜索词"));
+    app.handle_key(KeyCode::Char('N'));
+    assert_eq!(app.feedback(), Some("请先按 / 输入日志搜索词"));
+}
+
+#[test]
 // v键按全部、Procora、子进程顺序循环日志来源。
 fn log_source_filter_cycles_with_v_key() {
     let mut app = App::new(support::snapshot());

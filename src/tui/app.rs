@@ -47,6 +47,16 @@ impl LogFilterMode {
     }
 }
 
+/// 日志输入框提交后的动作。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum LogInputAction {
+    /// 更新搜索词并定位首个匹配。
+    #[default]
+    Search,
+    /// 更新搜索词并启用匹配行过滤。
+    Filter,
+}
+
 /// TUI 主区域当前显示的页面。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ActiveTab {
@@ -127,6 +137,7 @@ pub struct App {
     log_scrolls: BTreeMap<TaskId, usize>,
     log_query: String,
     log_search_input: Option<String>,
+    log_input_action: LogInputAction,
     log_filter_mode: LogFilterMode,
     log_source_filter: LogSourceFilter,
     log_match_indices: BTreeMap<TaskId, usize>,
@@ -160,6 +171,7 @@ impl App {
             log_scrolls: BTreeMap::new(),
             log_query: String::new(),
             log_search_input: None,
+            log_input_action: LogInputAction::default(),
             log_filter_mode: LogFilterMode::default(),
             log_source_filter: LogSourceFilter::default(),
             log_match_indices: BTreeMap::new(),
@@ -198,8 +210,10 @@ impl App {
             self.pending_action,
             self.current_log_scroll(),
             self.horizontal_scroll,
+            self.feedback.clone(),
             self.log_query.clone(),
             self.log_search_input.clone(),
+            self.log_input_action,
             self.log_filter_mode,
             self.log_source_filter,
             self.log_clear_confirmation.clone(),
@@ -248,8 +262,10 @@ impl App {
                     self.pending_action,
                     self.current_log_scroll(),
                     self.horizontal_scroll,
+                    self.feedback.clone(),
                     self.log_query.clone(),
                     self.log_search_input.clone(),
+                    self.log_input_action,
                     self.log_filter_mode,
                     self.log_source_filter,
                     self.log_clear_confirmation.clone(),

@@ -21,8 +21,13 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App) {
     let width = usize::from(area.width);
     let mut lines = vec![Line::from(text_view::clipped(&controls, 0, width))];
     if let Some(input) = app.log_search_input() {
+        let action = if app.log_filter_input_active() {
+            "过滤"
+        } else {
+            "搜索"
+        };
         lines.push(Line::from(text_view::clipped(
-            &format!("搜索日志：{input}_"),
+            &format!("{action}日志：{input}_"),
             0,
             width,
         )));

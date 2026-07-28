@@ -82,7 +82,7 @@ impl DaemonAutostart {
             self.windows_task_action().into(),
             "/RL".into(),
             "LIMITED".into(),
-            "/IT".into(),
+            "/NP".into(),
             "/F".into(),
         ]
     }
