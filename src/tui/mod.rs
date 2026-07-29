@@ -30,6 +30,7 @@ mod config_ui;
 mod config_ui_support;
 mod help_ui;
 mod inline_terminal;
+mod input;
 mod key_hints;
 mod live_editor;
 mod log_filter_ui;
@@ -59,7 +60,7 @@ use std::{
 use crate::core::TaskId;
 use crate::protocol::{ProjectSnapshot, ServiceActionDto};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
 };
 
@@ -80,30 +81,14 @@ pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline
 
 pub(crate) use new_service_wizard::{NewServiceChoice, run as run_new_service_wizard};
 
-/// 按页面切换鼠标事件捕获，并在退出或错误时自动恢复终端。
-struct MouseCaptureGuard {
-    enabled: bool,
-}
+/// 在 TUI 生命周期内启用鼠标事件，并在退出或错误时自动恢复终端。
+struct MouseCaptureGuard;
 
 impl MouseCaptureGuard {
     /// 启用终端鼠标捕获。
     fn enable() -> io::Result<Self> {
         execute!(io::stdout(), EnableMouseCapture)?;
-        Ok(Self { enabled: true })
-    }
-
-    /// 同步鼠标捕获状态；日志页释放捕获后可使用终端原生文本选择。
-    fn set_enabled(&mut self, enabled: bool) -> io::Result<()> {
-        if self.enabled == enabled {
-            return Ok(());
-        }
-        if enabled {
-            execute!(io::stdout(), EnableMouseCapture)?;
-        } else {
-            execute!(io::stdout(), DisableMouseCapture)?;
-        }
-        self.enabled = enabled;
-        Ok(())
+        Ok(Self)
     }
 }
 
@@ -222,7 +207,7 @@ pub fn run_overview_live(
                 .min(INPUT_MAX_WAIT);
             if event::poll(timeout)? {
                 match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    Event::Key(key) if input::key_activates(key.kind) => {
                         dirty |= app.handle_key_event(key);
                     }
                     Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
@@ -279,7 +264,7 @@ pub fn run_package_workspace(
             }
             if event::poll(INPUT_MAX_WAIT)? {
                 match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    Event::Key(key) if input::key_activates(key.kind) => {
                         dirty |= app.handle_key_event(key);
                     }
                     Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
@@ -317,7 +302,7 @@ fn overview_action_feedback(action: OverviewAction, service_name: &str) -> Strin
 pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
     let mut app = App::new(snapshot);
     ratatui::run(|terminal| {
-        let mut mouse_capture = MouseCaptureGuard::enable()?;
+        let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         let mut last_auto_scroll = Instant::now();
         loop {
@@ -327,7 +312,7 @@ pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
             }
             if event::poll(INPUT_MAX_WAIT)? {
                 match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    Event::Key(key) if input::key_activates(key.kind) => {
                         let page_lines = log_viewport_lines(terminal.size()?.height);
                         dirty |= app.handle_key_event_with_log_page(key, page_lines);
                     }
@@ -336,7 +321,6 @@ pub fn run(snapshot: ProjectSnapshot) -> io::Result<()> {
                     _ => {}
                 }
             }
-            mouse_capture.set_enabled(app.active_tab() != ActiveTab::Logs)?;
             let now = Instant::now();
             let elapsed = now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = now;
@@ -397,7 +381,7 @@ fn run_live_mode_with_editor(
     app.set_back_navigation(back_navigation);
     let config_path = session.config_path().map(Path::to_path_buf);
     ratatui::run(|terminal| {
-        let mut mouse_capture = MouseCaptureGuard::enable()?;
+        let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
         let mut next_snapshot = Instant::now();
         let mut next_log = Instant::now();
@@ -428,7 +412,7 @@ fn run_live_mode_with_editor(
             let timeout = deadline.saturating_duration_since(now).min(INPUT_MAX_WAIT);
             if event::poll(timeout)? {
                 match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    Event::Key(key) if input::key_activates(key.kind) => {
                         if let Some(editor) = &mut editor {
                             editor.handle_key(key);
                             dirty = true;
@@ -487,7 +471,6 @@ fn run_live_mode_with_editor(
                 dirty |= live_editor::poll_log(&mut app, session);
             }
 
-            mouse_capture.set_enabled(editor.is_some() || app.active_tab() != ActiveTab::Logs)?;
             let auto_now = Instant::now();
             let auto_elapsed = auto_now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = auto_now;

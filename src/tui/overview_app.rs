@@ -118,8 +118,8 @@ impl OverviewApp {
             }
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
-            KeyCode::Left => self.scroll_horizontal(false),
-            KeyCode::Right => self.scroll_horizontal(true),
+            KeyCode::Left | KeyCode::Char('h') => self.scroll_horizontal(false),
+            KeyCode::Right | KeyCode::Char('l') => self.scroll_horizontal(true),
             KeyCode::F(3) => self.horizontal_scroll.toggle_auto(),
             KeyCode::Char('/') => self.begin_filter_input(),
             KeyCode::Char('o') => self.next_sort(),
@@ -146,7 +146,9 @@ impl OverviewApp {
 
     /// 处理带修饰键的按键，并统一支持 Ctrl-C 退出。
     pub fn handle_key_event(&mut self, key: KeyEvent) -> bool {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(key.code, KeyCode::Char('c' | 'C'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
             let changed = self.exit.as_ref() != Some(&OverviewExit::Quit);
             self.exit = Some(OverviewExit::Quit);
             changed
@@ -160,11 +162,17 @@ impl OverviewApp {
         let confirmation_cancelled = self.remove_confirmation.is_some();
         let previous = (self.selected, self.horizontal_scroll);
         self.cancel_remove_confirmation();
-        match mouse.kind {
-            MouseEventKind::ScrollUp => self.select_previous(),
-            MouseEventKind::ScrollDown => self.select_next(),
-            MouseEventKind::ScrollLeft => self.scroll_horizontal(false),
-            MouseEventKind::ScrollRight => self.scroll_horizontal(true),
+        match (mouse.kind, mouse.modifiers) {
+            (MouseEventKind::ScrollUp, modifiers) if modifiers.contains(KeyModifiers::SHIFT) => {
+                self.scroll_horizontal(false);
+            }
+            (MouseEventKind::ScrollDown, modifiers) if modifiers.contains(KeyModifiers::SHIFT) => {
+                self.scroll_horizontal(true);
+            }
+            (MouseEventKind::ScrollUp, _) => self.select_previous(),
+            (MouseEventKind::ScrollDown, _) => self.select_next(),
+            (MouseEventKind::ScrollLeft, _) => self.scroll_horizontal(false),
+            (MouseEventKind::ScrollRight, _) => self.scroll_horizontal(true),
             _ => {}
         }
         confirmation_cancelled || previous != (self.selected, self.horizontal_scroll)
@@ -207,18 +215,10 @@ impl OverviewApp {
             .visible_services
             .iter()
             .map(|service| {
-                service
-                    .name
-                    .chars()
-                    .count()
-                    .max(service.root.to_string_lossy().chars().count())
-                    .max(service.config_path.to_string_lossy().chars().count())
-                    .max(
-                        service
-                            .message
-                            .as_deref()
-                            .map_or(0, |message| message.chars().count()),
-                    )
+                text_view::width(&service.name)
+                    .max(text_view::width(&service.root.to_string_lossy()))
+                    .max(text_view::width(&service.config_path.to_string_lossy()))
+                    .max(service.message.as_deref().map_or(0, text_view::width))
             })
             .max()
             .unwrap_or(0)
@@ -345,18 +345,10 @@ impl OverviewApp {
         let maximum = self
             .selected_service()
             .map_or(0, |service| {
-                service
-                    .name
-                    .chars()
-                    .count()
-                    .max(service.root.to_string_lossy().chars().count())
-                    .max(service.config_path.to_string_lossy().chars().count())
-                    .max(
-                        service
-                            .message
-                            .as_deref()
-                            .map_or(0, |message| message.chars().count()),
-                    )
+                text_view::width(&service.name)
+                    .max(text_view::width(&service.root.to_string_lossy()))
+                    .max(text_view::width(&service.config_path.to_string_lossy()))
+                    .max(service.message.as_deref().map_or(0, text_view::width))
             })
             .saturating_sub(1);
         self.horizontal_scroll.scroll_manual(forward, maximum);

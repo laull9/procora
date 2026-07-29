@@ -2,7 +2,7 @@
 
 use std::{io, path::Path, time::Instant};
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event};
 
 use super::{ConfigEditor, INPUT_MAX_WAIT};
 
@@ -23,7 +23,7 @@ pub fn edit_config(path: &Path) -> io::Result<()> {
             }
             if event::poll(INPUT_MAX_WAIT)? {
                 match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    Event::Key(key) if super::input::key_activates(key.kind) => {
                         editor.handle_key(key);
                         dirty = true;
                     }

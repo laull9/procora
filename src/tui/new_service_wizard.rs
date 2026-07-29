@@ -3,7 +3,7 @@
 use std::{io, path::PathBuf};
 
 use crate::core::ServiceName;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout},
@@ -164,7 +164,9 @@ pub(crate) fn run(base_directory: PathBuf) -> io::Result<Option<NewServiceChoice
             terminal.draw(|frame| wizard.render(frame))?;
             if event::poll(INPUT_MAX_WAIT)? {
                 match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => wizard.handle_key(key),
+                    Event::Key(key) if super::input::key_activates(key.kind) => {
+                        wizard.handle_key(key);
+                    }
                     _ => {}
                 }
             }

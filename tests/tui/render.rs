@@ -411,6 +411,23 @@ fn mac_log_view_shows_fn_keys_and_task_switch_hint() {
 }
 
 #[test]
+// SSH会话客户端系统未知时同时展示标准与macOS翻页键位。
+fn remote_log_view_shows_cross_platform_keys() {
+    let mut app = App::new(support::snapshot());
+    let task_id = TaskId::from_str("database").unwrap();
+    app.append_log(task_id, b"log\n", false);
+    app.set_plain_mode(false);
+    app.set_remote_key_hints(true);
+    app.handle_key(KeyCode::Char('3'));
+
+    let help = {
+        app.handle_key(KeyCode::Char('?'));
+        render_text(&app, 100, 20)
+    };
+    assert!(help.contains("PgUp/PgDn/Home/End·macOSFn+方向键"));
+}
+
+#[test]
 // 临时服务显示实时控制且不展示开发说明。
 fn embedded_service_shows_live_controls_without_dev_copy() {
     let mut snapshot = support::snapshot();

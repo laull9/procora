@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crossterm::event::KeyCode;
 
 use super::{ExportPicker, PackageWorkspaceApp, PackageWorkspaceExit, PackageWorkspaceTab};
+use crate::tui::text_view;
 
 impl PackageWorkspaceApp {
     /// 对当前选中包生成一个单路径动作。
@@ -221,33 +222,24 @@ impl PackageWorkspaceApp {
     fn common_text_length(&self) -> usize {
         self.context_source
             .as_ref()
-            .map_or(0, |path| path.to_string_lossy().chars().count())
-            .max(
-                self.feedback
-                    .as_deref()
-                    .map_or(0, |text| text.chars().count()),
-            )
+            .map_or(0, |path| text_view::width(&path.to_string_lossy()))
+            .max(self.feedback.as_deref().map_or(0, text_view::width))
     }
 }
 
 /// 返回一个包文件相关文本的最大字符数。
 fn package_entry_text_length(entry: &super::PackageWorkspaceEntry) -> usize {
-    let mut maximum = entry.path.to_string_lossy().chars().count();
-    maximum = maximum.max(
-        entry
-            .error
-            .as_deref()
-            .map_or(0, |text| text.chars().count()),
-    );
+    let mut maximum = text_view::width(&entry.path.to_string_lossy());
+    maximum = maximum.max(entry.error.as_deref().map_or(0, text_view::width));
     if let Some(info) = &entry.info {
         maximum = maximum
-            .max(info.manifest.project.chars().count())
-            .max(info.package_digest.chars().count())
+            .max(text_view::width(&info.manifest.project))
+            .max(text_view::width(&info.package_digest))
             .max(
                 info.manifest
                     .exports
                     .keys()
-                    .map(|entry| entry.chars().count())
+                    .map(|entry| text_view::width(entry))
                     .max()
                     .unwrap_or(0),
             )
@@ -256,7 +248,7 @@ fn package_entry_text_length(entry: &super::PackageWorkspaceEntry) -> usize {
                     .binaries
                     .values()
                     .flat_map(|binary| binary.variants.keys())
-                    .map(|platform| platform.chars().count())
+                    .map(|platform| text_view::width(platform))
                     .max()
                     .unwrap_or(0),
             );
@@ -266,38 +258,25 @@ fn package_entry_text_length(entry: &super::PackageWorkspaceEntry) -> usize {
 
 /// 返回一个安装项相关文本的最大字符数。
 fn installed_service_text_length(service: &crate::package::InstalledService) -> usize {
-    let mut maximum = service
-        .project
-        .chars()
-        .count()
-        .max(service.root.to_string_lossy().chars().count())
-        .max(
-            service
-                .error
-                .as_deref()
-                .map_or(0, |text| text.chars().count()),
-        );
+    let mut maximum = text_view::width(&service.project)
+        .max(text_view::width(&service.root.to_string_lossy()))
+        .max(service.error.as_deref().map_or(0, text_view::width));
     for release in &service.releases {
         maximum = maximum
-            .max(release.id.chars().count())
-            .max(release.sha256.chars().count())
-            .max(release.config_path.to_string_lossy().chars().count());
+            .max(text_view::width(&release.id))
+            .max(text_view::width(&release.sha256))
+            .max(text_view::width(&release.config_path.to_string_lossy()));
     }
     for package in &service.packages {
         maximum = maximum
-            .max(package.path.to_string_lossy().chars().count())
+            .max(text_view::width(&package.path.to_string_lossy()))
             .max(
                 package
                     .package_digest
                     .as_deref()
-                    .map_or(0, |text| text.chars().count()),
+                    .map_or(0, text_view::width),
             )
-            .max(
-                package
-                    .error
-                    .as_deref()
-                    .map_or(0, |text| text.chars().count()),
-            );
+            .max(package.error.as_deref().map_or(0, text_view::width));
     }
     maximum
 }

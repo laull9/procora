@@ -469,49 +469,48 @@ impl FormState {
         }
     }
 
-    /// 返回当前高亮摘要的字符长度，用于限制水平视口。
+    /// 返回当前高亮摘要的终端显示宽度，用于限制水平视口。
     fn selected_text_len(&self) -> usize {
         match self.pane {
-            FormPane::Project => self.config.project().chars().count(),
+            FormPane::Project => text_view::width(self.config.project()),
             FormPane::Profiles => self
                 .config
                 .profiles()
                 .nth(self.selected)
                 .map_or(0, |(name, profile)| {
-                    name.chars().count() + profile.summary().chars().count() + 5
+                    text_view::width(name) + text_view::width(&profile.summary()) + 5
                 }),
             FormPane::Tasks => self
                 .config
                 .tasks()
                 .nth(self.selected)
                 .map_or(0, |(name, task)| {
-                    name.chars().count() + task.command.chars().count() + 5
+                    text_view::width(name) + text_view::width(&task.command) + 5
                 }),
-            FormPane::Dependencies => self
-                .config
-                .dependencies()
-                .nth(self.selected)
-                .map_or(0, |(name, dependency)| {
-                    name.chars().count() + dependency.source.chars().count() + 5
-                }),
+            FormPane::Dependencies => {
+                self.config
+                    .dependencies()
+                    .nth(self.selected)
+                    .map_or(0, |(name, dependency)| {
+                        text_view::width(name) + text_view::width(&dependency.source) + 5
+                    })
+            }
         }
     }
 
-    /// 返回结构化表单所有可横移摘要中的最长字符数。
+    /// 返回结构化表单所有可横移摘要中的最大终端显示宽度。
     fn global_text_len(&self) -> usize {
-        let projects = std::iter::once(self.config.project().chars().count());
-        let profiles = self
-            .config
-            .profiles()
-            .map(|(name, profile)| name.chars().count() + profile.summary().chars().count() + 5);
+        let projects = std::iter::once(text_view::width(self.config.project()));
+        let profiles = self.config.profiles().map(|(name, profile)| {
+            text_view::width(name) + text_view::width(&profile.summary()) + 5
+        });
         let tasks = self
             .config
             .tasks()
-            .map(|(name, task)| name.chars().count() + task.command.chars().count() + 5);
-        let dependencies = self
-            .config
-            .dependencies()
-            .map(|(name, dependency)| name.chars().count() + dependency.source.chars().count() + 5);
+            .map(|(name, task)| text_view::width(name) + text_view::width(&task.command) + 5);
+        let dependencies = self.config.dependencies().map(|(name, dependency)| {
+            text_view::width(name) + text_view::width(&dependency.source) + 5
+        });
         projects
             .chain(profiles)
             .chain(tasks)
