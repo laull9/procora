@@ -1,8 +1,7 @@
 use std::{
     fs,
-    io::{BufRead, BufReader, Read, Write},
     path::PathBuf,
-    process::{Command, Output, Stdio},
+    process::{Command, Output},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -10,6 +9,7 @@ use flate2::{Compression, write::GzEncoder};
 use sha2::{Digest, Sha256};
 
 use crate::command_support::{remove_directory_when_released, run_background_cli};
+pub(super) use crate::deploy_command_support::receive_deploy;
 
 /// 创建当前测试独占的临时目录。
 pub(super) fn temporary_directory(label: &str) -> PathBuf {
@@ -69,48 +69,6 @@ fn deploy_with_keep(
         "keep": keep,
     });
     receive_deploy(home, archive, &header)
-}
-
-/// 把部署头和归档写入隐藏接收器。
-pub(super) fn receive_deploy(
-    home: &std::path::Path,
-    archive: &[u8],
-    header: &serde_json::Value,
-) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_procora"))
-        .arg("__receive-deploy")
-        .env("PROCORA_HOME", home)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut stdin = child.stdin.take().unwrap();
-    let mut stdout = BufReader::new(child.stdout.take().unwrap());
-    writeln!(stdin, "{header}").unwrap();
-    stdin.flush().unwrap();
-    let mut output_bytes = Vec::new();
-    stdout.read_until(b'\n', &mut output_bytes).unwrap();
-    assert!(
-        String::from_utf8_lossy(&output_bytes).contains(r#""type":"ready""#),
-        "{}",
-        String::from_utf8_lossy(&output_bytes)
-    );
-    stdin.write_all(archive).unwrap();
-    drop(stdin);
-    stdout.read_to_end(&mut output_bytes).unwrap();
-    let mut stderr = Vec::new();
-    child
-        .stderr
-        .take()
-        .unwrap()
-        .read_to_end(&mut stderr)
-        .unwrap();
-    Output {
-        status: child.wait().unwrap(),
-        stdout: output_bytes,
-        stderr,
-    }
 }
 
 #[test]

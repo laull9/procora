@@ -4,6 +4,8 @@ mod center;
 #[path = "../support/command.rs"]
 mod command_support;
 mod dependency_manager;
+#[path = "../support/deploy_command.rs"]
+mod deploy_command_support;
 mod deployment_edges;
 mod deployments;
 mod event_loop;
