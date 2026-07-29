@@ -6,7 +6,7 @@ use std::path::{Component, Path};
 pub(super) fn target_environment() -> Option<String> {
     #[cfg(target_os = "linux")]
     {
-        return linux_runtime_environment().map(str::to_owned);
+        linux_runtime_environment().map(str::to_owned)
     }
     #[cfg(not(target_os = "linux"))]
     if cfg!(target_env = "msvc") {
