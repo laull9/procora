@@ -1,19 +1,19 @@
 //! GitHub Releases 自更新下载、校验与安装流程。
 
 mod archive;
+mod download;
 mod replace;
 
 use std::{
     env, fs,
-    io::{Read, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use anyhow::{Context, bail};
+use download::Downloader;
 use semver::Version;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 const DEFAULT_REPOSITORY: &str = "laull9/procora";
 const API_MAX_BYTES: u64 = 2 * 1024 * 1024;
@@ -32,6 +32,8 @@ struct Release {
 struct ReleaseAsset {
     name: String,
     browser_download_url: String,
+    #[serde(default)]
+    size: u64,
 }
 
 /// 自动清理本次更新的独占暂存目录。
@@ -54,19 +56,29 @@ impl Drop for TemporaryDirectory {
 }
 
 /// 查询最新发布，并在需要时下载、校验和安装。
-pub(crate) fn run(check: bool) -> anyhow::Result<()> {
+pub(crate) fn run(
+    check: bool,
+    github_mirror: Option<&str>,
+    download_command: Option<&Path>,
+) -> anyhow::Result<()> {
     let repository = env::var("PROCORA_REPO").unwrap_or_else(|_| DEFAULT_REPOSITORY.to_owned());
     validate_repository(&repository)?;
+    let github_mirror = github_mirror
+        .map(str::to_owned)
+        .or_else(|| nonempty_env("PROCORA_GITHUB_MIRROR"));
+    let download_command = download_command
+        .map(Path::to_path_buf)
+        .or_else(|| nonempty_env("PROCORA_DOWNLOAD_COMMAND").map(PathBuf::from));
     let api_url = env::var("PROCORA_UPDATE_API_URL")
         .unwrap_or_else(|_| format!("https://api.github.com/repos/{repository}/releases/latest"));
-    let agent = http_agent();
-    let release: Release = serde_json::from_slice(&download_bytes(
-        &agent,
-        &api_url,
-        API_MAX_BYTES,
-        "发布信息",
-    )?)
-    .context("GitHub 返回了无效的发布信息")?;
+    let downloader = Downloader::new(
+        http_agent(),
+        github_mirror.as_deref(),
+        download_command.as_deref(),
+    )?;
+    let release: Release =
+        serde_json::from_slice(&downloader.bytes(&api_url, API_MAX_BYTES, "发布信息")?)
+            .context("GitHub 返回了无效的发布信息")?;
     let latest = parse_tag(&release.tag_name)?;
     let current = Version::parse(env!("CARGO_PKG_VERSION")).context("当前包版本格式无效")?;
     if latest <= current {
@@ -81,23 +93,28 @@ pub(crate) fn run(check: bool) -> anyhow::Result<()> {
     let (target, extension, executable_name) = current_asset()?;
     let asset_name = format!("procora-{target}.{extension}");
     let checksum_name = format!("{asset_name}.sha256");
-    let archive_url = asset_url(&release, &asset_name)?;
-    let checksum_url = asset_url(&release, &checksum_name)?;
+    let archive_asset = asset(&release, &asset_name)?;
+    let checksum_asset = asset(&release, &checksum_name)?;
     let temporary = TemporaryDirectory::create()?;
     let archive_path = temporary.0.join(&asset_name);
+    let checksum_path = temporary.0.join(&checksum_name);
     let executable_path = temporary.0.join(executable_name);
-    let expected = parse_checksum(&download_bytes(
-        &agent,
-        checksum_url,
+    downloader.file(
+        &checksum_asset.browser_download_url,
+        &checksum_path,
         CHECKSUM_MAX_BYTES,
+        nonzero(checksum_asset.size),
         "校验文件",
-    )?)?;
-    let actual = download_file(
-        &agent,
-        archive_url,
+        false,
+    )?;
+    let expected = parse_checksum(&fs::read(&checksum_path).context("无法读取 SHA-256 校验文件")?)?;
+    let actual = downloader.file(
+        &archive_asset.browser_download_url,
         &archive_path,
         ARCHIVE_MAX_BYTES,
+        nonzero(archive_asset.size),
         "发布归档",
+        true,
     )?;
     if actual != expected {
         bail!("更新归档 SHA-256 校验失败：期望 {expected}，实际 {actual}");
@@ -140,86 +157,6 @@ fn http_agent() -> ureq::Agent {
         .build()
 }
 
-/// 下载有界的小型响应到内存。
-fn download_bytes(
-    agent: &ureq::Agent,
-    url: &str,
-    max_bytes: u64,
-    label: &str,
-) -> anyhow::Result<Vec<u8>> {
-    let response = request(agent, url, label)?;
-    enforce_content_length(&response, max_bytes, label)?;
-    let mut bytes = Vec::new();
-    response
-        .into_reader()
-        .take(max_bytes + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > max_bytes {
-        bail!("{label}超过允许的 {max_bytes} 字节");
-    }
-    Ok(bytes)
-}
-
-/// 流式下载归档并同步计算小写 SHA-256。
-fn download_file(
-    agent: &ureq::Agent,
-    url: &str,
-    destination: &Path,
-    max_bytes: u64,
-    label: &str,
-) -> anyhow::Result<String> {
-    let response = request(agent, url, label)?;
-    enforce_content_length(&response, max_bytes, label)?;
-    let mut input = response.into_reader().take(max_bytes + 1);
-    let mut output = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    let mut total = 0_u64;
-    loop {
-        let count = input.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        total = total.saturating_add(count as u64);
-        if total > max_bytes {
-            bail!("{label}超过允许的 {max_bytes} 字节");
-        }
-        output.write_all(&buffer[..count])?;
-        digest.update(&buffer[..count]);
-    }
-    output.sync_all()?;
-    Ok(format!("{:x}", digest.finalize()))
-}
-
-/// 发送带稳定 User-Agent 的 GET，并生成可操作的 HTTP 错误。
-fn request(agent: &ureq::Agent, url: &str, label: &str) -> anyhow::Result<ureq::Response> {
-    agent
-        .get(url)
-        .set("User-Agent", concat!("procora/", env!("CARGO_PKG_VERSION")))
-        .set("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|error| anyhow::anyhow!("{label}下载失败：{error}"))
-}
-
-/// 在读取正文前拒绝服务器声明的超大响应。
-fn enforce_content_length(
-    response: &ureq::Response,
-    max_bytes: u64,
-    label: &str,
-) -> anyhow::Result<()> {
-    if let Some(length) = response
-        .header("Content-Length")
-        .and_then(|value| value.parse::<u64>().ok())
-        && length > max_bytes
-    {
-        bail!("{label}声明 {length} 字节，超过允许的 {max_bytes} 字节");
-    }
-    Ok(())
-}
-
 /// 从严格的 `vX.Y.Z` 标签读取语义版本。
 fn parse_tag(tag: &str) -> anyhow::Result<Version> {
     let value = tag
@@ -229,13 +166,25 @@ fn parse_tag(tag: &str) -> anyhow::Result<Version> {
 }
 
 /// 定位发布中名称完全匹配的资产。
-fn asset_url<'a>(release: &'a Release, name: &str) -> anyhow::Result<&'a str> {
+fn asset<'a>(release: &'a Release, name: &str) -> anyhow::Result<&'a ReleaseAsset> {
     release
         .assets
         .iter()
         .find(|asset| asset.name == name)
-        .map(|asset| asset.browser_download_url.as_str())
         .with_context(|| format!("最新 Release 缺少当前平台资产 `{name}`"))
+}
+
+/// 把零字节的未知资产大小转换为无总量进度。
+fn nonzero(value: u64) -> Option<u64> {
+    (value > 0).then_some(value)
+}
+
+/// 读取非空环境变量；空字符串与未设置等价。
+fn nonempty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 /// 解析 sha256sum 兼容格式的摘要首字段。

@@ -5,6 +5,8 @@ set -eu
 repo=${PROCORA_REPO:-laull9/procora}
 install_dir=${PROCORA_INSTALL_DIR:-"$HOME/.local/bin"}
 version=${PROCORA_VERSION:-latest}
+github_mirror=${PROCORA_GITHUB_MIRROR:-}
+download_command=${PROCORA_DOWNLOAD_COMMAND:-}
 
 # 输出安装错误并退出。
 fail() {
@@ -12,7 +14,9 @@ fail() {
   exit 1
 }
 
-command -v curl >/dev/null 2>&1 || fail "缺少 curl"
+[ -n "$download_command" ] || command -v curl >/dev/null 2>&1 || fail "缺少 curl"
+[ -z "$download_command" ] || command -v "$download_command" >/dev/null 2>&1 ||
+  fail "找不到 PROCORA_DOWNLOAD_COMMAND：$download_command"
 command -v tar >/dev/null 2>&1 || fail "缺少 tar"
 command -v install >/dev/null 2>&1 || fail "缺少 install"
 
@@ -27,6 +31,14 @@ esac
 case "$version" in
   latest) ;;
   ""|*[!A-Za-z0-9._-]*) fail "PROCORA_VERSION 包含无效字符" ;;
+esac
+case "$github_mirror" in
+  "") ;;
+  https://*) ;;
+  *) fail "PROCORA_GITHUB_MIRROR 必须是 HTTPS 前缀或包含 {url} 的 HTTPS 模板" ;;
+esac
+case "$github_mirror" in
+  *[[:space:]]*) fail "PROCORA_GITHUB_MIRROR 不能包含空白字符" ;;
 esac
 
 case "$(uname -s)" in
@@ -53,14 +65,36 @@ temporary=$(mktemp -d "${TMPDIR:-/tmp}/procora-install.XXXXXX")
 staged=
 trap 'rm -rf "$temporary"; if [ -n "$staged" ]; then rm -f "$staged"; fi' EXIT INT TERM
 
+# 使用镜像前缀或模板改写 GitHub 地址。
+mirror_url() {
+  original_url=$1
+  if [ -z "$github_mirror" ]; then
+    printf '%s\n' "$original_url"
+    return
+  fi
+  case "$github_mirror" in
+    *"{url}"*)
+      mirror_prefix=${github_mirror%%\{url\}*}
+      mirror_suffix=${github_mirror#*\{url\}}
+      printf '%s%s%s\n' "$mirror_prefix" "$original_url" "$mirror_suffix"
+      ;;
+    *) printf '%s/%s\n' "${github_mirror%/}" "$original_url" ;;
+  esac
+}
+
 # 下载指定发布文件，并在失败时显示来源地址。
 download() {
-  source_url=$1
+  source_url=$(mirror_url "$1")
   destination=$2
   printf '下载 %s\n' "$source_url"
-  curl --fail --location --proto '=https' --tlsv1.2 \
-    "$source_url" --output "$destination" ||
-    fail "下载失败：$source_url"
+  if [ -n "$download_command" ]; then
+    "$download_command" "$source_url" "$destination" ||
+      fail "下载命令失败：$source_url"
+  else
+    curl --fail --location --proto '=https' --tlsv1.2 \
+      "$source_url" --output "$destination" ||
+      fail "下载失败：$source_url"
+  fi
 }
 
 download "$base_url/$asset" "$temporary/$asset"

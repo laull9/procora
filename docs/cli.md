@@ -182,11 +182,19 @@ procora update --check
 
 # 下载、校验并安装当前平台的最新正式 Release
 procora update
+
+# 通过 GitHub 镜像下载
+procora update --github-mirror https://mirror.example
+
+# 交给自定义程序下载，程序依次接收 URL 和输出路径
+procora update --download-command /path/to/procora-fetch
 ```
 
-`procora update` 查询 GitHub 最新正式 Release，按语义版本比较当前版本，选择与安装脚本相同的六平台发布产物，并在 128 MiB 上限内流式下载。只有同名 `.sha256` 校验通过、归档中恰好只有 `procora` 或 `procora.exe` 普通文件时才会安装。Linux/macOS 在当前可执行文件目录中暂存并原子替换；Windows 启动已验证的新版本助手，在旧进程退出后完成可恢复替换和暂存清理。安装目录不可写时会保留旧版本并提示修正权限。
+`procora update` 查询 GitHub 最新正式 Release，按语义版本比较当前版本，选择与安装脚本相同的六平台发布产物，并在 128 MiB 上限内流式下载。归档下载期间会在标准错误显示百分比、已下载量、总量和平均速度；Release 未提供大小时仍显示已下载量和速度。交互终端使用单行刷新，重定向或 CI 日志按秒节流，不污染标准输出中的版本结果。
 
-如果更新前全局 Center 正在运行，新版本会在可执行文件替换后自动对账并正常重启 Center；原先离线时不会因为更新而隐式启动。`PROCORA_REPO=owner/repo` 可与安装脚本一样改为 fork 的 Release 来源。
+只有同名 `.sha256` 校验通过、归档中恰好只有 `procora` 或 `procora.exe` 普通文件时才会安装。Linux/macOS 在当前可执行文件目录中暂存并原子替换；Windows 启动已验证的新版本助手，在旧进程退出后完成可恢复替换和暂存清理。安装目录不可写时会保留旧版本并提示修正权限。
+
+如果更新前全局 Center 正在运行，新版本会在可执行文件替换后自动对账并正常重启 Center；原先离线时不会因为更新而隐式启动。`PROCORA_REPO=owner/repo` 可与安装脚本一样改为 fork 的 Release 来源。`--github-mirror URL` 覆盖 `PROCORA_GITHUB_MIRROR`，支持在完整 GitHub URL 前增加 HTTPS 前缀，或用 `{url}` 模板决定插入位置；非 GitHub 地址不会被意外改写。`--download-command PROGRAM` 覆盖 `PROCORA_DOWNLOAD_COMMAND`，程序固定接收 `URL OUTPUT` 两个参数，不经过 shell 解释。该程序负责写入目标文件，Procora 继续限制文件大小、显示进度并执行 SHA-256 校验。
 
 ## 1. 固定层级
 

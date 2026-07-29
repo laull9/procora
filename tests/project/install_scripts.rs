@@ -33,6 +33,8 @@ fn public_scripts_use_real_repository_and_raw_urls() {
     for script in [INSTALL_SH, INSTALL_PS1] {
         assert!(script.contains("laull9/procora"));
         assert!(!script.contains("laull/procora"));
+        assert!(script.contains("PROCORA_GITHUB_MIRROR"));
+        assert!(script.contains("PROCORA_DOWNLOAD_COMMAND"));
     }
     for script in [UNINSTALL_SH, UNINSTALL_PS1] {
         assert!(script.contains("disable"));
@@ -95,7 +97,7 @@ fn unix_install_and_uninstall_scripts_form_offline_lifecycle() {
     let url_log = root.join("urls.log");
     let installed = Command::new("sh")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh"))
-        .env("PATH", path)
+        .env("PATH", &path)
         .env("PROCORA_INSTALL_DIR", &install_dir)
         .env("PROCORA_TEST_ASSET_DIR", &assets)
         .env("PROCORA_TEST_URL_LOG", &url_log)
@@ -118,6 +120,32 @@ fn unix_install_and_uninstall_scripts_form_offline_lifecycle() {
     );
     let requested_urls = fs::read_to_string(url_log).unwrap();
     assert!(requested_urls.contains("github.com/laull9/procora/releases/latest/download"));
+
+    let command_log = root.join("command-urls.log");
+    let download_command = mock_bin.join("procora-fetch");
+    write_executable(
+        &download_command,
+        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$1\" >> \"$PROCORA_TEST_URL_LOG\"\ncp \"$PROCORA_TEST_ASSET_DIR/${1##*/}\" \"$2\"\n",
+    );
+    let mirrored = Command::new("sh")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh"))
+        .env("PATH", &path)
+        .env("PROCORA_INSTALL_DIR", &install_dir)
+        .env("PROCORA_GITHUB_MIRROR", "https://mirror.example/{url}")
+        .env("PROCORA_DOWNLOAD_COMMAND", &download_command)
+        .env("PROCORA_TEST_ASSET_DIR", &assets)
+        .env("PROCORA_TEST_URL_LOG", &command_log)
+        .output()
+        .unwrap();
+    assert!(
+        mirrored.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mirrored.stderr)
+    );
+    let mirrored_urls = fs::read_to_string(command_log).unwrap();
+    assert!(mirrored_urls.contains(
+        "https://mirror.example/https://github.com/laull9/procora/releases/latest/download"
+    ));
 
     assert_uninstall_safety(&root, &install_dir, &binary);
 
