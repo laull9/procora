@@ -40,6 +40,7 @@ impl FormConfig {
             text.push('\n');
         }
         append_dependencies(&mut text, self);
+        append_binaries(&mut text, self);
         append_uploads(&mut text, 0, &self.uploads);
         text.push_str("tasks:\n");
         for (id, task) in &self.tasks {
@@ -99,6 +100,18 @@ impl FormConfig {
         }
         text
     }
+}
+
+/// 以YAML兼容JSON紧凑保留暂未提供表单控件的二进制矩阵。
+fn append_binaries(text: &mut String, config: &FormConfig) {
+    if config.binaries.is_empty() {
+        return;
+    }
+    text.push_str("binaries: ");
+    text.push_str(
+        &serde_json::to_string(&config.binaries).expect("部署二进制声明可序列化为 YAML 兼容 JSON"),
+    );
+    text.push('\n');
 }
 
 /// 以 YAML 兼容 JSON 紧凑保留暂未提供表单控件的上传目标。

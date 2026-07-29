@@ -70,10 +70,12 @@ jobs:
   windows-tests:
     name: Windows x86_64 测试
     runs-on: windows-2025
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: stable
       - name: 运行 Windows 测试
-        run: cargo test --locked
+        # 后台 Center、Job Object 与实时防护同时参与时限制并发，避免进程型测试互相争抢启动窗口。
+        run: cargo test --locked -- --test-threads=2

@@ -43,15 +43,31 @@ enum SshChoice {
 }
 
 /// 完成 push 缺失参数的交互引导并执行传输。
-pub(super) fn run(
-    source: Option<PathBuf>,
-    target: Option<&str>,
-    ssh: Option<String>,
-    remote_bin: Option<String>,
-    batch: bool,
-    restart: bool,
-) -> anyhow::Result<()> {
-    let complete = source.is_some() && target.is_some() && ssh.is_some();
+pub(super) struct PushRequest<'a> {
+    pub(super) source: Option<PathBuf>,
+    pub(super) target: Option<&'a str>,
+    pub(super) package_entry: Option<&'a str>,
+    pub(super) package_platform: &'a str,
+    pub(super) ssh: Option<String>,
+    pub(super) remote_bin: Option<String>,
+    pub(super) batch: bool,
+    pub(super) restart: bool,
+}
+
+/// 完成 push 缺失参数的交互引导并执行传输。
+pub(super) fn run(request: PushRequest<'_>) -> anyhow::Result<()> {
+    let PushRequest {
+        source,
+        target,
+        package_entry,
+        package_platform,
+        ssh,
+        remote_bin,
+        batch,
+        restart,
+    } = request;
+    let complete =
+        source.is_some() && (target.is_some() || package_entry.is_some()) && ssh.is_some();
     let interactive =
         io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
     if !complete && !batch && !interactive {
@@ -72,10 +88,20 @@ pub(super) fn run(
     };
     let source = crate::platform::canonicalize(&source)
         .with_context(|| format!("无法访问本机上传来源 `{}`", source.display()))?;
+    let packaged = package_entry
+        .map(|entry| super::push_package::materialize(&source, entry, package_platform))
+        .transpose()?;
+    let upload_source = packaged
+        .as_ref()
+        .map_or(source.as_path(), |packaged| packaged.source.as_path());
+    let package_target = packaged
+        .as_ref()
+        .map(|packaged| packaged.default_target.as_str());
+    let target = target.or(package_target);
     let ssh = match ssh {
         Some(ssh) => Some(ssh),
         None if batch => None,
-        None => Some(choose_ssh_target(target, &memory)?),
+        None => Some(choose_ssh_target(&memory)?),
     };
     let remote_bin = remote_bin.or_else(|| {
         (!complete && !batch)
@@ -89,7 +115,7 @@ pub(super) fn run(
     };
 
     let outcome = transfer::push(
-        &source,
+        upload_source,
         target,
         ssh.as_deref(),
         remote_bin.as_deref(),
@@ -190,8 +216,8 @@ fn prompt_path(default: Option<&Path>) -> anyhow::Result<PathBuf> {
     Ok(crate::platform::simplify_path(Path::new(&value)))
 }
 
-/// 从记忆、环境变量、选择器与 SSH config 中引导选择连接目标。
-fn choose_ssh_target(selector: Option<&str>, memory: &PushMemory) -> anyhow::Result<String> {
+/// 从记忆、环境变量与 SSH config 中引导选择连接目标。
+fn choose_ssh_target(memory: &PushMemory) -> anyhow::Result<String> {
     let mut candidates = Vec::<(String, String)>::new();
     let mut seen = HashSet::new();
     add_ssh_candidate(
@@ -207,8 +233,6 @@ fn choose_ssh_target(selector: Option<&str>, memory: &PushMemory) -> anyhow::Res
         environment.as_deref(),
         "PROCORA_SSH_TARGET",
     );
-    let inferred = selector.and_then(|value| value.split("::").next());
-    add_ssh_candidate(&mut candidates, &mut seen, inferred, "由上传选择器推断");
     for alias in ssh_config_aliases() {
         add_ssh_candidate(&mut candidates, &mut seen, Some(&alias), "SSH config");
     }
@@ -228,7 +252,7 @@ fn choose_ssh_target(selector: Option<&str>, memory: &PushMemory) -> anyhow::Res
     ));
     match select_inline(
         "选择 SSH 连接",
-        "密码不会写入记忆；需要密码时由 OpenSSH 在连接阶段读取。",
+        "这里选择服务器；上传目标稍后从该服务器读取。密码仅在本次命令内存中复用，绝不落盘。",
         items,
     )?
     .context("已取消 SSH 目标选择")?
@@ -382,15 +406,21 @@ fn native_path_dialog(kind: NativePathKind) -> anyhow::Result<Option<PathBuf>> {
 
 /// 解析原生选择器的退出状态与路径输出。
 fn dialog_output(output: Output) -> anyhow::Result<Option<PathBuf>> {
-    if !output.status.success() {
-        if matches!(output.status.code(), Some(1 | 130)) {
+    let Output {
+        status,
+        stdout,
+        stderr,
+    } = output;
+    if !status.success() {
+        if matches!(status.code(), Some(1 | 130)) {
             return Ok(None);
         }
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let message = crate::platform::decode_external_output(&stderr)
+            .trim()
+            .to_owned();
         bail!("系统文件选择器失败：{message}");
     }
-    let value = String::from_utf8(output.stdout)
-        .context("系统文件选择器返回了非 UTF-8 路径")?
+    let value = crate::platform::decode_external_output(&stdout)
         .trim()
         .to_owned();
     Ok((!value.is_empty()).then(|| crate::platform::simplify_path(Path::new(&value))))

@@ -3,7 +3,8 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::PathBuf,
     process::{Command, Output, Stdio},
-    time::{SystemTime, UNIX_EPOCH},
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use flate2::{Compression, write::GzEncoder};
@@ -74,7 +75,7 @@ fn receive(
         "archive_bytes": archive.len(),
         "content_bytes": content_bytes,
         "sha256": digest,
-        "select_target": false,
+        "select_target": selection.is_some(),
         "restart": restart,
     });
     let mut child = Command::new(binary)
@@ -91,7 +92,25 @@ fn receive(
     stdin.flush().unwrap();
     let mut output_bytes = Vec::new();
     stdout.read_until(b'\n', &mut output_bytes).unwrap();
-    let response: serde_json::Value = serde_json::from_slice(&output_bytes).unwrap();
+    let response: serde_json::Value = match serde_json::from_slice(&output_bytes) {
+        Ok(response) => response,
+        Err(error) => {
+            drop(stdin);
+            stdout.read_to_end(&mut output_bytes).unwrap();
+            let mut stderr = format!("接收器首个响应无效：{error}\n").into_bytes();
+            child
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_end(&mut stderr)
+                .unwrap();
+            return Output {
+                status: child.wait().unwrap(),
+                stdout: output_bytes,
+                stderr,
+            };
+        }
+    };
     if response["type"] == "choose" {
         let selection = selection.expect("多个候选目标时测试必须提供选择");
         writeln!(stdin, "{}", serde_json::json!({ "target": selection })).unwrap();
@@ -112,6 +131,39 @@ fn receive(
         status: child.wait().unwrap(),
         stdout: output_bytes,
         stderr,
+    }
+}
+
+/// 等待新注册 Service 的上传目标可由独立接收器进程读取。
+fn wait_for_target(home: &std::path::Path, selector: &str) {
+    let binary = env!("CARGO_BIN_EXE_procora");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let output = run_background_cli(
+            Command::new(binary)
+                .args(["uploads", "--json"])
+                .env("PROCORA_HOME", home),
+            home,
+            "upload-target-ready",
+        );
+        let ready = output.status.success()
+            && serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout).is_ok_and(
+                |targets| {
+                    targets
+                        .iter()
+                        .any(|target| target["selector"].as_str() == Some(selector))
+                },
+            );
+        if ready {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "等待上传目标 `{selector}` 超时\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -141,6 +193,7 @@ fn receiver_replaces_declared_targets_atomically() {
         "{}",
         String::from_utf8_lossy(&opened.stderr)
     );
+    wait_for_target(&home, "demo::release");
 
     let archive = directory_archive();
     let output = receive(
@@ -168,6 +221,30 @@ fn receiver_replaces_declared_targets_atomically() {
     );
     assert!(!service.join("deployed/stale.txt").exists());
     assert!(String::from_utf8_lossy(&output.stdout).contains(r#""restarted":true"#));
+
+    let archive = directory_archive();
+    let output = receive(
+        &home,
+        Some("missing::release"),
+        "directory",
+        &archive,
+        11,
+        Some("demo::assets"),
+        false,
+    );
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(r#""invalid_target":"missing::release""#)
+    );
+    assert_eq!(
+        fs::read_to_string(service.join("public/app.txt")).unwrap(),
+        "new app"
+    );
 
     let archive = file_archive(b"port = 8080\n");
     let output = receive(&home, None, "file", &archive, 12, None, true);

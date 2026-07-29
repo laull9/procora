@@ -211,7 +211,9 @@ impl Center {
             };
         };
         let mut diff = diff_projects(&active.spec, &candidate.spec);
-        if active.dependencies != candidate.dependencies {
+        if active.dependencies != candidate.dependencies
+            || active.deploy_binaries != candidate.deploy_binaries
+        {
             let all = candidate
                 .spec
                 .tasks

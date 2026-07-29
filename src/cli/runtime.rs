@@ -11,11 +11,12 @@ use clap::CommandFactory;
 use clap_complete::generate;
 
 use super::{
-    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, logs, project,
-    push, session, source, suggestion, template,
+    Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, deploy, logs,
+    package_command, project, push, remote, session, source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
+#[allow(clippy::too_many_lines)]
 pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Result<()> {
     match command {
         None if target.is_none() => open_overview(),
@@ -36,11 +37,25 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         Some(Command::Push {
             source,
             target,
+            package_entry,
+            package_platform,
             ssh,
             remote_bin,
             batch,
             restart,
-        }) => push::run(source, target.as_deref(), ssh, remote_bin, batch, restart),
+        }) => push::run(push::PushRequest {
+            source,
+            target: target.as_deref(),
+            package_entry: package_entry.as_deref(),
+            package_platform: &package_platform,
+            ssh,
+            remote_bin,
+            batch,
+            restart,
+        }),
+        Some(Command::Deploy(arguments)) => deploy::run(&arguments),
+        Some(Command::Package(arguments)) => package_command::run(arguments),
+        Some(Command::Remote(arguments)) => remote::run(arguments),
         Some(Command::Uploads {
             ssh,
             remote_bin,
@@ -93,6 +108,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             Ok(())
         }
         Some(Command::Receive) => crate::transfer::receive(),
+        Some(Command::ReceiveDeploy) => crate::transfer::receive_deploy(),
         Some(Command::UploadTargets) => crate::transfer::print_local_targets_json(),
         #[cfg(target_os = "windows")]
         Some(Command::ApplyUpdate {
@@ -206,8 +222,34 @@ fn open_center_tui(client: CenterClient, target: std::path::PathBuf) -> anyhow::
 /// 从可选路径显式启动临时服务。
 fn run_temporary(target: Option<&Path>) -> anyhow::Result<()> {
     let target = resolve_tui_target(target)?;
+    if crate::package::is_package_path(&target) {
+        return run_package_temporary(&target);
+    }
     project::warn_python_execution(&target);
     run_temporary_at(&target)
+}
+
+/// 验证并临时物化一个包，再创建与当前 TUI 同生命周期的宿主。
+pub(super) fn run_package_temporary(package: &Path) -> anyhow::Result<()> {
+    let package = api::absolute_user_path(package)?;
+    let info = crate::package::inspect(&package)?;
+    let directory =
+        crate::platform::temp_dir().join(format!("procora-run-{}", uuid::Uuid::new_v4()));
+    let platform = crate::config::DeployPlatform::current()
+        .normalized()
+        .map_err(anyhow::Error::msg)?;
+    crate::package::extract(&package, &directory, platform)?;
+    let config = directory.join(&info.manifest.config.source);
+    project::warn_python_execution(&config);
+    let result = run_temporary_at(&config);
+    let cleanup = std::fs::remove_dir_all(&directory);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => {
+            Err(error).with_context(|| format!("无法清理临时包目录：{}", directory.display()))
+        }
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }
 
 /// 创建与当前 TUI 同生命周期的临时宿主。
@@ -257,6 +299,9 @@ fn server(arguments: ServerArgs) -> anyhow::Result<()> {
 
 /// 注册并启动一个持久托管服务。
 fn add(path: std::path::PathBuf) -> anyhow::Result<()> {
+    if crate::package::is_package_path(&path) {
+        return package_command::install_path(&path, 30_000, 2_000, 3);
+    }
     project::warn_python_execution(&path);
     let service = api::add_service(path)?;
     print_service(&service);

@@ -25,6 +25,7 @@ use super::{
 
 mod registry;
 mod reload;
+mod relocate;
 mod upload_targets;
 
 /// 中心服务器注册、恢复和服务解析错误。
@@ -100,6 +101,16 @@ pub enum CenterError {
         service: String,
         /// `name` 或 `task::name` 目标键。
         target: String,
+    },
+    /// 服务在调用端读取后已经迁移到其他根目录。
+    #[error("服务 `{name}` 根目录已变化：期望 `{expected}`，当前 `{actual}`；拒绝覆盖并发更新")]
+    RelocationRootMismatch {
+        /// 服务稳定名称。
+        name: String,
+        /// 调用端确认的旧根目录。
+        expected: PathBuf,
+        /// Center 当前根目录。
+        actual: PathBuf,
     },
 }
 
@@ -193,6 +204,13 @@ impl Center {
             CenterRequest::Manage { action, selector } => {
                 self.manage(action, &selector).map(CenterResponse::Service)
             }
+            CenterRequest::RelocateService {
+                selector,
+                expected_root,
+                path,
+            } => self
+                .relocate_service(&selector, &expected_root, &path)
+                .map(CenterResponse::Service),
             CenterRequest::Remove { selector } => {
                 self.remove(&selector).map(CenterResponse::Removed)
             }

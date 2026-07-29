@@ -68,42 +68,43 @@ fn negotiate_target(
     input: &mut impl BufRead,
     init: &TransferInit,
 ) -> anyhow::Result<target::ResolvedTarget> {
-    let selector = if let Some(selector) = &init.target {
-        selector.clone()
-    } else {
-        let compatible = target::list()?
-            .into_iter()
-            .filter(|candidate| {
-                candidate.kind == init.source_kind && candidate.max_bytes >= init.content_bytes
-            })
-            .map(|candidate| TransferTarget {
-                selector: candidate.selector,
-                path: candidate.path,
-                kind: candidate.kind,
-                max_bytes: candidate.max_bytes,
-                restart: candidate.restart,
-            })
-            .collect::<Vec<_>>();
-        match compatible.as_slice() {
-            [] => bail!(
-                "远端没有可接收 {:?} 且上限不少于 {} 字节的活动上传目标",
-                init.source_kind,
-                init.content_bytes
-            ),
-            [only] if !init.select_target => only.selector.clone(),
-            _ => {
-                send_response(&TransferResponse::Choose {
-                    targets: compatible.clone(),
-                })?;
-                let selection: TransferSelection = read_json_line(input, "上传目标选择")?;
-                if !compatible
-                    .iter()
-                    .any(|candidate| candidate.selector == selection.target)
-                {
-                    bail!("选择的上传目标不在本次远端候选中");
-                }
-                selection.target
-            }
+    if let Some(selector) = &init.target {
+        match target::resolve(selector).and_then(|resolved| {
+            validate_target(init, &resolved)?;
+            Ok(resolved)
+        }) {
+            Ok(resolved) => return Ok(resolved),
+            Err(error) if !init.select_target => return Err(error),
+            Err(_) => {}
+        }
+    }
+    let compatible = target::list()?
+        .into_iter()
+        .filter(|candidate| {
+            candidate.kind == init.source_kind && candidate.max_bytes >= init.content_bytes
+        })
+        .map(|candidate| TransferTarget {
+            selector: candidate.selector,
+            path: candidate.path,
+            kind: candidate.kind,
+            max_bytes: candidate.max_bytes,
+            restart: candidate.restart,
+        })
+        .collect::<Vec<_>>();
+    let selector = match compatible.as_slice() {
+        [] => bail!(
+            "远端没有可接收 {:?} 且上限不少于 {} 字节的活动上传目标",
+            init.source_kind,
+            init.content_bytes
+        ),
+        [only] if !init.select_target => only.selector.clone(),
+        _ => {
+            send_response(&TransferResponse::Choose {
+                targets: compatible,
+                invalid_target: init.target.clone(),
+            })?;
+            let selection: TransferSelection = read_json_line(input, "上传目标选择")?;
+            selection.target
         }
     };
     let resolved = target::resolve(&selector)?;

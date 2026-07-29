@@ -22,6 +22,8 @@ Procora 把每个项目视为一个 Service，把项目中的进程视为具有�
 - **真实进程托管**：Linux/macOS 使用进程组，Windows 使用 Job Object，停止时回收完整进程树。
 - **终端优先**：在 TUI 中查看状态、资源、彩色日志，并启动、停止、重启或编辑服务。
 - **可靠热更新**：先预览配置修订，再按受影响的下游闭包应用，失败时保留旧的有效定义。
+- **全托管裸机部署**：远端无需预先声明上传目标；通过 SSH 接收完整 Service，以不可变 release 启动并验活，失败时由确定性状态机自动回滚。
+- **可移植 Service 包**：确定性 `.pcpkg` 可携带多平台二进制，支持独立验证、解包、本机安装、裸机部署和命名资产推送。
 - **多项目 Center**：统一注册本机服务，支持用户级开机自启动、历史状态和本地 IPC。
 - **自动化接口**：提供脚本友好的 CLI、Shell 补全和 stdio MCP 服务。
 
@@ -113,6 +115,38 @@ procora
 
 `procora init` 创建可直接运行的最小配置；`procora add .` 注册并启动当前服务；不带参数运行 `procora` 会打开全局 TUI。
 
+把当前完整 Service 部署到已安装 Procora 的 SSH 远端，不需要远端预建目录、注册 Service 或声明 `uploads` target：
+
+```bash
+procora deploy --ssh prod --dry-run
+procora deploy --ssh prod
+procora deploy
+
+procora remote ps
+procora remote logs demo api
+procora remote restart demo
+```
+
+`--dry-run` 会探测平台、选择产物并生成完整计划，但不上传或切换 Service。成功部署后，Procora 会按本地 Service 记住非敏感的 SSH 目标，之后在同一项目目录可直接运行 `procora deploy` 和 `procora remote ...`。远端会重新校验配置和归档摘要，在 Procora 数据目录中创建不可变 release，启动后等待全部 Task 运行及已声明健康检查通过稳定窗口。命令行实时显示校验、切换、验活与回滚阶段；相同 release 已在运行时幂等跳过，启动、健康或稳定窗口失败时自动恢复并重新验收上一 release。两阶段状态还能让下一次部署自动收敛上次意外中断的切换。全部判断来自配置、进程状态、退出结果、健康检查和超时。
+
+开发机与远端平台不同时，可在 `binaries` 中把 Linux、macOS universal/单架构和 Windows `.exe` 映射到任意工具链预先生成的二进制产物。`deploy` 会先探测远端，只提交匹配文件，并在远端重新核对平台、目标路径和 SHA-256；Task 使用 `${binary.<name>}` 引用 release 内的稳定绝对路径。CLI 与 MCP 两阶段部署示例见[全托管裸机部署](docs/cli.md#全托管裸机部署)和[MCP 本地服务](docs/mcp.md)。
+
+需要把配置、普通文件和多平台二进制固化成单文件时，可构建 `.pcpkg`。包可直接检查、验证、解包和安装；`add`、`temp-run`、`deploy` 也能像接收目录一样接收包：
+
+```bash
+procora package build . --output demo.pcpkg
+procora package verify demo.pcpkg
+procora add demo.pcpkg
+procora package list
+procora package rollback demo
+procora deploy demo.pcpkg --ssh prod
+procora push demo.pcpkg --package-entry assets --ssh prod
+```
+
+在服务总览按 `p` 可进入包工作台，统一完成包文件操作与已安装 release 的审计、恢复和清理。完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
+
+TUI 会随终端尺寸自动切换主从、上下和单列布局；窄屏仍保留当前对象、主操作、`?` 帮助以及 `q/Esc` 返回路径。配置表单在窄屏一次显示一个区域，通过 `Tab` 切换，不会把多个列表挤成不可用的空框。详细尺寸行为见 [CLI 与 TUI](docs/cli.md#自适应终端布局)。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -125,6 +159,9 @@ procora
 | `procora list` | 列出已注册服务 |
 | `procora start/stop/restart <name>` | 控制服务生命周期 |
 | `procora logs <name> <task>` | 查看、搜索或清理 Task 日志 |
+| `procora deploy [path] --ssh <host>` | 无需远端 target，全托管部署完整 Service |
+| `procora package <操作>` | 构建、验证、安装、运行、审计、回滚或清理 `.pcpkg` |
+| `procora remote <操作>` | 查看或管理当前项目记住的裸机远端 |
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |
 | `procora enable/disable` | 启用或停用用户级开机自启动 |

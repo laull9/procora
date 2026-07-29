@@ -6,6 +6,7 @@ mod support;
 mod app_interaction;
 mod config_editor;
 mod overview;
+mod package_workspace;
 mod render;
 mod selection;
 mod tui_remote_dependencies;

@@ -60,11 +60,11 @@ impl App {
         true
     }
 
-    /// 返回指定 Task 当前缓存的有损 UTF-8 日志文本。
+    /// 返回指定 Task 当前缓存的 UTF-8 或 GB18030 日志文本。
     pub fn log_text(&self, task_id: &TaskId) -> Option<String> {
         self.log_buffers
             .get(task_id)
-            .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+            .map(|bytes| crate::platform::decode_external_output(bytes).into_owned())
     }
 
     /// 返回指定 Task 当前可见日志行的最大字符宽度。

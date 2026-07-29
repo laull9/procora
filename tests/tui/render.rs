@@ -215,7 +215,7 @@ fn narrow_footer_keeps_help_and_renders_overlay() {
 
     let narrow = render_text(&app, 32, 12);
     assert!(narrow.contains("?帮助"));
-    assert!(narrow.contains("q退出"));
+    assert!(narrow.contains("q/Esc退出"));
 
     app.handle_key(KeyCode::Char('?'));
     let help = render_text(&app, 80, 20);

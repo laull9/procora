@@ -158,7 +158,7 @@ procora/
 | `procora::protocol` | 请求、响应、事件 DTO，协议协商和编解码 | 复用内部对象内存布局作为线协议 |
 | `procora::tui` | 终端页面、交互状态、筛选、图视图、日志与指标展示 | 直接访问配置文件或操作系统进程 |
 | `procora::cli` | 命令行解析、人类/机器输出、连接生命周期 | 复制引擎规则 |
-| `procora::mcp` | 基于 CLI 程序化接口提供本地 stdio 工具和内嵌文档 Prompts | 网络监听、另建服务语义或执行显式 Python 配置 |
+| `procora::mcp` | 基于 CLI 程序化接口提供本地 stdio 工具、两阶段SSH裸机部署和内嵌文档 Prompts | 网络监听、另建部署/服务语义、交互式SSH认证或执行显式 Python 配置 |
 | `procora::daemon` | Center 注册表与路由、`ServiceHost` 装配、服务生命周期、本地 IPC | 承载可复用领域规则或把所有服务 Task 合并为全局图 |
 
 ## 6. 核心端口

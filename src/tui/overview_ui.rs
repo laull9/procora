@@ -20,7 +20,7 @@ pub(super) fn render(frame: &mut Frame<'_>, app: &OverviewApp) {
     let area = frame.area();
     if area.width < 16 || area.height < 4 {
         render_too_small(frame, area, app);
-    } else if area.width < 30 || area.height < 10 {
+    } else if area.width < 48 || area.height < 16 {
         render_compact(frame, area, app);
     } else {
         render_full(frame, area, app);
@@ -252,6 +252,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "↑↓/jk 选择",
             "Enter 详情",
+            "p 包工作台",
             "n 新建",
             "/ 筛选",
             "o 排序",
@@ -267,6 +268,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "↑↓/jk 选择",
             "Enter 详情",
+            "p 包工作台",
             "/ 筛选",
             "o 排序",
             "O 方向",
@@ -280,6 +282,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "j/k 选",
             "Enter 详情",
+            "p 包",
             "n 新建",
             "/ 筛选",
             "o 排序",
@@ -291,6 +294,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "j/k 选",
             "Enter 详情",
+            "p 包",
             "/ 筛选",
             "o 排序",
             "? 帮助",
@@ -318,7 +322,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
             detailed,
             medium,
             standard,
-            key_hints::join(&["j/k 选", "Enter", "? 帮助", "q 退出"]),
+            key_hints::join(&["j/k 选", "Enter", "p 包", "? 帮助", "q 退出"]),
             key_hints::join(&["? 帮助", "q 退出"]),
         ],
         width,
@@ -335,11 +339,15 @@ fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
     ))];
     if let Some(service) = app.selected_service() {
         let (cpu, memory) = resource_labels(service.resources);
-        lines.push(Line::from(format!(
-            "{} · {} · {} Task · {cpu} · {memory}",
-            service.name,
-            service_status_label(service.status),
-            service.task_count
+        lines.push(Line::from(text_view::clipped(
+            &format!(
+                "{} · {} · {} Task · {cpu} · {memory}",
+                service.name,
+                service_status_label(service.status),
+                service.task_count
+            ),
+            app.text_offset(true),
+            usize::from(area.width.saturating_sub(2)),
         )));
     } else {
         lines.push(Line::from(if app.all_service_count() == 0 {
@@ -348,11 +356,23 @@ fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
             "没有匹配筛选的服务"
         }));
     }
-    lines.push(Line::from(if app.control_allowed() {
-        "n新建 · ?帮助 · q/Esc退出"
-    } else {
-        "Enter详情 · ?帮助 · q/Esc退出"
-    }));
+    lines.push(Line::from(text_view::clipped(
+        "j/k选择 · Enter详情 · ?帮助",
+        0,
+        usize::from(area.width.saturating_sub(2)),
+    )));
+    if area.height >= 7 {
+        lines.push(Line::from(text_view::clipped(
+            if app.control_allowed() {
+                "n新建 · p包 · s/x/r控制"
+            } else {
+                "p包工作台"
+            },
+            0,
+            usize::from(area.width.saturating_sub(2)),
+        )));
+    }
+    lines.push(Line::from("q/Esc退出"));
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
@@ -366,6 +386,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
     let mut lines = vec![
         help_ui::key_line("↑↓ / j k", "切换服务", app.plain_mode()),
         help_ui::key_line("Enter", "打开当前服务详情", app.plain_mode()),
+        help_ui::key_line("p", "打开 Procora 包工作台", app.plain_mode()),
         help_ui::key_line("/", "按名称、路径或状态筛选", app.plain_mode()),
         help_ui::key_line("o / O", "切换排序字段 / 方向", app.plain_mode()),
         help_ui::key_line("← / →", "水平移动折叠文本", app.plain_mode()),

@@ -80,9 +80,6 @@ impl LineFilter {
 
     /// 消费一个日志分片，只有完整行才立即进入文本匹配。
     fn write(&mut self, bytes: &[u8], output: &mut impl Write) -> io::Result<()> {
-        if self.query.is_none() {
-            return output.write_all(bytes);
-        }
         self.pending.extend_from_slice(bytes);
         while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
             let line = self.pending.drain(..=end).collect::<Vec<_>>();
@@ -93,7 +90,7 @@ impl LineFilter {
 
     /// 输出最后一个没有换行符的日志行。
     fn finish(&mut self, output: &mut impl Write) -> io::Result<()> {
-        if self.query.is_some() && !self.pending.is_empty() {
+        if !self.pending.is_empty() {
             let line = std::mem::take(&mut self.pending);
             self.write_line(&line, output)?;
         }
@@ -102,12 +99,12 @@ impl LineFilter {
 
     /// 匹配并输出一条已经去除换行符的日志行。
     fn write_line(&mut self, bytes: &[u8], output: &mut impl Write) -> io::Result<()> {
-        let line = String::from_utf8_lossy(bytes);
+        let line = crate::platform::decode_external_output(bytes);
         let searchable = crate::log::strip_ansi(&line).to_ascii_lowercase();
         if self
             .query
             .as_ref()
-            .is_some_and(|query| searchable.contains(query))
+            .is_none_or(|query| searchable.contains(query))
         {
             if self.numbered {
                 writeln!(output, "{}:{line}", self.line_number)?;
@@ -117,5 +114,36 @@ impl LineFilter {
         }
         self.line_number += 1;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LineFilter;
+
+    // CLI搜索会先把GBK日志恢复为Unicode，并保留正确行号。
+    #[test]
+    fn gbk_log_line_can_be_searched() {
+        let (line, _, had_errors) = encoding_rs::GBK.encode("初始化\n服务启动完成\n");
+        assert!(!had_errors);
+        let mut filter = LineFilter::new(Some("启动"), None);
+        let mut output = Vec::new();
+        filter.write(&line, &mut output).unwrap();
+        filter.finish(&mut output).unwrap();
+        assert_eq!(String::from_utf8(output).unwrap(), "2:服务启动完成\n");
+    }
+
+    // 不启用搜索时也会在完整行边界解码GBK，而不是把原始字节交给UTF-8终端。
+    #[test]
+    fn gbk_log_is_decoded_without_filter() {
+        let (line, _, had_errors) = encoding_rs::GBK.encode("服务启动完成\n");
+        assert!(!had_errors);
+        let mut filter = LineFilter::new(None, None);
+        let mut output = Vec::new();
+        let split = line.len() - 2;
+        filter.write(&line[..split], &mut output).unwrap();
+        filter.write(&line[split..], &mut output).unwrap();
+        filter.finish(&mut output).unwrap();
+        assert_eq!(String::from_utf8(output).unwrap(), "服务启动完成\n");
     }
 }

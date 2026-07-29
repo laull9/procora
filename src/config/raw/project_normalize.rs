@@ -4,14 +4,15 @@ use std::{
 };
 
 use crate::{
-    config::{ManagedDependencies, TaskConfigOrigins, UploadTargetSpec},
+    config::{DeployBinaries, ManagedDependencies, TaskConfigOrigins, UploadTargetSpec},
     core::{ProjectSpec, TaskId, TaskSpec},
 };
 
 use super::{
     ConfigDiagnostic, RawProject, RawTask, declarations::RawDeclarations, diagnostic,
-    normalize_dependencies, normalize_path, normalize_project, normalize_task,
-    profile::ProfileSources, task_defaults::RawTaskDefaults, task_templates::TemplateSources,
+    normalize_dependencies, normalize_deploy_binaries, normalize_path, normalize_project,
+    normalize_task, profile::ProfileSources, task_defaults::RawTaskDefaults,
+    task_templates::TemplateSources,
 };
 
 /// 全部 Task 规范化后需要交给领域层和声明层的结果。
@@ -42,6 +43,7 @@ struct TaskNormalization<'a> {
 pub(crate) type NormalizedProject = (
     ProjectSpec,
     ManagedDependencies,
+    DeployBinaries,
     BTreeMap<String, UploadTargetSpec>,
     RawDeclarations,
 );
@@ -66,6 +68,7 @@ impl RawProject {
             normalized_task_defaults.clone()
         };
         let dependencies = normalize_dependencies(self.dependencies, &mut diagnostics);
+        let binaries = normalize_deploy_binaries(self.binaries, &mut diagnostics);
         let uploads = normalize_uploads(
             &self.uploads,
             &self.tasks,
@@ -103,6 +106,7 @@ impl RawProject {
                 tasks: normalized_tasks.tasks,
             },
             dependencies,
+            binaries,
             uploads,
             RawDeclarations {
                 vars: self.vars,
@@ -125,6 +129,7 @@ impl RawProject {
                     .collect(),
                 profiles: self.declared_profiles,
                 task_templates: self.declared_task_templates,
+                binaries: self.declared_binaries,
                 uploads: self.declared_uploads,
                 task_extends: normalized_tasks.task_extends,
                 task_env_files: normalized_tasks.task_env_files,

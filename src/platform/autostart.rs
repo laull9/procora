@@ -152,24 +152,21 @@ fn run_command(program: &str, arguments: &[OsString]) -> Result<(), AutostartErr
     })
 }
 
-/// 生成不受 Windows 本地代码页影响的命令失败摘要。
+/// 生成兼容 UTF-8 与 Windows GB 系代码页的命令失败摘要。
 fn command_failure_details(output: &std::process::Output) -> String {
-    #[cfg(target_os = "windows")]
-    {
-        output.status.to_string()
+    let stderr = crate::platform::decode_external_output(&output.stderr)
+        .trim()
+        .to_owned();
+    if !stderr.is_empty() {
+        return stderr;
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        if !stderr.is_empty() {
-            return stderr;
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if stdout.is_empty() {
-            output.status.to_string()
-        } else {
-            stdout
-        }
+    let stdout = crate::platform::decode_external_output(&output.stdout)
+        .trim()
+        .to_owned();
+    if stdout.is_empty() {
+        output.status.to_string()
+    } else {
+        stdout
     }
 }
 
@@ -339,12 +336,14 @@ mod platform {
         if !output.status.success() {
             return Err(AutostartError::CommandFailed {
                 program: "id".to_owned(),
-                details: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                details: crate::platform::decode_external_output(&output.stderr)
+                    .trim()
+                    .to_owned(),
             });
         }
         Ok(format!(
             "gui/{}",
-            String::from_utf8_lossy(&output.stdout).trim()
+            crate::platform::decode_external_output(&output.stdout).trim()
         ))
     }
 

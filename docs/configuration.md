@@ -479,7 +479,37 @@ procora.py
 
 具体测试矩阵见[测试策略](testing.md)。
 
+## 裸机部署二进制矩阵
+
+顶层 `binaries` 用于开发机和裸机远端系统或架构不同的场景。每个逻辑二进制声明一个 release 内稳定 `target`，并用 `variants` 把远端平台键映射到开发机本地产物：
+
+```yaml
+binaries:
+  api:
+    target: bin/api
+    variants:
+      linux-amd64: dist/api-linux-x86
+      linux-arm64: dist/api-linux-arm64
+      macos-arm64:
+        source: dist/api-arm64-macos
+      windows-amd64:
+        source: dist/api-windows-amd64.exe
+        target: bin/api.exe
+
+tasks:
+  api:
+    command: "${binary.api}"
+```
+
+字符串是 `{ source: ... }` 的简写。`source` 相对声明它的配置文件解析，因此 include 可以携带自己的构建输出位置；只有被远端平台选中的源文件必须存在。顶层 `target` 是默认路径，变体对象可用自己的 `target` 覆盖，例如 Windows 的 `bin/api.exe`。所有 target 都必须是 Service 内不含 `.procora` 的可移植普通相对文件路径，不同逻辑二进制不能使用相同 target，也不能覆盖配置入口。`${binary.<name>}` 可用于 Task 的命令、参数、环境、工作目录及 exec 健康检查字段，运行前替换为当前平台选中 target 的绝对路径。
+
+平台键格式为 `os-arch` 或 `os-arch-environment`。当前支持 `linux`、`macos`、`windows`、`freebsd`，以及 `x86_64`、`aarch64`、`x86`、`arm`；常用别名包括 `amd64`、`x64`、`arm64`、`darwin`、`osx`、`glibc`。环境可以是 `gnu`、`musl` 或 `msvc`。带环境的精确项优先于同 OS/架构的通用项。macOS 还接受 `macos-universal`/`macos-universal2`，用于真正的双架构 Mach-O；精确的 `macos-amd64` 或 `macos-arm64` 仍优先。
+
+该声明只影响 `procora deploy` 的归档选择，不执行编译，也不调用 AI。任意语言和工具链都应先在本地构建系统或 CI 中生成各个平台文件，再由 Procora 自动探测、选择、上传、验摘要和回滚。
+
 ## 声明式远端上传目标
+
+本节 `uploads` 只用于向已有 Service 的特定文件或目录执行 `procora push`。部署完整 Service 时使用 `procora deploy`；它根据包内配置的 `project` 在远端创建全托管不可变 release，不要求也不读取 `uploads` target。完整流程见[CLI 与全局 Procora 服务器语义](cli.md#全托管裸机部署)。
 
 项目可以声明 Service 共享目标，以及位于 Task 命名空间内的目标：
 

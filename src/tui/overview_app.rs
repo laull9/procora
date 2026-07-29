@@ -33,6 +33,8 @@ pub enum OverviewExit {
     OpenService(String),
     /// 打开新建托管服务向导。
     CreateService,
+    /// 打开包工作台，并可携带当前 Service 作为构建上下文。
+    OpenPackages(Option<String>),
 }
 
 /// 全局中心服务总览的交互状态。
@@ -108,6 +110,11 @@ impl OverviewApp {
             }
             KeyCode::Char('n') if self.control_allowed => {
                 self.exit = Some(OverviewExit::CreateService);
+            }
+            KeyCode::Char('p') => {
+                self.exit = Some(OverviewExit::OpenPackages(
+                    self.selected_service().map(|service| service.name.clone()),
+                ));
             }
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),

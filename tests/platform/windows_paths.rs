@@ -3,7 +3,9 @@
 #![cfg(windows)]
 
 use std::{
+    ffi::OsString,
     fs,
+    os::windows::ffi::{OsStrExt, OsStringExt},
     path::PathBuf,
     thread,
     time::{Duration, Instant},
@@ -61,6 +63,23 @@ fn device_and_drive_relative_paths_are_preserved() {
 }
 
 #[test]
+// UTF-16中文和未配对代理项都不经过UTF-8有损往返。
+fn unicode_and_non_utf8_wide_paths_are_preserved() {
+    let chinese = PathBuf::from(r"C:\工具\服务\进程.exe");
+    assert_eq!(simplify_path(&chinese), chinese);
+
+    let raw = [
+        67_u16, 58, 92, 116, 111, 111, 108, 115, 92, 0xD800, 92, 97, 112, 112,
+    ];
+    let unusual = PathBuf::from(OsString::from_wide(&raw));
+    let simplified = simplify_path(&unusual);
+    assert_eq!(
+        simplified.as_os_str().encode_wide().collect::<Vec<_>>(),
+        raw
+    );
+}
+
+#[test]
 // 平台目录和可执行文件入口不会泄漏Windows扩展前缀。
 fn platform_path_sources_hide_windows_verbatim_prefix() {
     for path in [
@@ -90,6 +109,21 @@ fn windows_task_action_hides_verbatim_prefix() {
     assert!(!action.contains(r"\\?\"));
     assert!(action.contains(r"C:\Program Files\Procora\procora.exe"));
     assert!(action.contains(r"C:\ProgramData\Procora\procora.sqlite3"));
+}
+
+#[test]
+// 计划任务动作以Unicode参数保留中文路径，不依赖活动代码页。
+fn windows_task_action_preserves_chinese_paths() {
+    let definition = DaemonAutostart::new(
+        r"C:\程序\Procora 工具\procora.exe",
+        "procora-center-北京",
+        r"C:\数据\Procora\中心.sqlite3",
+    );
+    let action = definition.windows_task_action();
+
+    assert!(action.contains(r#""C:\程序\Procora 工具\procora.exe""#));
+    assert!(action.contains("procora-center-北京"));
+    assert!(action.contains(r"C:\数据\Procora\中心.sqlite3"));
 }
 
 #[test]

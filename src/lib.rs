@@ -16,6 +16,8 @@ pub mod log;
 pub mod mcp;
 /// 受管任务进程的跨平台资源采样。
 pub mod monitor;
+/// 可独立构建、验证和物化的 Procora Service 包。
+pub mod package;
 /// 操作系统能力、标准目录与自启动集成。
 pub mod platform;
 /// 受管子进程的创建、输出与回收。

@@ -1,5 +1,7 @@
 //! CLI、MCP 与其他本地入口共享的程序化接口。
 
+pub(crate) mod deploy;
+
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -14,9 +16,9 @@ use crate::{
     core::ServiceName,
     daemon::{CenterClient, ServiceHost},
     protocol::{
-        CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ServiceActionDto,
-        ServiceSelectorDto, ServiceStatusRecordDto, ServiceViewDto, UploadTargetDto,
-        UploadTargetViewDto,
+        CenterHello, CenterRequest, CenterResponse, ConfigCandidateDto, ProjectSnapshot,
+        ServiceActionDto, ServiceSelectorDto, ServiceStatusRecordDto, ServiceViewDto,
+        UploadTargetDto, UploadTargetViewDto,
     },
 };
 
@@ -126,6 +128,7 @@ pub fn effective_config(path: &Path) -> anyhow::Result<serde_json::Value> {
         "profiles": compiled.profile_names,
         "profile_extends": compiled.profile_extends,
         "dependencies": compiled.dependencies,
+        "binaries": compiled.deploy_binaries,
         "uploads": compiled.upload_targets,
         "env": compiled.project_env,
         "task_defaults": compiled.task_defaults,
@@ -158,6 +161,26 @@ pub fn list_services() -> anyhow::Result<Option<Vec<ServiceViewDto>>> {
         return Ok(None);
     };
     expect_services(client.request(&CenterRequest::List)?).map(Some)
+}
+
+/// 确保 Center 运行并返回全部服务，供远端托管部署做冲突检查。
+pub(crate) fn managed_deploy_services() -> anyhow::Result<Vec<ServiceViewDto>> {
+    let client = center_runtime::ensure_center()?;
+    expect_services(client.request(&CenterRequest::List)?)
+}
+
+/// 在当前根目录精确匹配时把托管 Service 切换到新 release。
+pub(crate) fn relocate_managed_service(
+    service: &str,
+    expected_root: &Path,
+    config_path: &Path,
+) -> anyhow::Result<ServiceViewDto> {
+    let client = center_runtime::ensure_center()?;
+    expect_service(client.request(&CenterRequest::RelocateService {
+        selector: ServiceSelectorDto::Name(service.to_owned()),
+        expected_root: expected_root.to_path_buf(),
+        path: config_path.to_path_buf(),
+    })?)
 }
 
 /// 从 Center 当前已生效配置读取声明式上传目标。
@@ -203,6 +226,27 @@ pub fn add_service(path: PathBuf) -> anyhow::Result<ServiceViewDto> {
     let path = absolute_user_path(path)?;
     let client = center_runtime::ensure_center()?;
     expect_service(client.request(&CenterRequest::Open { path })?)
+}
+
+/// 返回指定服务当前的任务运行快照。
+///
+/// # Errors
+///
+/// 当中心离线、服务不存在或响应不兼容时返回错误。
+pub(crate) fn service_snapshot(target: &str) -> anyhow::Result<ProjectSnapshot> {
+    let client = running_center_required()?;
+    match client.request(&CenterRequest::Snapshot {
+        selector: selector(target)?,
+    })? {
+        CenterResponse::Snapshot(snapshot) => Ok(snapshot),
+        CenterResponse::Error { message } => bail!(message),
+        response => unexpected_response(&response),
+    }
+}
+
+/// 返回当前用户全托管 Service 的稳定数据根目录。
+pub(crate) fn managed_services_root() -> anyhow::Result<PathBuf> {
+    Ok(center_runtime::center_paths()?.home.join("services"))
 }
 
 /// 返回指定服务的状态历史；中心必须已经运行。

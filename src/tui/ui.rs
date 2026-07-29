@@ -23,7 +23,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     let area = frame.area();
     if area.width < 16 || area.height < 4 {
         render_too_small(frame, area, app);
-    } else if area.width < 30 || area.height < 10 {
+    } else if area.width < 48 || area.height < 16 {
         render_compact_summary(frame, area, app);
     } else {
         render_full(frame, area, app);
@@ -362,7 +362,10 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
                 .fg(display_color(app, ACCENT))
                 .add_modifier(Modifier::BOLD),
         )),
-        Line::from(Span::styled(source, Style::default().fg(source_color))),
+        Line::from(Span::styled(
+            format!("{source} · 任务详情"),
+            Style::default().fg(source_color),
+        )),
     ];
     if let Some(task) = app.selected_task() {
         lines.push(Line::from(format!(
@@ -382,17 +385,23 @@ fn render_compact_summary(frame: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         lines.push(Line::from("无 Task"));
     }
-    lines.push(Line::from(
-        if app.back_navigation() && app.config_edit_allowed() {
-            "e 编辑 · ? 帮助 · q/Esc 返回 · 放大终端查看详情"
-        } else if app.back_navigation() {
-            "? 帮助 · q/Esc 返回 · 放大终端查看详情"
-        } else if app.config_edit_allowed() {
-            "e 编辑 · ? 帮助 · q/Esc 退出 · 放大终端查看详情"
-        } else {
-            "? 帮助 · q/Esc 退出 · 放大终端查看详情"
-        },
-    ));
+    let width = usize::from(area.width);
+    lines.push(Line::from(text_view::clipped(
+        "j/k选择 · Tab切页 · ?帮助",
+        0,
+        width,
+    )));
+    let exit = if app.back_navigation() {
+        "q/Esc返回"
+    } else {
+        "q/Esc退出"
+    };
+    let actions = if app.config_edit_allowed() {
+        format!("e编辑 · {exit}")
+    } else {
+        exit.to_owned()
+    };
+    lines.push(Line::from(text_view::clipped(&actions, 0, width)));
     frame.render_widget(Paragraph::new(lines), area);
 }
 

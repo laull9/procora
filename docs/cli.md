@@ -1,5 +1,144 @@
 # CLI 与全局 Procora 服务器语义
 
+## 全托管裸机部署
+
+`deploy` 通过 SSH 上传一个完整 Service。远端只需安装 Procora 并允许当前 SSH 用户运行它；不需要预先创建服务目录、执行 `add` 或在配置中声明 `uploads` target：
+
+```bash
+procora deploy . --ssh prod --dry-run
+procora deploy . --ssh prod
+procora deploy
+procora deploy ./service --ssh user@server --service demo
+procora deploy . --ssh prod --timeout 45s --stable-for 5s --keep 5
+procora deploy . --ssh prod --batch
+procora deploy ./demo.pcpkg --ssh prod
+```
+
+第一次连接建议先执行普通 `ssh prod`，人工核对并保存主机指纹；确认 `ssh prod procora __ssh-probe` 能返回 JSON 后再部署。日常开发可省略 `--batch`，Procora 会在密钥不可用时交给 OpenSSH 从控制终端读取密码。CI 和 MCP 必须使用密钥、agent 或 SSH config 完成非交互认证，并启用 `--batch` 语义。
+
+本机先发现并完整编译声明式配置，服务名取自 `project`。`--service` 只做身份一致性校验，不是远端路径或上传目标。`--dry-run` 仍会建立只读 SSH 连接、探测平台并在本机生成临时归档，但不会调用远端部署接收器；输出包含配置入口、二进制选择、内容大小、预期 release 和可供自动化确认的完整修订。
+
+非 `--batch` 部署成功后，CLI 会在全局 Procora 数据目录的 `cli-memory/deploy.json` 中按规范化 Service 根目录和 `project` 记住 SSH 目标及远端 Procora 路径，不保存密码。之后在同一项目运行 `procora deploy` 会直接复用；显式参数始终优先，`PROCORA_SSH_TARGET` 优先于记忆。`--batch` 不读取或写入这份交互记忆，CI 应显式传入目标或环境变量。
+
+远端在当前用户的 Procora 数据目录下保存：
+
+```text
+services/<project>/
+  releases/<archive-sha256-prefix>/
+  state.json
+  deploy.lock
+```
+
+部署接收器会再次校验 SHA-256、展开大小、配置入口和 `project`，再把 release 注册到 Center。命令行会实时显示 `[校验]`、`[切换]`、`[验活]`、`[回滚]` 和 `[恢复]` 阶段。相同 release 已经注册且处于运行状态时返回 `changed=false`，不切换、不重启也不追加部署记录；若该 Service 已停止、失败或注册被移除，则相同内容仍会重新启动和验收。全部 Task 必须进入运行状态；配置健康检查的 Task 还必须达到 `healthy`，并持续通过 `--stable-for` 稳定窗口。Task 启动失败、健康检查失败或 `--timeout` 到期都会停止新 release，恢复上一 release，并再次执行相同验收。首次部署失败时会停止失败服务。若旧 release 也无法恢复，命令明确报告自动回滚失败。
+
+部署和回滚是固定程序状态机，不调用 AI，也不根据日志文本猜测成功。release 切换由 Center 在同一服务身份内完成，并用旧根目录作为并发校验，避免删除注册记录和短暂的未注册窗口。切换前会把待部署 release 写入两阶段状态；若接收器或 SSH 会话在中途异常退出，下一次部署会先识别未完成事务并恢复最近一次已确认 release。没有配置健康检查的运行中 Task 以受管进程仍在运行为降级验收条件；需要强健康保证的服务应声明 exec 或 HTTP GET healthcheck。
+
+同名服务只有在其根目录确实属于上述 Procora 托管 release 目录时才能被后续 `deploy` 更新。用户通过 `add` 注册的同名普通目录不会被接管。`--keep` 默认保留最近 3 个 release，范围为 1–32；部署记录保存在 `state.json`，最多保留最近 100 条。
+
+本机与远端 Procora 都需要支持 `deploy`。远端版本过旧且缺少托管接收器时，客户端会直接提示升级远端 Procora。
+
+`deploy` 的来源也可以是 `.pcpkg`。客户端先探测远端平台，再从包中物化唯一匹配变体，因此开发机与远端平台可以不同，未命中的二进制不会进入部署归档。包的构建、验证、本机安装和导出项见 [Procora Service 包](packages.md)。
+
+### 部署后的远端管理
+
+成功部署后，可在同一项目目录直接管理记住的 SSH 目标，也可随时用 `--ssh` 覆盖：
+
+```bash
+procora remote ps
+procora remote status
+procora remote logs demo api
+procora remote history demo
+procora remote start demo
+procora remote restart demo
+procora remote stop demo
+procora remote rm demo
+
+procora remote ps --ssh another-host
+procora remote --ssh another-host logs demo api
+```
+
+`ps` 列出远端 Center 当前托管的 Service；`logs` 读取指定 Task 的当前活动日志；其他命令复用 Procora 已有的状态、历史和生命周期语义。`rm` 只停止并移除远端 Center 注册，不删除不可变 release 与 `state.json`，下一次部署可重新注册。Service 和 Task 参数先按领域标识规则校验，再作为固定参数交给 OpenSSH，不接受路径或任意 shell 文本。`--remote-bin`、`--batch`、主机确认、密钥/一次性内存密码回退和常见远端安装路径发现与 `deploy` 一致；`--batch` 不使用当前项目的部署目标记忆。
+
+### 三平台预编译二进制
+
+开发机与远端不需要使用相同系统或 CPU。先用项目自己的构建系统或 CI 生成各平台二进制；Procora 不参与编译，只消费已经存在的普通文件。例如构建目录可以是：
+
+```text
+dist/
+  api-linux-amd64
+  api-macos-arm64
+  api-windows-amd64.exe
+```
+
+再把远端平台映射到这些文件。Windows 可在对象形式中覆盖 release target，使 Task 自动拿到 `.exe` 路径：
+
+```yaml
+version: 1
+project: api
+
+binaries:
+  api:
+    target: bin/api
+    variants:
+      linux-amd64: dist/api-linux-amd64
+      macos-arm64: dist/api-macos-arm64
+      windows-amd64:
+        source: dist/api-windows-amd64.exe
+        target: bin/api.exe
+
+tasks:
+  api:
+    command: "${binary.api}"
+```
+
+这里的 `source` 是开发机上的构建输出，文件名没有约束；顶层 `target` 是默认 release 路径，变体对象中的 `target` 只覆盖该平台。`${binary.api}` 在远端启动前替换为当前 release 的绝对路径：Linux/macOS 得到 `bin/api`，Windows 得到 `bin/api.exe`。归档只包含命中的那一个文件，其他平台产物以及源码目录中的旧 target 都会被排除。
+
+| 远端探测结果 | 命中键 | 写入release |
+| --- | --- | --- |
+| Linux x86-64 glibc | `linux-amd64` | `bin/api` |
+| Linux x86-64 musl | `linux-x86_64-musl`，没有时回退 `linux-amd64` | `bin/api` |
+| macOS Apple Silicon | `macos-arm64`，也可用 `macos-universal` | `bin/api` |
+| macOS Intel | `macos-amd64`，也可用 `macos-universal` | `bin/api` |
+| Windows x86-64 MSVC | `windows-amd64` | 变体声明的 `bin/api.exe` |
+| Windows ARM64 MSVC | `windows-arm64` | 通常声明 `bin/api.exe` |
+
+平台键使用 `os-arch` 或 `os-arch-environment`。支持 `amd64`/`x64` → `x86_64`、`arm64` → `aarch64`、`darwin`/`osx` → `macos`、`glibc` → `gnu` 等无歧义别名。`x86` 始终表示 32 位，不会被猜成 `x86_64`。Linux 精确 ABI 项优先于同 OS/架构的通用项。`macos-universal`/`macos-universal2` 只表示同时包含 Intel 与 Apple Silicon 代码的 macOS universal binary；它的优先级低于精确架构项，不能用于 Linux/Windows 或附带 ABI。
+
+客户端会显示探测平台和每个命中的变体。缺少匹配项、选中源文件不存在、target 冲突或远端版本不支持平台探测时，命令在构造归档和切换服务前失败。归档固定二进制可执行权限；远端还会按自身平台重新选择配置、核对 target、大小和 SHA-256，平台及摘要同时写入 `state.json` release 记录。
+
+### 参数怎么选
+
+| 参数 | 默认值 | 建议 |
+| --- | --- | --- |
+| `--ssh` | 交互询问 | CI 中始终显式提供 SSH config 别名或`user@host` |
+| `--service` | 不断言 | 发布脚本中填入预期 project，防止路径指错服务 |
+| `--timeout` | `30s` | 应覆盖最慢 Task 启动和健康检查时间，上限10分钟 |
+| `--stable-for` | `2s` | 无状态服务通常 2–10 秒；不要大于 timeout |
+| `--keep` | `3` | 保留 3–5 个便于审计和快速恢复 |
+| `--remote-bin` | `procora`并自动查找 | 远端非交互 PATH 特殊时显式填写 |
+| `--batch` | 关闭 | CI 使用；禁止主机确认、密码询问和路径询问 |
+| `--dry-run` | 关闭 | 发布前输出确定性计划，不上传或切换远端 |
+
+建议至少给对外服务声明 HTTP 或 exec healthcheck。没有健康检查时，Procora 只能确认受管进程在稳定窗口内没有退出，无法判断端口、数据库连接或应用内部就绪状态。
+
+单个二进制不能是空文件，完整归档的压缩大小和展开内容各有 8 GiB 上限。超限会在预检或远端接收正文前失败，不会留下半个 release。
+
+### 失败时从哪里看
+
+- “没有适用于远端平台的变体”：按错误中的规范化平台键补一项；不要把 `x86` 当成 x86-64。
+- “预检后平台发生变化”：目标主机、远端 Procora 或 Linux libc 探测结果发生了变化，重新执行部署。
+- “远端 Procora 不支持协议”：先升级远端 Procora；客户端不会降级成缺少摘要校验的部署。
+- “选中产物不存在”：先运行构建矩阵；未命中的其他平台产物可以不存在。
+- “SSH 自动登录失败”：交互终端先用普通 SSH 建立信任；CI 检查 key、agent、known_hosts 和 SSH config。
+- “新 release 验活失败”：命令输出会继续报告回滚及旧 release 再验收结果；应用日志仍在对应 release 的 Service 日志目录中。
+
+`deploy` 与 `push` 的边界不同：
+
+| 命令 | 内容 | 远端是否声明 target |
+| --- | --- | --- |
+| `deploy` | 包含 Procora 配置的完整 Service | 不需要 |
+| `push` | 已有 Service 的单个文件或目录 | 需要 |
+
 ## 远端声明式上传
 
 服务端配置可在 Service 或 Task 下声明 `uploads`，客户端通过稳定选择器上传：
@@ -8,6 +147,7 @@
 # 完整 CLI：直接执行，不打开 TUI
 procora push ./assets --target demo::assets --ssh prod
 procora push ./target/release/api --target demo::api::release --ssh user@server --restart
+procora push demo.pcpkg --package-entry assets --ssh prod
 
 # 参数不完整：交互终端打开内联引导
 procora push
@@ -16,6 +156,7 @@ procora push ./assets --ssh prod
 
 # 远端非交互 shell 找不到 procora 时显式给出安装路径
 procora push ./assets --ssh prod --remote-bin ~/.local/bin/procora
+procora push ./assets --ssh windows-prod --remote-bin C:/工具/Procora/procora.exe
 
 # 检查本机或远端当前生效的上传项、类型、上限和 Service 内路径
 procora uploads
@@ -29,7 +170,7 @@ PATH 正常命中时，目标发现、选择和归档传输在同一条 SSH 会�
 
 成功上传后，非敏感的来源方式、上次来源、SSH 目标、远端 Procora 路径、上传选择器和重启偏好会写入全局 Procora 数据目录的 `cli-memory/push.json`，只用作下一次交互默认值；现场目录不会生成记忆文件，显式 CLI 参数始终优先。`--restart` 可为本次上传显式开启自动重启，远端上传目标也可用 `restart: true` 声明默认策略；两者任一开启时，Procora 都只在目标原子提交成功后重启所属 Service。两处都未开启时默认不重启。`--batch` 禁止登录和目标选择交互，缺少本机来源时直接报错，适合 CI。
 
-远端必须运行同一用户的 Center，上传目标从当前已经 apply 的有效配置解析。只保存在磁盘、尚未 apply 的候选声明不会提前生效。默认远端命令为 `procora`；自动查找仍无法定位时，可用 `--remote-bin ~/.local/bin/procora` 指定不含空格的命令路径。
+远端必须运行同一用户的 Center，上传目标从当前已经 apply 的有效配置解析。只保存在磁盘、尚未 apply 的候选声明不会提前生效。默认远端命令为 `procora`；自动查找仍无法定位时，可用 `--remote-bin ~/.local/bin/procora` 或 `--remote-bin C:/工具/Procora/procora.exe` 指定不含空格的 Unicode 命令路径。Windows 旧控制台或远端 shell 返回 GBK/GB18030 诊断时会自动恢复为中文；能力握手、目标清单和传输协议仍要求 UTF-8 JSON，编码损坏会明确失败而不会猜测协议。
 
 SSH 互传不要求两端 Procora 包版本完全一致，而按传输协议范围和本次使用的能力校验。当前普通覆盖使用兼容协议 1，可与旧接收端互传；CLI 显式 `--restart` 使用协议 2，旧接收端不支持时会报告所需能力和双方协议边界，不会静默忽略重启。当前接收端兼容协议 1–2，因此旧客户端仍能上传，并可由远端配置的 `restart: true` 决定是否重启。`procora __ssh-probe` 返回机器可读的协议范围和能力列表，便于部署诊断。
 
@@ -70,6 +211,18 @@ Procora 的内部模型固定为 `Center → Service → Task`；界面和命令
 总览需要交互终端；脚本应使用 `procora list`。显式 PATH 的非交互环境不会擅自选择运行模式，应使用 `procora up` 或 `procora temp-run [path]`。需要持久注册服务时仍使用 `procora add <path>`。
 
 连接全局服务器后，TUI 通过协议控制服务并按游标读取事件和日志；临时模式直接连接当前进程中的服务宿主。两种模式提供相同的主要交互。Task、依赖和表单等字段型文本只有超出区域宽度时才响应左右方向键；日志解析常见 ANSI/SGR 颜色并使用统一的大文本视口，任一日志行需要横移时全部行使用同一偏移。日志页会释放鼠标捕获，允许直接框选终端文本；使用 `/` 搜索、`n/N` 跳转匹配、`f` 过滤匹配行，尚无搜索词时按 `f` 可直接输入过滤词，`v` 切换“全部 / Procora / 子进程”来源，连续两次 `C` 确认清空当前 Task 日志。Task 运行错误会同时保留为特殊样式的 Procora 日志和详情页“综合分析”。`F3` 开关当前页面的自动横移，速度固定为每秒 4 个字符；字段型文本在自动模式下仍只移动实际溢出的行。自动模式下手动横移会冻结当前高亮文本 10 秒，其他溢出文本继续滚动。
+
+### 自适应终端布局
+
+TUI 会在终端 Resize 后立即重新计算布局，不要求退出重进：
+
+- 宽屏使用列表/详情主从布局；中等宽度改为上下排列。
+- 宽度低于 48 列或高度低于 16 行时，总览、Task 页和包工作台进入单列紧凑视图，只显示当前选中对象、状态、主操作、`?` 帮助和退出路径。`j/k`、方向键、`Tab`、`Enter` 等交互继续有效，不会因为列表被折叠而失去导航能力。
+- 配置表单低于 72 列或 18 行时一次只显示当前项目、Task、依赖或 Profile 区域；用 `Tab`/`Shift-Tab` 切换区域，当前区域详情和 `Enter`、`n/d`、`Ctrl-S` 操作固定显示在其下方。高级文本模式优先保留正文、光标、保存和退出。
+- 帮助、运行方式选择、路径浏览、字段编辑和键值表弹层会在窄屏使用完整可用宽度，压缩为单行键位说明并截断次要描述；`Esc` 取消、`Enter` 确认和 `Ctrl-S` 保存始终优先显示。
+- 极小终端不再尝试绘制破碎边框，而是显示“终端过小”及 `Ctrl-S`、`Esc` 或 `q` 恢复入口。放大窗口后完整页面会自动恢复。
+
+窄屏中的省略号只表示显示被折叠，并不代表配置、路径或包清单被修改；支持横移的字段可用左右方向键查看，其余内容在放大窗口后恢复。任何危险操作的二次确认规则也不会因紧凑布局改变。
 
 已知命令优先于同名路径；同名路径使用 `./status` 这类显式路径。命令和子命令支持唯一前缀推断，接近但不唯一或拼写错误的输入会显示最相近命令；运行期错误统一提示通过 `procora --help` 查看完整用法。
 

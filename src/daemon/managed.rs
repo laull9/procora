@@ -6,7 +6,10 @@ use crate::protocol::{
 };
 use crate::storage::{StoredService, StoredServiceStatus};
 use crate::{
-    config::{CompiledProject, ManagedDependencies, ProjectDiff, UploadTargetSpec, discover_path},
+    config::{
+        CompiledProject, DeployBinaries, ManagedDependencies, ProjectDiff, UploadTargetSpec,
+        discover_path,
+    },
     core::ProjectSpec,
 };
 
@@ -26,6 +29,7 @@ pub(crate) struct PendingConfig {
 pub(crate) struct ActiveDefinition {
     pub(crate) spec: ProjectSpec,
     pub(crate) dependencies: ManagedDependencies,
+    pub(crate) deploy_binaries: DeployBinaries,
     pub(crate) upload_targets: std::collections::BTreeMap<String, UploadTargetSpec>,
 }
 
@@ -35,6 +39,7 @@ impl ActiveDefinition {
         Self {
             spec: compiled.spec.clone(),
             dependencies: compiled.dependencies.clone(),
+            deploy_binaries: compiled.deploy_binaries.clone(),
             upload_targets: compiled.upload_targets.clone(),
         }
     }

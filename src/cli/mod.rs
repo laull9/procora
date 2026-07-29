@@ -4,12 +4,21 @@
 pub mod api;
 mod autostart_command;
 mod center_runtime;
+mod deploy;
+mod deploy_memory;
+pub use deploy::DeployArgs;
 #[cfg(target_os = "windows")]
 mod elevation;
 mod logs;
+mod package_command;
+mod package_installed_command;
+pub use package_command::PackageArgs;
 mod project;
 mod push;
 mod push_memory;
+mod push_package;
+mod remote;
+pub use remote::RemoteArgs;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
 pub mod session;
@@ -113,22 +122,34 @@ pub enum Command {
     Push {
         /// 本机普通文件或目录。
         source: Option<PathBuf>,
-        /// `service::name` 或 `service::task::name` 上传目标。
+        /// 远端 Procora 中的 `service::name` 或 `service::task::name` 上传目标。
         #[arg(long, value_name = "SELECTOR")]
         target: Option<String>,
-        /// SSH config 别名或 `[user@]host`；省略时依次使用环境变量和服务名推断。
+        /// 从 `.pcpkg` 清单选择一个导出项，而不是上传包文件本身。
+        #[arg(long, value_name = "NAME")]
+        package_entry: Option<String>,
+        /// 包导出项物化平台：`current` 或 `os-arch[-environment]`。
+        #[arg(long, default_value = "current", requires = "package_entry")]
+        package_platform: String,
+        /// 要连接的服务器：SSH config 别名或 `[user@]host`。
         #[arg(long, value_name = "SSH_TARGET")]
         ssh: Option<String>,
         /// 远端 Procora 命令名或 Unix/Windows 无空格路径。
         #[arg(long, value_name = "PATH")]
         remote_bin: Option<String>,
-        /// 禁止人工目标与密码登录回退，适合 CI。
+        /// 禁止主机确认与密码登录回退，适合 CI。
         #[arg(long)]
         batch: bool,
         /// 为本次上传强制开启重启；省略时遵循远端目标配置。
         #[arg(long)]
         restart: bool,
     },
+    /// 通过 SSH 全托管部署一个完整 Service，无需远端预先声明上传目标。
+    Deploy(DeployArgs),
+    /// 构建、检查、验证或解包可移植的 Procora Service 包。
+    Package(PackageArgs),
+    /// 通过 SSH 查看或管理裸机远端的 Procora Service。
+    Remote(RemoteArgs),
     /// 列出本机或远端当前可用的声明式上传目标与路径。
     Uploads {
         /// SSH config 别名或 `[user@]host`；省略时读取本机全局 Procora。
@@ -243,6 +264,9 @@ pub enum Command {
     /// 从 SSH 标准输入接收并提交声明式上传目标。
     #[command(name = "__receive", hide = true)]
     Receive,
+    /// 从 SSH 标准输入接收并全托管部署完整 Service。
+    #[command(name = "__receive-deploy", hide = true)]
+    ReceiveDeploy,
     /// 输出当前 Center 的上传目标 JSON，供 SSH 客户端调用。
     #[command(name = "__upload-targets", hide = true)]
     UploadTargets,
@@ -412,6 +436,9 @@ pub enum TemplateFormat {
 ///
 /// 当配置加载、中心服务器连接或 TUI 终端操作失败时返回错误。
 pub fn run() -> anyhow::Result<()> {
+    if crate::transfer::answer_askpass_if_requested()? {
+        return Ok(());
+    }
     run_with(Cli::parse())
 }
 

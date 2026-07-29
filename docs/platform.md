@@ -10,6 +10,8 @@ Procora 的三个目标平台为：
 
 Release 固定构建六个目标 triple：`x86_64-unknown-linux-musl`、`aarch64-unknown-linux-musl`、`x86_64-apple-darwin`、`aarch64-apple-darwin`、`x86_64-pc-windows-msvc`、`aarch64-pc-windows-msvc`。Windows 静态链接 MSVC/UCRT 运行时，macOS 只链接 Apple 系统库并以 macOS 11.0 为最低部署版本。项目不维护平台原生安装包；WSL 视为 Linux 环境，不与原生 Windows 进程混合管理。
 
+裸机部署的平台握手使用远端 Procora 实际运行环境，不使用开发机平台。Linux 额外读取宿主 `ldd` 区分 gnu/musl，避免静态 musl 版 Procora 把 glibc 宿主误报成 musl；macOS 支持精确 Intel/Apple Silicon 和低优先级 universal 选择；Windows 报告 MSVC 环境，并允许变体把默认 target 覆盖为 `.exe`。协议中的路径统一使用 `/` 分隔并拒绝 Windows 保留字符，接收后才转换为本机路径。
+
 ## 2. 平台层边界
 
 `procora::platform` 只提供操作系统原语和能力探测，上层 `procora::process`、`procora::monitor`、`procora::daemon` 负责组合业务语义。建议内部结构：
@@ -87,12 +89,28 @@ Center 的 SQLite 数据库、缓存和运行时端点使用平台标准用户�
 - 原子替换能力和目录同步语义存在差异，持久化层需要平台测试。
 - 文件监听可能产生重复、乱序或合并事件，配置层必须去抖后重新读取完整内容。
 
+### Windows 路径与本地代码页
+
+Windows 路径在 Procora 内部始终保留为 `Path`/`PathBuf`（底层为 UTF-16），不会先转成 GBK，也不会因为当前活动代码页不同而改变。来自系统、用户输入或持久化边界的绝对路径会移除普通驱动器与 UNC 路径的 `\\?\` 前缀；设备命名空间和不能安全降级的路径保持原样。中文文件名、跨盘路径和 UNC 路径因此不要求开发机与部署机使用相同区域设置。
+
+旧版 `cmd.exe`、任务计划程序、第三方程序和 SSH 远端 shell 的 stdout/stderr 仍可能输出代码页 936/54936 字节。Procora 只在这些“外部文本”边界使用以下顺序：
+
+1. 严格 UTF-8；
+2. UTF-8 无效时按 GB18030 解码，兼容 GB2312、GBK/CP936 和 GB18030 四字节字符；
+3. 损坏或截断序列只替换对应片段，不影响进程和错误处理。
+
+Task 日志的 CLI 查看/搜索和 TUI 显示也采用同一顺序；CLI 会跨读取分片保留半行，避免 GBK 双字节字符恰好被切开时误解码。配置文件、IPC、MCP、JSON 以及上传/部署协议仍严格使用 UTF-8，不会用代码页兜底解析机器协议；这可以避免一段损坏协议被误当成合法中文文本。Windows 原生文件选择器输出则在外部文本边界完成解码后重新构造 `PathBuf`。
+
+裸机部署的 `--remote-bin` 接受不含空格的 Unicode Unix/Windows 路径，例如 `C:/工具/Procora/procora.exe`。路径作为单个受校验的 SSH shell token 传递，仍拒绝空格、控制字符和命令分隔符；远端能力响应本身必须是 UTF-8 JSON。
+
 ## 7. 终端能力
 
 TUI 应通过终端库抽象输入、备用屏幕、颜色和尺寸变化。至少处理：
 
 - Unix TTY 与 Windows Terminal。
-- 终端过小时显示降级页面，而不是布局 panic。
+- 终端 Resize 后立即重排；窄屏使用单列当前对象视图，低高度优先保留状态、主操作和退出路径，而不是继续挤压主从面板。
+- 配置表单窄屏只显示当前焦点区域，帮助和弹层改用完整可用宽度；终端过小时显示带保存/退出入口的降级页面，而不是布局 panic。
+- 中文宽字符、Unicode 路径和长错误信息按终端显示列截断，不能按 UTF-8 字节或字符数量计算宽度。
 - 非交互输出自动退化为纯文本或 JSON。
 - `PROCORA_TUI_PLAIN=1`、`NO_COLOR` 或 `TERM=dumb` 使用 ASCII 无彩色模式。
 - Ctrl-C、Ctrl-Break、关闭终端等事件通过入口层转换为统一命令。

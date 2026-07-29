@@ -127,6 +127,18 @@ fn create_key_requires_control_capability() {
 }
 
 #[test]
+// 包工作台入口在只读会话中也可使用，并携带当前服务上下文。
+fn package_workspace_is_available_from_read_only_overview() {
+    let mut app = OverviewApp::new(vec![service("api", ServiceStatusDto::Running)]);
+
+    assert!(app.handle_key(KeyCode::Char('p')));
+    assert_eq!(
+        app.take_exit(),
+        Some(OverviewExit::OpenPackages(Some("api".to_owned())))
+    );
+}
+
+#[test]
 // 总览帮助层会阻止服务动作，并由问号或退出键优先关闭。
 fn overview_help_blocks_actions_until_closed() {
     let mut app = OverviewApp::new(vec![service("api", ServiceStatusDto::Running)]);
@@ -269,11 +281,26 @@ fn overview_narrow_footer_and_help_are_discoverable() {
 
     let narrow = render_text(&app, 32, 12);
     assert!(narrow.contains("?帮助"));
-    assert!(narrow.contains("q退出"));
+    assert!(narrow.contains("q/Esc退出"));
 
     app.handle_key(KeyCode::Char('?'));
     let help = render_text(&app, 80, 20);
     assert!(help.contains("快捷键帮助·服务总览"));
     assert!(help.contains("打开当前服务详情"));
     assert!(help.contains("关闭帮助"));
+}
+
+#[test]
+// 服务总览和帮助层在常见Resize边界均可安全重排。
+fn overview_resize_matrix_is_safe() {
+    let mut app = OverviewApp::new(vec![service("中文服务", ServiceStatusDto::Running)]);
+    app.handle_key(KeyCode::Char('?'));
+
+    for width in [8, 12, 16, 24, 32, 47, 48, 72] {
+        for height in [2, 3, 4, 6, 10, 15, 16] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+        }
+    }
 }

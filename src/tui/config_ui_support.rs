@@ -1,7 +1,7 @@
 //! 配置表单与子弹窗共享的布局和焦点样式。
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
 };
 
@@ -12,22 +12,20 @@ pub(super) fn focus_style() -> Style {
         .add_modifier(Modifier::BOLD)
 }
 
-/// 将百分比宽度和固定高度居中为弹窗区域。
+/// 将百分比宽度和固定高度居中，并在窄屏使用完整可用宽度。
 pub(super) fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - width.min(100)) / 2),
-            Constraint::Percentage(width.min(100)),
-            Constraint::Percentage((100 - width.min(100)) / 2),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(area.height.saturating_sub(height) / 2),
-            Constraint::Length(height),
-            Constraint::Min(0),
-        ])
-        .split(horizontal[1])[1]
+    let popup_width = if area.width < 48 {
+        area.width
+    } else {
+        area.width
+            .saturating_mul(width.min(100))
+            .saturating_div(100)
+    };
+    let popup_height = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(popup_width) / 2,
+        y: area.y + area.height.saturating_sub(popup_height) / 2,
+        width: popup_width,
+        height: popup_height,
+    }
 }

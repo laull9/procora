@@ -97,6 +97,9 @@ impl Serialize for FormConfig {
         if !self.dependencies.is_empty() {
             map.serialize_entry("dependencies", &self.dependencies)?;
         }
+        if !self.binaries.is_empty() {
+            map.serialize_entry("binaries", &self.binaries)?;
+        }
         if !self.uploads.is_empty() {
             map.serialize_entry("uploads", &self.uploads)?;
         }

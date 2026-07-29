@@ -58,6 +58,7 @@ fn help_command_runs() {
     assert!(stdout.contains("deps"));
     assert!(stdout.contains("clean"));
     assert!(stdout.contains("push"));
+    assert!(stdout.contains("remote"));
     assert!(stdout.contains("up"));
     assert!(stdout.contains("down"));
     assert!(stdout.contains("status"));
@@ -420,6 +421,8 @@ fn push_arguments_remain_stable() {
         Some(Command::Push {
             source: Some(source),
             target: Some(target),
+            package_entry: None,
+            package_platform,
             ssh: Some(ssh),
             remote_bin,
             batch: true,
@@ -429,7 +432,62 @@ fn push_arguments_remain_stable() {
                 && target == "demo::api::release"
                 && ssh == "prod"
                 && remote_bin.is_none()
+                && package_platform == "current"
     ));
+}
+
+#[test]
+// push包导出项可省略重复的远端选择器并显式指定物化平台。
+fn push_package_entry_arguments_are_stable() {
+    let parsed = Cli::try_parse_from([
+        "procora",
+        "push",
+        "demo.pcpkg",
+        "--package-entry",
+        "assets",
+        "--package-platform",
+        "linux-x86_64-gnu",
+        "--ssh",
+        "prod",
+        "--batch",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Push {
+            source: Some(source),
+            target: None,
+            package_entry: Some(entry),
+            package_platform,
+            ..
+        }) if source == std::path::Path::new("demo.pcpkg")
+            && entry == "assets"
+            && package_platform == "linux-x86_64-gnu"
+    ));
+}
+
+#[test]
+// 已安装包的查询、回滚、恢复与清理命令保持可解析。
+fn installed_package_management_commands_are_stable() {
+    for arguments in [
+        vec!["procora", "package", "list", "--json"],
+        vec!["procora", "package", "status", "demo", "--json"],
+        vec![
+            "procora",
+            "package",
+            "rollback",
+            "demo",
+            "old-release",
+            "--timeout",
+            "20s",
+        ],
+        vec!["procora", "package", "recover", "demo"],
+        vec!["procora", "package", "uninstall", "demo", "--purge"],
+    ] {
+        let parsed = Cli::try_parse_from(arguments).unwrap();
+        assert!(matches!(parsed.command, Some(Command::Package(_))));
+    }
 }
 
 #[test]
@@ -470,6 +528,60 @@ fn push_source_is_optional_for_interactive_wizard() {
             restart: false,
             ..
         })
+    ));
+}
+
+#[test]
+// deploy完整表达无target全托管、验收窗口和release保留策略。
+fn deploy_arguments_remain_stable() {
+    let parsed = Cli::try_parse_from([
+        "procora",
+        "deploy",
+        "./service",
+        "--ssh",
+        "prod",
+        "--service",
+        "demo",
+        "--timeout",
+        "1m",
+        "--stable-for",
+        "5s",
+        "--keep",
+        "5",
+        "--batch",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Deploy(procora::cli::DeployArgs {
+            source,
+            ssh: Some(ssh),
+            remote_bin: None,
+            service: Some(service),
+            timeout: 60_000,
+            stable_for: 5_000,
+            keep: 5,
+            batch: true,
+            dry_run: false,
+        })) if source == std::path::Path::new("./service")
+            && ssh == "prod"
+            && service == "demo"
+    ));
+}
+
+#[test]
+// deploy支持明确的无副作用预检模式。
+fn deploy_dry_run_argument_is_stable() {
+    let parsed = Cli::try_parse_from(["procora", "deploy", "--ssh", "prod", "--dry-run"]).unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Deploy(procora::cli::DeployArgs {
+            dry_run: true,
+            batch: false,
+            ..
+        }))
     ));
 }
 

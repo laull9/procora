@@ -9,6 +9,7 @@ use crate::{
 use super::profile::{ProfileSources, RawProfile};
 use super::task_defaults::RawTaskDefaults;
 use super::{RawTask, task_templates::TemplateSources};
+use crate::config::deploy_binary::RawDeployBinary;
 use crate::config::upload::RawUploadTarget;
 
 /// 规范化后仍需保留给编辑器和有效配置说明的声明层元数据。
@@ -35,6 +36,8 @@ pub(crate) struct RawDeclarations {
     pub(crate) profiles: BTreeMap<String, RawProfile>,
     /// 顶层命名模板的本地声明，供结构化编辑器无展开写回。
     pub(crate) task_templates: BTreeMap<String, RawTask>,
+    /// 裸机部署二进制的原始声明。
+    pub(crate) binaries: BTreeMap<String, RawDeployBinary>,
     /// 顶层上传目标的原始声明，供编辑器无损写回。
     pub(crate) uploads: BTreeMap<String, RawUploadTarget>,
     /// 每个 Task 的显式模板引用。
