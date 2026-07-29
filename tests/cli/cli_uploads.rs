@@ -117,7 +117,11 @@ case "$FAKE_SSH_MODE" in
     ;;
 esac
 archive_bytes=$(printf '%s' "$header" | sed -n 's/.*"archive_bytes":\([0-9][0-9]*\).*/\1/p')
-dd bs=1 count="$archive_bytes" >/dev/null 2>&1
+if [ -n "$FAKE_SSH_ARCHIVE_LOG" ]; then
+  dd bs=1 count="$archive_bytes" of="$FAKE_SSH_ARCHIVE_LOG" 2>/dev/null
+else
+  dd bs=1 count="$archive_bytes" >/dev/null 2>&1
+fi
 case "$header" in
   *'"restart":true'*)
     printf '%s\n' '{"type":"complete","result":{"target":"demo::release","path":"/srv/demo/release","content_bytes":7,"sha256":"fixture","restarted":true}}'

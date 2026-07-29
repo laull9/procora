@@ -2,11 +2,13 @@
 
 mod archive;
 mod deploy_health;
+mod deploy_package;
 mod deploy_platform;
 mod deploy_prepare;
 mod deploy_protocol;
 mod deploy_receive;
 mod deploy_remote;
+mod deploy_remote_package;
 mod deploy_report;
 mod deploy_state;
 mod deploy_wire;
@@ -21,10 +23,15 @@ mod remote_list;
 mod remote_selection;
 mod target;
 
+/// 把本机 Procora 包安装到不可变 release 并执行验活回滚。
+pub(crate) use deploy_package::install as install_package;
 /// 运行只供 SSH 子进程调用的全托管部署接收器。
 pub(crate) use deploy_receive::run as receive_deploy;
 /// 从本机向远端全托管部署完整 Service。
 pub(crate) use deploy_remote::{deploy, preview_deploy};
+pub(crate) use deploy_remote_package::{
+    deploy as deploy_package, preview as preview_package_deploy,
+};
 pub(crate) use deploy_report::{DeployEvent, DeployOutcome, DeployPreview};
 /// 运行只供 SSH 子进程调用的远端接收器。
 pub(crate) use receive::run as receive;

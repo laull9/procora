@@ -421,6 +421,8 @@ fn push_arguments_remain_stable() {
         Some(Command::Push {
             source: Some(source),
             target: Some(target),
+            package_entry: None,
+            package_platform,
             ssh: Some(ssh),
             remote_bin,
             batch: true,
@@ -430,6 +432,38 @@ fn push_arguments_remain_stable() {
                 && target == "demo::api::release"
                 && ssh == "prod"
                 && remote_bin.is_none()
+                && package_platform == "current"
+    ));
+}
+
+#[test]
+// push包导出项可省略重复的远端选择器并显式指定物化平台。
+fn push_package_entry_arguments_are_stable() {
+    let parsed = Cli::try_parse_from([
+        "procora",
+        "push",
+        "demo.pcpkg",
+        "--package-entry",
+        "assets",
+        "--package-platform",
+        "linux-x86_64-gnu",
+        "--ssh",
+        "prod",
+        "--batch",
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Push {
+            source: Some(source),
+            target: None,
+            package_entry: Some(entry),
+            package_platform,
+            ..
+        }) if source == std::path::Path::new("demo.pcpkg")
+            && entry == "assets"
+            && package_platform == "linux-x86_64-gnu"
     ));
 }
 

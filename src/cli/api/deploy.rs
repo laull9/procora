@@ -24,6 +24,7 @@ struct PreparedService {
     project: String,
     config_path: PathBuf,
     binaries: crate::config::DeployBinaries,
+    package: bool,
 }
 
 /// 无副作用校验本地包并探测远端平台、二进制选择和归档修订。
@@ -33,17 +34,29 @@ pub(crate) fn preview(settings: &DeploySettings) -> anyhow::Result<DeployPreview
         .as_deref()
         .context("MCP 部署预检必须显式提供 ssh")?;
     let prepared = prepare(settings)?;
-    crate::transfer::preview_deploy(
-        &prepared.root,
-        &prepared.project,
-        &prepared.config_path,
-        &prepared.binaries,
-        ssh_target,
-        settings.remote_bin.as_deref(),
-        settings.timeout_ms,
-        settings.stable_for_ms,
-        settings.keep,
-    )
+    if prepared.package {
+        crate::transfer::preview_package_deploy(
+            &prepared.root,
+            &prepared.project,
+            ssh_target,
+            settings.remote_bin.as_deref(),
+            settings.timeout_ms,
+            settings.stable_for_ms,
+            settings.keep,
+        )
+    } else {
+        crate::transfer::preview_deploy(
+            &prepared.root,
+            &prepared.project,
+            &prepared.config_path,
+            &prepared.binaries,
+            ssh_target,
+            settings.remote_bin.as_deref(),
+            settings.timeout_ms,
+            settings.stable_for_ms,
+            settings.keep,
+        )
+    }
 }
 
 /// 重新校验预检修订并执行全托管部署。
@@ -53,26 +66,59 @@ pub(crate) fn execute(
     reporter: &mut dyn FnMut(&DeployEvent),
 ) -> anyhow::Result<DeployOutcome> {
     let prepared = prepare(settings)?;
-    crate::transfer::deploy(
-        &prepared.root,
-        &prepared.project,
-        &prepared.config_path,
-        &prepared.binaries,
-        settings.ssh_target.as_deref(),
-        settings.remote_bin.as_deref(),
-        settings.timeout_ms,
-        settings.stable_for_ms,
-        settings.keep,
-        settings.batch,
-        expected_revision,
-        reporter,
-    )
+    if prepared.package {
+        crate::transfer::deploy_package(
+            &prepared.root,
+            &prepared.project,
+            settings.ssh_target.as_deref(),
+            settings.remote_bin.as_deref(),
+            settings.timeout_ms,
+            settings.stable_for_ms,
+            settings.keep,
+            settings.batch,
+            expected_revision,
+            reporter,
+        )
+    } else {
+        crate::transfer::deploy(
+            &prepared.root,
+            &prepared.project,
+            &prepared.config_path,
+            &prepared.binaries,
+            settings.ssh_target.as_deref(),
+            settings.remote_bin.as_deref(),
+            settings.timeout_ms,
+            settings.stable_for_ms,
+            settings.keep,
+            settings.batch,
+            expected_revision,
+            reporter,
+        )
+    }
 }
 
 /// 固定路径、配置、服务名、target冲突和验收参数。
 fn prepare(settings: &DeploySettings) -> anyhow::Result<PreparedService> {
     validate_policy(settings)?;
     let source = super::absolute_user_path(&settings.source)?;
+    if crate::package::is_package_path(&source) {
+        let info = crate::package::inspect(&source)?;
+        if let Some(expected) = settings.expected_service.as_deref()
+            && info.manifest.project != expected
+        {
+            bail!(
+                "包中的 project `{}` 与期望 Service `{expected}` 不一致",
+                info.manifest.project
+            );
+        }
+        return Ok(PreparedService {
+            root: source,
+            project: info.manifest.project,
+            config_path: PathBuf::from(info.manifest.config.source),
+            binaries: crate::config::DeployBinaries::new(),
+            package: true,
+        });
+    }
     let discovered = crate::config::discover_path(&source)
         .with_context(|| format!("无法发现待部署 Service：{}", source.display()))?;
     if let Some(expected) = settings.expected_service.as_deref()
@@ -94,6 +140,7 @@ fn prepare(settings: &DeploySettings) -> anyhow::Result<PreparedService> {
         project: discovered.compiled.spec.project,
         config_path,
         binaries: discovered.compiled.deploy_binaries,
+        package: false,
     })
 }
 

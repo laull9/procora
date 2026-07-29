@@ -69,6 +69,45 @@ impl DeployPlatform {
             |environment| format!("{}-{}-{environment}", self.os, self.arch),
         )
     }
+
+    /// 从稳定平台键解析一个具体运行平台。
+    ///
+    /// # Errors
+    ///
+    /// 当平台键不是受支持的 `os-arch[-environment]` 时返回诊断。
+    pub fn parse_key(value: &str) -> Result<Self, String> {
+        let mut parts = value.split('-');
+        let os = parts.next().unwrap_or_default();
+        let arch = parts.next().unwrap_or_default();
+        let environment = parts.next();
+        if os.is_empty() || arch.is_empty() || parts.next().is_some() {
+            return Err("平台键必须是 `os-arch` 或 `os-arch-environment`".to_owned());
+        }
+        Self {
+            os: os.to_owned(),
+            arch: arch.to_owned(),
+            environment: environment.map(str::to_owned),
+        }
+        .normalized()
+    }
+
+    /// 返回平台选择器匹配当前平台时的优先级。
+    pub(crate) fn selector_specificity(&self, value: &str) -> Result<Option<usize>, String> {
+        let selector = DeployPlatformSelector::parse(value)?;
+        Ok(selector.matches(self).then(|| selector.specificity()))
+    }
+
+    /// 校验包清单使用的是规范化平台选择器键。
+    pub(crate) fn validate_selector_key(value: &str) -> Result<(), String> {
+        let selector = DeployPlatformSelector::parse(value)?;
+        if selector.key() != value {
+            return Err(format!(
+                "平台选择器 `{value}` 不是规范形式，应使用 `{}`",
+                selector.key()
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// 单个平台变体的本地构建产物。
@@ -281,7 +320,7 @@ impl DeployPlatformSelector {
     }
 
     /// 返回规范化配置键。
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         self.environment.as_ref().map_or_else(
             || format!("{}-{}", self.os, self.arch),
             |environment| format!("{}-{}-{environment}", self.os, self.arch),

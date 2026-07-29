@@ -43,15 +43,31 @@ enum SshChoice {
 }
 
 /// 完成 push 缺失参数的交互引导并执行传输。
-pub(super) fn run(
-    source: Option<PathBuf>,
-    target: Option<&str>,
-    ssh: Option<String>,
-    remote_bin: Option<String>,
-    batch: bool,
-    restart: bool,
-) -> anyhow::Result<()> {
-    let complete = source.is_some() && target.is_some() && ssh.is_some();
+pub(super) struct PushRequest<'a> {
+    pub(super) source: Option<PathBuf>,
+    pub(super) target: Option<&'a str>,
+    pub(super) package_entry: Option<&'a str>,
+    pub(super) package_platform: &'a str,
+    pub(super) ssh: Option<String>,
+    pub(super) remote_bin: Option<String>,
+    pub(super) batch: bool,
+    pub(super) restart: bool,
+}
+
+/// 完成 push 缺失参数的交互引导并执行传输。
+pub(super) fn run(request: PushRequest<'_>) -> anyhow::Result<()> {
+    let PushRequest {
+        source,
+        target,
+        package_entry,
+        package_platform,
+        ssh,
+        remote_bin,
+        batch,
+        restart,
+    } = request;
+    let complete =
+        source.is_some() && (target.is_some() || package_entry.is_some()) && ssh.is_some();
     let interactive =
         io::stdin().is_terminal() && io::stdout().is_terminal() && io::stderr().is_terminal();
     if !complete && !batch && !interactive {
@@ -72,6 +88,16 @@ pub(super) fn run(
     };
     let source = crate::platform::canonicalize(&source)
         .with_context(|| format!("无法访问本机上传来源 `{}`", source.display()))?;
+    let packaged = package_entry
+        .map(|entry| super::push_package::materialize(&source, entry, package_platform))
+        .transpose()?;
+    let upload_source = packaged
+        .as_ref()
+        .map_or(source.as_path(), |packaged| packaged.source.as_path());
+    let package_target = packaged
+        .as_ref()
+        .map(|packaged| packaged.default_target.as_str());
+    let target = target.or(package_target);
     let ssh = match ssh {
         Some(ssh) => Some(ssh),
         None if batch => None,
@@ -89,7 +115,7 @@ pub(super) fn run(
     };
 
     let outcome = transfer::push(
-        &source,
+        upload_source,
         target,
         ssh.as_deref(),
         remote_bin.as_deref(),

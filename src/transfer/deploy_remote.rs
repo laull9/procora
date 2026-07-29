@@ -27,12 +27,12 @@ use super::{
 
 /// 一次部署会话中保持不变的验收参数。
 #[derive(Clone, Copy)]
-struct DeployOptions<'a> {
-    timeout_ms: u64,
-    stable_for_ms: u64,
-    keep: u32,
-    target_platform: Option<&'a DeployPlatform>,
-    binaries: &'a [DeployBinaryMetadata],
+pub(super) struct DeployOptions<'a> {
+    pub(super) timeout_ms: u64,
+    pub(super) stable_for_ms: u64,
+    pub(super) keep: u32,
+    pub(super) target_platform: Option<&'a DeployPlatform>,
+    pub(super) binaries: &'a [DeployBinaryMetadata],
 }
 
 /// 无副作用探测远端平台并构造可确认的部署预检。
@@ -149,7 +149,7 @@ pub(crate) fn deploy(
 }
 
 /// 把协议结果与预检、阶段事件组合为共享输出。
-fn deploy_outcome(
+pub(super) fn deploy_outcome(
     result: DeployResult,
     preview: DeployPreview,
     events: Vec<DeployEvent>,
@@ -177,7 +177,7 @@ fn record_event(
 }
 
 /// 把平台、变体和归档摘要转换为共享预检事件。
-fn report_prepared(
+pub(super) fn report_prepared(
     preview: &DeployPreview,
     archive: &PreparedArchive,
     events: &mut Vec<DeployEvent>,
@@ -218,7 +218,7 @@ fn report_prepared(
 
 /// 完成SSH登录回退、远端命令发现和最终部署会话。
 #[allow(clippy::too_many_arguments)]
-fn transfer_with_fallback(
+pub(super) fn transfer_with_fallback(
     ssh_target: &str,
     remote_bin: &mut String,
     configured_remote_bin: Option<&str>,

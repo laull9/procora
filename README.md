@@ -23,6 +23,7 @@ Procora 把每个项目视为一个 Service，把项目中的进程视为具有�
 - **终端优先**：在 TUI 中查看状态、资源、彩色日志，并启动、停止、重启或编辑服务。
 - **可靠热更新**：先预览配置修订，再按受影响的下游闭包应用，失败时保留旧的有效定义。
 - **全托管裸机部署**：远端无需预先声明上传目标；通过 SSH 接收完整 Service，以不可变 release 启动并验活，失败时由确定性状态机自动回滚。
+- **可移植 Service 包**：确定性 `.pcpkg` 可携带多平台二进制，支持独立验证、解包、本机安装、裸机部署和命名资产推送。
 - **多项目 Center**：统一注册本机服务，支持用户级开机自启动、历史状态和本地 IPC。
 - **自动化接口**：提供脚本友好的 CLI、Shell 补全和 stdio MCP 服务。
 
@@ -130,6 +131,18 @@ procora remote restart demo
 
 开发机与远端平台不同时，可在 `binaries` 中把 Linux、macOS universal/单架构和 Windows `.exe` 映射到任意工具链预先生成的二进制产物。`deploy` 会先探测远端，只提交匹配文件，并在远端重新核对平台、目标路径和 SHA-256；Task 使用 `${binary.<name>}` 引用 release 内的稳定绝对路径。CLI 与 MCP 两阶段部署示例见[全托管裸机部署](docs/cli.md#全托管裸机部署)和[MCP 本地服务](docs/mcp.md)。
 
+需要把配置、普通文件和多平台二进制固化成单文件时，可构建 `.pcpkg`。包可直接检查、验证、解包和安装；`add`、`temp-run`、`deploy` 也能像接收目录一样接收包：
+
+```bash
+procora package build . --output demo.pcpkg
+procora package verify demo.pcpkg
+procora add demo.pcpkg
+procora deploy demo.pcpkg --ssh prod
+procora push demo.pcpkg --package-entry assets --ssh prod
+```
+
+完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
+
 ## 常用命令
 
 | 命令 | 作用 |
@@ -143,6 +156,7 @@ procora remote restart demo
 | `procora start/stop/restart <name>` | 控制服务生命周期 |
 | `procora logs <name> <task>` | 查看、搜索或清理 Task 日志 |
 | `procora deploy [path] --ssh <host>` | 无需远端 target，全托管部署完整 Service |
+| `procora package <操作>` | 构建、检查、验证、解包、安装或临时运行 `.pcpkg` |
 | `procora remote <操作>` | 查看或管理当前项目记住的裸机远端 |
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |

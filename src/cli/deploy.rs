@@ -62,15 +62,21 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
         dry_run,
     } = arguments;
     let source = crate::cli::api::absolute_user_path(source)?;
-    let discovered = crate::config::discover_path(&source)
-        .with_context(|| format!("无法发现待部署 Service：{}", source.display()))?;
+    let (memory_root, project) = if crate::package::is_package_path(&source) {
+        let info = crate::package::inspect(&source)?;
+        (source.clone(), info.manifest.project)
+    } else {
+        let discovered = crate::config::discover_path(&source)
+            .with_context(|| format!("无法发现待部署 Service：{}", source.display()))?;
+        (discovered.root, discovered.compiled.spec.project)
+    };
     let remembered = if ssh.is_none()
         && !batch
         && env::var("PROCORA_SSH_TARGET")
             .ok()
             .is_none_or(|value| value.trim().is_empty())
     {
-        load_target(&discovered.root, &discovered.compiled.spec.project)
+        load_target(&memory_root, &project)
     } else {
         None
     };
@@ -129,7 +135,7 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
     }
     if !batch
         && let Err(error) = save_target(DeployTargetMemory {
-            root: discovered.root,
+            root: memory_root,
             project: outcome.project,
             ssh_target: outcome.preview.ssh_target,
             remote_bin: outcome.preview.remote_bin,

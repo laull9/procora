@@ -10,9 +10,12 @@ pub use deploy::DeployArgs;
 #[cfg(target_os = "windows")]
 mod elevation;
 mod logs;
+mod package_command;
+pub use package_command::PackageArgs;
 mod project;
 mod push;
 mod push_memory;
+mod push_package;
 mod remote;
 pub use remote::RemoteArgs;
 mod runtime;
@@ -121,6 +124,12 @@ pub enum Command {
         /// 远端 Procora 中的 `service::name` 或 `service::task::name` 上传目标。
         #[arg(long, value_name = "SELECTOR")]
         target: Option<String>,
+        /// 从 `.pcpkg` 清单选择一个导出项，而不是上传包文件本身。
+        #[arg(long, value_name = "NAME")]
+        package_entry: Option<String>,
+        /// 包导出项物化平台：`current` 或 `os-arch[-environment]`。
+        #[arg(long, default_value = "current", requires = "package_entry")]
+        package_platform: String,
         /// 要连接的服务器：SSH config 别名或 `[user@]host`。
         #[arg(long, value_name = "SSH_TARGET")]
         ssh: Option<String>,
@@ -136,6 +145,8 @@ pub enum Command {
     },
     /// 通过 SSH 全托管部署一个完整 Service，无需远端预先声明上传目标。
     Deploy(DeployArgs),
+    /// 构建、检查、验证或解包可移植的 Procora Service 包。
+    Package(PackageArgs),
     /// 通过 SSH 查看或管理裸机远端的 Procora Service。
     Remote(RemoteArgs),
     /// 列出本机或远端当前可用的声明式上传目标与路径。

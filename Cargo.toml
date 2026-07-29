@@ -18,6 +18,7 @@ directories = "6.0"
 encoding_rs = "0.8.35"
 flate2 = "1.1.9"
 fs2 = "0.4.3"
+ignore = "0.4"
 interprocess = { version = "2.4.2", features = ["tokio"] }
 notify = "8.2"
 petgraph = { version = "0.8.3", default-features = false, features = ["graphmap", "std"] }
@@ -47,6 +48,7 @@ uuid = { version = "1.0", features = ["serde", "v4"] }
 widestring = "1.2"
 zeroize = "1.9.0"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
+zstd = "0.13"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify = { version = "0.5", optional = true }

@@ -11,6 +11,7 @@ procora deploy
 procora deploy ./service --ssh user@server --service demo
 procora deploy . --ssh prod --timeout 45s --stable-for 5s --keep 5
 procora deploy . --ssh prod --batch
+procora deploy ./demo.pcpkg --ssh prod
 ```
 
 第一次连接建议先执行普通 `ssh prod`，人工核对并保存主机指纹；确认 `ssh prod procora __ssh-probe` 能返回 JSON 后再部署。日常开发可省略 `--batch`，Procora 会在密钥不可用时交给 OpenSSH 从控制终端读取密码。CI 和 MCP 必须使用密钥、agent 或 SSH config 完成非交互认证，并启用 `--batch` 语义。
@@ -35,6 +36,8 @@ services/<project>/
 同名服务只有在其根目录确实属于上述 Procora 托管 release 目录时才能被后续 `deploy` 更新。用户通过 `add` 注册的同名普通目录不会被接管。`--keep` 默认保留最近 3 个 release，范围为 1–32；部署记录保存在 `state.json`，最多保留最近 100 条。
 
 本机与远端 Procora 都需要支持 `deploy`。远端版本过旧且缺少托管接收器时，客户端会直接提示升级远端 Procora。
+
+`deploy` 的来源也可以是 `.pcpkg`。客户端先探测远端平台，再从包中物化唯一匹配变体，因此开发机与远端平台可以不同，未命中的二进制不会进入部署归档。包的构建、验证、本机安装和导出项见 [Procora Service 包](packages.md)。
 
 ### 部署后的远端管理
 
@@ -144,6 +147,7 @@ tasks:
 # 完整 CLI：直接执行，不打开 TUI
 procora push ./assets --target demo::assets --ssh prod
 procora push ./target/release/api --target demo::api::release --ssh user@server --restart
+procora push demo.pcpkg --package-entry assets --ssh prod
 
 # 参数不完整：交互终端打开内联引导
 procora push

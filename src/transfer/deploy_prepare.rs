@@ -1,6 +1,9 @@
 //! 裸机部署的平台选择、归档构造与预检修订。
 
-use std::path::{Component, Path};
+use std::{
+    fs,
+    path::{Component, Path, PathBuf},
+};
 
 use anyhow::{Context, bail};
 use sha2::{Digest, Sha256};
@@ -22,6 +25,18 @@ pub(super) struct PreparedDeployment {
     pub(super) target_platform: DeployPlatform,
     pub(super) binaries: Vec<DeployBinaryMetadata>,
     pub(super) choices: Vec<DeployBinaryChoice>,
+    /// 包部署时保持平台物化目录存活到传输完成。
+    _package_root: Option<TemporaryPackageRoot>,
+}
+
+/// 包平台物化目录的自动清理守卫。
+struct TemporaryPackageRoot(PathBuf);
+
+impl Drop for TemporaryPackageRoot {
+    /// 部署准备结果释放后清理临时 Service。
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 /// 探测平台、选择唯一变体并构造不夹带其他平台产物的归档。
@@ -64,7 +79,80 @@ pub(super) fn prepare_deployment(
         target_platform: platform,
         binaries: metadata,
         choices,
+        _package_root: None,
     })
+}
+
+/// 探测远端平台，并从胖包或薄包物化恰好一个可部署 Service。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn prepare_package_deployment(
+    package: &Path,
+    expected_project: &str,
+    ssh_target: &str,
+    configured_remote_bin: Option<&str>,
+    remote_bin: &mut String,
+    auth: &mut SshAuth,
+    batch: bool,
+) -> anyhow::Result<(PreparedDeployment, PathBuf)> {
+    let platform =
+        resolve_remote_platform(ssh_target, configured_remote_bin, remote_bin, auth, batch)?;
+    let info = crate::package::inspect(package)?;
+    if info.manifest.project != expected_project {
+        bail!(
+            "包中的 Service `{}` 与期望 `{expected_project}` 不一致",
+            info.manifest.project
+        );
+    }
+    let root = crate::platform::temp_dir()
+        .join(format!("procora-deploy-package-{}", uuid::Uuid::new_v4()));
+    let result = (|| {
+        crate::package::extract(package, &root, platform.clone())?;
+        let config_path = PathBuf::from(&info.manifest.config.source);
+        let discovered = crate::config::discover_path(root.join(&config_path))
+            .context("远端平台包内容无法重新编译为 Service")?;
+        if discovered.compiled.spec.project != expected_project {
+            bail!("包物化后的配置声明了不同 Service");
+        }
+        let mut selected = select_deploy_binaries(&discovered.compiled.deploy_binaries, &platform)
+            .map_err(anyhow::Error::msg)?;
+        for binary in &mut selected {
+            binary.source = discovered.root.join(&binary.target);
+        }
+        let archive = archive::prepare_deploy(
+            &discovered.root,
+            &discovered.compiled.deploy_binaries,
+            &selected,
+        )?;
+        if archive.archive_bytes > MAX_DEPLOY_BYTES || archive.content_bytes > MAX_DEPLOY_BYTES {
+            bail!("部署包压缩前后都不能超过 {MAX_DEPLOY_BYTES} 字节");
+        }
+        let metadata = deploy_binary_metadata(&selected)?;
+        let choices = metadata
+            .iter()
+            .map(|metadata| DeployBinaryChoice {
+                name: metadata.name.clone(),
+                selector: metadata.selector.clone(),
+                source: package.to_path_buf(),
+                target: metadata.target.clone(),
+                bytes: metadata.bytes,
+                sha256: metadata.sha256.clone(),
+            })
+            .collect();
+        Ok((
+            PreparedDeployment {
+                archive,
+                target_platform: platform,
+                binaries: metadata,
+                choices,
+                _package_root: Some(TemporaryPackageRoot(root.clone())),
+            },
+            config_path,
+        ))
+    })();
+    if result.is_err() && root.exists() {
+        let _ = fs::remove_dir_all(&root);
+    }
+    result
 }
 
 /// 从已探测且已归档的输入生成可防止TOCTOU的稳定预检修订。
