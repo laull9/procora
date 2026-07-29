@@ -87,7 +87,11 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
         |path| format!("上下文 Service：{}", path.display()),
     );
     frame.render_widget(
-        Paragraph::new(text_view::clipped(&context, 0, usize::from(rows[1].width))),
+        Paragraph::new(text_view::clipped(
+            &context,
+            app.text_offset(true),
+            usize::from(rows[1].width),
+        )),
         rows[1],
     );
 }
@@ -99,7 +103,8 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
             let items = app
                 .packages()
                 .iter()
-                .map(|entry| {
+                .enumerate()
+                .map(|(index, entry)| {
                     let label = entry.info.as_ref().map_or_else(
                         || {
                             format!(
@@ -117,7 +122,7 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
                     );
                     ListItem::new(text_view::clipped(
                         &label,
-                        0,
+                        app.text_offset(index == app.selected_package_index()),
                         usize::from(area.width.saturating_sub(4)),
                     ))
                 })
@@ -140,7 +145,8 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
             let items = app
                 .installed()
                 .iter()
-                .map(|service| {
+                .enumerate()
+                .map(|(index, service)| {
                     let state = if service.error.is_some() {
                         "损坏"
                     } else if service.pending_release.is_some() {
@@ -157,7 +163,7 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
                             state,
                             service.releases.len()
                         ),
-                        0,
+                        app.text_offset(index == app.selected_installed_index()),
                         usize::from(area.width.saturating_sub(4)),
                     ))
                 })
@@ -202,21 +208,25 @@ fn package_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
         ]);
     };
     let Some(info) = &entry.info else {
+        let offset = app.text_offset(true);
         return Text::from(vec![
             Line::styled("包清单不可读", Style::default().fg(Color::Red)),
             Line::from(text_view::clipped(
                 &entry.path.display().to_string(),
-                0,
+                offset,
                 usize::from(width.saturating_sub(2)),
             )),
             Line::from(""),
             Line::from(text_view::clipped(
                 entry.error.as_deref().unwrap_or_default(),
-                0,
+                offset,
                 usize::from(width.saturating_sub(2)),
             )),
+            Line::from(""),
+            Line::from("Delete Delete / X X 永久删除此包"),
         ]);
     };
+    let offset = app.text_offset(true);
     let variants = info
         .manifest
         .binaries
@@ -233,14 +243,20 @@ fn package_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
         .into_iter()
         .collect::<Vec<_>>();
     Text::from(vec![
-        detail("Service", &info.manifest.project, width),
-        detail("格式", &info.manifest.format, width),
-        detail("大小", &format_bytes(info.package_bytes), width),
-        detail("文件", &info.manifest.files.len().to_string(), width),
+        detail("Service", &info.manifest.project, width, offset),
+        detail("格式", &info.manifest.format, width, offset),
+        detail("大小", &format_bytes(info.package_bytes), width, offset),
+        detail(
+            "文件",
+            &info.manifest.files.len().to_string(),
+            width,
+            offset,
+        ),
         detail(
             "二进制",
             &format!("{} / {variants} 变体", info.manifest.binaries.len()),
             width,
+            offset,
         ),
         detail(
             "平台",
@@ -250,6 +266,7 @@ fn package_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
                 platforms.join("、")
             },
             width,
+            offset,
         ),
         detail(
             "导出",
@@ -264,10 +281,16 @@ fn package_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
                     .join("、")
             },
             width,
+            offset,
         ),
         Line::from(""),
-        detail("Package", &short_digest(&info.package_digest), width),
-        detail("路径", &entry.path.display().to_string(), width),
+        detail(
+            "Package",
+            &short_digest(&info.package_digest),
+            width,
+            offset,
+        ),
+        detail("路径", &entry.path.display().to_string(), width, offset),
     ])
 }
 
@@ -279,32 +302,48 @@ fn installed_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
             Line::from("切换到“包文件”，选择包后按 i 安装。"),
         ]);
     };
+    let offset = app.text_offset(true);
     let mut lines = vec![
-        detail("Service", &service.project, width),
+        detail("Service", &service.project, width, offset),
         detail(
             "Active",
             service.active_release.as_deref().unwrap_or("-"),
             width,
+            offset,
         ),
         detail(
             "Pending",
             service.pending_release.as_deref().unwrap_or("-"),
             width,
+            offset,
         ),
-        detail("Releases", &service.releases.len().to_string(), width),
-        detail("Packages", &service.packages.len().to_string(), width),
-        detail("目录", &service.root.display().to_string(), width),
+        detail(
+            "Releases",
+            &service.releases.len().to_string(),
+            width,
+            offset,
+        ),
+        detail(
+            "Packages",
+            &service.packages.len().to_string(),
+            width,
+            offset,
+        ),
+        detail("目录", &service.root.display().to_string(), width, offset),
     ];
     if let Some(error) = &service.error {
         lines.push(Line::from(""));
         lines.push(Line::styled(
             text_view::clipped(
                 &format!("状态错误：{error}"),
-                0,
+                offset,
                 usize::from(width.saturating_sub(2)),
             ),
             Style::default().fg(Color::Red),
         ));
+        lines.push(Line::from(""));
+        lines.push(Line::from("U U 解除包托管 · D D 永久删除安装数据"));
+        lines.push(Line::from("同名普通 Service 始终保留，不会被误删"));
     } else if !service.releases.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::styled(
@@ -325,7 +364,7 @@ fn installed_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
                 .map_or_else(|| "-".to_owned(), crate::config::DeployPlatform::key);
             lines.push(Line::from(text_view::clipped(
                 &format!("{marker:10} {} · {platform}", release.id),
-                0,
+                offset,
                 usize::from(width.saturating_sub(2)),
             )));
         }
@@ -334,11 +373,11 @@ fn installed_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
 }
 
 /// 生成统一详情标签行。
-fn detail(label: &str, value: &str, width: u16) -> Line<'static> {
+fn detail(label: &str, value: &str, width: u16, offset: usize) -> Line<'static> {
     let value_width = usize::from(width.saturating_sub(2)).saturating_sub(detail_label_width());
     Line::from(vec![
         Span::styled(detail_label(label), Style::default().fg(Color::DarkGray)),
-        Span::raw(text_view::clipped(value, 0, value_width)),
+        Span::raw(text_view::clipped(value, offset, value_width)),
     ])
 }
 

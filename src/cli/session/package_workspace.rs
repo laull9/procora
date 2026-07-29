@@ -105,6 +105,7 @@ fn execute(
             })?;
             Ok(WorkspaceFlow::Continue(format!("导出项 `{entry}` 已推送")))
         }
+        PackageWorkspaceExit::DeletePackage(path) => delete_package(&path, opened),
         PackageWorkspaceExit::Rollback(project) => {
             super::super::package_installed_command::rollback(&project, None, 30_000, 2_000)?;
             Ok(WorkspaceFlow::Continue(format!(
@@ -118,18 +119,24 @@ fn execute(
             )))
         }
         PackageWorkspaceExit::Purge(project) => {
-            super::super::package_installed_command::uninstall(&project, true)?;
-            Ok(WorkspaceFlow::Continue(format!(
-                "`{project}` 的安装数据已永久清理"
-            )))
+            let feedback = super::super::package_installed_command::uninstall(&project, true)?;
+            Ok(WorkspaceFlow::Continue(feedback))
         }
         PackageWorkspaceExit::Uninstall(project) => {
-            super::super::package_installed_command::uninstall(&project, false)?;
-            Ok(WorkspaceFlow::Continue(format!(
-                "`{project}` 已从 Center 解除，release 与原始包仍保留"
-            )))
+            let feedback = super::super::package_installed_command::uninstall(&project, false)?;
+            Ok(WorkspaceFlow::Continue(feedback))
         }
     }
+}
+
+/// 永久删除选中的包文件，并从本次会话的显式打开集合移除。
+fn delete_package(path: &Path, opened: &mut BTreeSet<PathBuf>) -> anyhow::Result<WorkspaceFlow> {
+    package::delete_file(path)?;
+    opened.remove(path);
+    Ok(WorkspaceFlow::Continue(format!(
+        "包文件已永久删除：{}",
+        path.display()
+    )))
 }
 
 /// 选择并加入一个已有 `.pcpkg`。

@@ -271,6 +271,7 @@ pub fn run_package_workspace(
     ratatui::run(|terminal| {
         let _mouse_capture = MouseCaptureGuard::enable()?;
         let mut dirty = true;
+        let mut last_auto_scroll = Instant::now();
         loop {
             if dirty {
                 terminal.draw(|frame| app.render(frame))?;
@@ -281,6 +282,7 @@ pub fn run_package_workspace(
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
                         dirty |= app.handle_key_event(key);
                     }
+                    Event::Mouse(mouse) => dirty |= app.handle_mouse(mouse),
                     Event::Resize(_, _) => dirty = true,
                     _ => {}
                 }
@@ -288,6 +290,10 @@ pub fn run_package_workspace(
             if let Some(exit) = app.take_exit() {
                 break Ok(exit);
             }
+            let now = Instant::now();
+            let elapsed = now.saturating_duration_since(last_auto_scroll);
+            last_auto_scroll = now;
+            dirty |= app.advance_auto_scroll(elapsed);
         }
     })
 }

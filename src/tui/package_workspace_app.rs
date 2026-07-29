@@ -1,11 +1,13 @@
 //! Procora 包工作台的纯交互状态与动作意图。
 
-use std::path::PathBuf;
+mod actions;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::{path::PathBuf, time::Duration};
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::Frame;
 
-use super::{help_ui::HelpVisibility, package_workspace_ui};
+use super::{help_ui::HelpVisibility, package_workspace_ui, text_view};
 
 /// 包工作台的顶层视图。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +67,8 @@ pub enum PackageWorkspaceExit {
         /// 清单中的命名导出项。
         entry: String,
     },
+    /// 永久删除选中的本地包文件。
+    DeletePackage(PathBuf),
     /// 回滚到最近一个非活动 release。
     Rollback(String),
     /// 恢复中断的 pending 安装。
@@ -87,8 +91,10 @@ pub struct PackageWorkspaceApp {
     control_allowed: bool,
     help_visibility: HelpVisibility,
     export_picker: Option<ExportPicker>,
+    package_delete_confirmation: Option<PathBuf>,
     purge_confirmation: Option<String>,
     uninstall_confirmation: Option<String>,
+    horizontal_scroll: text_view::HorizontalScroll,
     feedback: Option<String>,
     exit: Option<PackageWorkspaceExit>,
     plain_mode: bool,
@@ -119,8 +125,10 @@ impl PackageWorkspaceApp {
             control_allowed: false,
             help_visibility: HelpVisibility::default(),
             export_picker: None,
+            package_delete_confirmation: None,
             purge_confirmation: None,
             uninstall_confirmation: None,
+            horizontal_scroll: text_view::HorizontalScroll::default(),
             feedback: None,
             exit: None,
             plain_mode: super::ui_environment::terminal_plain_mode(),
@@ -153,11 +161,23 @@ impl PackageWorkspaceApp {
         if self.export_picker.is_some() {
             return self.handle_export_key(key);
         }
-        if key != KeyCode::Char('D') {
+        let mut confirmation_cancelled = false;
+        if key != KeyCode::Char('D') && self.purge_confirmation.is_some() {
             self.purge_confirmation = None;
+            confirmation_cancelled = true;
         }
-        if key != KeyCode::Char('U') {
+        if key != KeyCode::Char('U') && self.uninstall_confirmation.is_some() {
             self.uninstall_confirmation = None;
+            confirmation_cancelled = true;
+        }
+        if !matches!(key, KeyCode::Delete | KeyCode::Char('X'))
+            && self.package_delete_confirmation.is_some()
+        {
+            self.package_delete_confirmation = None;
+            confirmation_cancelled = true;
+        }
+        if confirmation_cancelled {
+            self.feedback = Some("已取消删除或解除确认".to_owned());
         }
         match key {
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -167,6 +187,9 @@ impl PackageWorkspaceApp {
             KeyCode::Tab | KeyCode::BackTab => self.switch_tab(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
+            KeyCode::Left => self.scroll_horizontal(false),
+            KeyCode::Right => self.scroll_horizontal(true),
+            KeyCode::F(3) => self.horizontal_scroll.toggle_auto(),
             KeyCode::Char('r') => self.exit = Some(PackageWorkspaceExit::Refresh),
             KeyCode::Char('o') => self.exit = Some(PackageWorkspaceExit::OpenPackage),
             KeyCode::Char('b') if self.control_allowed => {
@@ -184,6 +207,9 @@ impl PackageWorkspaceApp {
                 self.package_action(PackageWorkspaceExit::Deploy);
             }
             KeyCode::Char('u') if self.control_allowed => self.begin_export(),
+            KeyCode::Delete | KeyCode::Char('X') if self.control_allowed => {
+                self.confirm_package_delete();
+            }
             KeyCode::Char('R') if self.control_allowed => self.installed_action(
                 |project| PackageWorkspaceExit::Rollback(project.to_owned()),
                 "没有可回滚的已安装 Service",
@@ -197,6 +223,38 @@ impl PackageWorkspaceApp {
             _ => return false,
         }
         true
+    }
+
+    /// 处理鼠标滚轮选择和触控板横向移动。
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> bool {
+        let confirmation_cancelled = self.package_delete_confirmation.is_some()
+            || self.purge_confirmation.is_some()
+            || self.uninstall_confirmation.is_some();
+        let previous = (
+            self.selected_package,
+            self.selected_installed,
+            self.horizontal_scroll,
+        );
+        self.package_delete_confirmation = None;
+        self.purge_confirmation = None;
+        self.uninstall_confirmation = None;
+        if confirmation_cancelled {
+            self.feedback = Some("已取消删除或解除确认".to_owned());
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.select_previous(),
+            MouseEventKind::ScrollDown => self.select_next(),
+            MouseEventKind::ScrollLeft => self.scroll_horizontal(false),
+            MouseEventKind::ScrollRight => self.scroll_horizontal(true),
+            _ => {}
+        }
+        confirmation_cancelled
+            || previous
+                != (
+                    self.selected_package,
+                    self.selected_installed,
+                    self.horizontal_scroll,
+                )
     }
 
     /// 取出一次工作台导航或操作意图。
@@ -237,6 +295,7 @@ impl PackageWorkspaceApp {
                 self.selected_installed
                     .min(self.installed.len().saturating_sub(1))
             });
+        self.horizontal_scroll.reset_position();
     }
 
     /// 设置当前会话是否允许产生运行副作用。
@@ -321,12 +380,44 @@ impl PackageWorkspaceApp {
         self.purge_confirmation.as_deref()
     }
 
+    /// 返回当前是否正在等待删除包文件的第二次确认。
+    pub fn package_delete_confirmation(&self) -> Option<&std::path::Path> {
+        self.package_delete_confirmation.as_deref()
+    }
+
+    /// 返回一段折叠文本当前应使用的偏移。
+    pub(crate) const fn text_offset(&self, selected: bool) -> usize {
+        self.horizontal_scroll.offset(selected)
+    }
+
+    /// 返回手动水平偏移，供交互测试和状态提示使用。
+    pub const fn horizontal_offset(&self) -> usize {
+        self.horizontal_scroll.manual_offset()
+    }
+
+    /// 返回自动横移是否启用。
+    pub const fn auto_scroll_enabled(&self) -> bool {
+        self.horizontal_scroll.auto_enabled()
+    }
+
+    /// 返回当前选中项是否处于手动滚动冻结期。
+    pub const fn manual_scroll_frozen(&self) -> bool {
+        self.horizontal_scroll.manual_frozen()
+    }
+
+    /// 推进全部折叠文本的恒速自动横移。
+    pub fn advance_auto_scroll(&mut self, elapsed: Duration) -> bool {
+        let maximum = self.all_text_maximum();
+        self.horizontal_scroll.advance(elapsed, maximum)
+    }
+
     /// 在两个顶层视图之间切换。
     fn switch_tab(&mut self) {
         self.tab = match self.tab {
             PackageWorkspaceTab::Packages => PackageWorkspaceTab::Installed,
             PackageWorkspaceTab::Installed => PackageWorkspaceTab::Packages,
         };
+        self.horizontal_scroll.reset_position();
     }
 
     /// 选择当前视图的下一项。
@@ -337,6 +428,7 @@ impl PackageWorkspaceApp {
         };
         if length > 0 {
             *selected = (*selected + 1) % length;
+            self.horizontal_scroll.reset_position();
         }
     }
 
@@ -348,153 +440,7 @@ impl PackageWorkspaceApp {
         };
         if length > 0 {
             *selected = selected.checked_sub(1).unwrap_or(length - 1);
+            self.horizontal_scroll.reset_position();
         }
-    }
-
-    /// 对当前选中包生成一个单路径动作。
-    fn package_action(&mut self, action: fn(PathBuf) -> PackageWorkspaceExit) {
-        if self.tab != PackageWorkspaceTab::Packages {
-            self.feedback = Some("切换到“包文件”后再执行该操作".to_owned());
-            return;
-        }
-        let Some(entry) = self.selected_package() else {
-            self.feedback = Some("没有可操作的包；按 o 打开，或按 b 构建".to_owned());
-            return;
-        };
-        if entry.info.is_none() {
-            self.feedback = Some("包清单不可读；只能重新选择或查看诊断".to_owned());
-            return;
-        }
-        self.exit = Some(action(entry.path.clone()));
-    }
-
-    /// 单个导出直接执行，多个导出进入内联选择。
-    fn begin_export(&mut self) {
-        if self.tab != PackageWorkspaceTab::Packages {
-            self.feedback = Some("切换到“包文件”后再选择导出项".to_owned());
-            return;
-        }
-        let Some(entry) = self.selected_package() else {
-            self.feedback = Some("没有可导出的包".to_owned());
-            return;
-        };
-        let Some(info) = &entry.info else {
-            self.feedback = Some("包清单不可读，无法列出导出项".to_owned());
-            return;
-        };
-        let entries = info.manifest.exports.keys().cloned().collect::<Vec<_>>();
-        match entries.as_slice() {
-            [] => self.feedback = Some("该包没有命名导出项".to_owned()),
-            [only] => {
-                self.exit = Some(PackageWorkspaceExit::PushExport {
-                    package: entry.path.clone(),
-                    entry: only.clone(),
-                });
-            }
-            _ => {
-                self.export_picker = Some(ExportPicker {
-                    package: entry.path.clone(),
-                    entries,
-                    selected: 0,
-                });
-            }
-        }
-    }
-
-    /// 对当前已安装 Service 生成管理动作。
-    fn installed_action(
-        &mut self,
-        action: impl FnOnce(&str) -> PackageWorkspaceExit,
-        empty_message: &str,
-    ) {
-        if self.tab != PackageWorkspaceTab::Installed {
-            self.feedback = Some("切换到“已安装”后再执行 release 管理".to_owned());
-            return;
-        }
-        let Some(service) = self.selected_installed() else {
-            self.feedback = Some(empty_message.to_owned());
-            return;
-        };
-        if service.error.is_some() {
-            self.feedback = Some("安装状态损坏；请先根据详情修复 state.json".to_owned());
-            return;
-        }
-        self.exit = Some(action(&service.project));
-    }
-
-    /// 用两次大写 D 确认永久删除安装数据。
-    fn confirm_purge(&mut self) {
-        if self.tab != PackageWorkspaceTab::Installed {
-            self.feedback = Some("切换到“已安装”后再清理安装数据".to_owned());
-            return;
-        }
-        let Some(project) = self
-            .selected_installed()
-            .map(|service| service.project.clone())
-        else {
-            self.feedback = Some("没有可清理的已安装 Service".to_owned());
-            return;
-        };
-        if self.purge_confirmation.as_deref() == Some(project.as_str()) {
-            self.purge_confirmation = None;
-            self.exit = Some(PackageWorkspaceExit::Purge(project));
-        } else {
-            self.purge_confirmation = Some(project.clone());
-            self.feedback = Some(format!(
-                "永久清理会删除 `{project}` 的全部 release 和原始包；再次按大写 D 确认"
-            ));
-        }
-    }
-
-    /// 用两次大写 U 确认仅解除 Center 注册并保留安装数据。
-    fn confirm_uninstall(&mut self) {
-        if self.tab != PackageWorkspaceTab::Installed {
-            self.feedback = Some("切换到“已安装”后再解除安装".to_owned());
-            return;
-        }
-        let Some(project) = self
-            .selected_installed()
-            .map(|service| service.project.clone())
-        else {
-            self.feedback = Some("没有可解除的已安装 Service".to_owned());
-            return;
-        };
-        if self.uninstall_confirmation.as_deref() == Some(project.as_str()) {
-            self.uninstall_confirmation = None;
-            self.exit = Some(PackageWorkspaceExit::Uninstall(project));
-        } else {
-            self.uninstall_confirmation = Some(project.clone());
-            self.feedback = Some(format!(
-                "将从 Center 解除 `{project}`，但保留 release 和原始包；再次按大写 U 确认"
-            ));
-        }
-    }
-
-    /// 处理导出项选择弹层。
-    fn handle_export_key(&mut self, key: KeyCode) -> bool {
-        let Some(picker) = self.export_picker.as_mut() else {
-            return false;
-        };
-        match key {
-            KeyCode::Esc | KeyCode::Char('q') => self.export_picker = None,
-            KeyCode::Down | KeyCode::Char('j') => {
-                picker.selected = (picker.selected + 1) % picker.entries.len();
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                picker.selected = picker
-                    .selected
-                    .checked_sub(1)
-                    .unwrap_or(picker.entries.len() - 1);
-            }
-            KeyCode::Enter => {
-                self.exit = Some(PackageWorkspaceExit::PushExport {
-                    package: picker.package.clone(),
-                    entry: picker.entries[picker.selected].clone(),
-                });
-                self.export_picker = None;
-            }
-            _ => return false,
-        }
-        true
     }
 }
