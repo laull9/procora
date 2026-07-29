@@ -59,6 +59,7 @@ pub(crate) struct DeployOutcome {
     pub(crate) project: String,
     pub(crate) release: String,
     pub(crate) previous_release: Option<String>,
+    pub(crate) changed: bool,
     pub(crate) preview: DeployPreview,
     pub(crate) events: Vec<DeployEvent>,
 }

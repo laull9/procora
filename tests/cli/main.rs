@@ -10,6 +10,7 @@ mod cli_deploy;
 mod cli_deploy_edges;
 mod cli_git_source;
 mod cli_reload;
+mod cli_remote;
 mod cli_update;
 mod cli_uploads;
 mod cli_uploads_list;

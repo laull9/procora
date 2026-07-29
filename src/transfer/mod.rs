@@ -16,6 +16,7 @@ mod remote;
 mod remote_auth;
 mod remote_binary;
 mod remote_error;
+mod remote_exec;
 mod remote_list;
 mod remote_selection;
 mod target;
@@ -28,8 +29,9 @@ pub(crate) use deploy_report::{DeployEvent, DeployOutcome, DeployPreview};
 /// 运行只供 SSH 子进程调用的远端接收器。
 pub(crate) use receive::run as receive;
 /// 从本机向远端声明式目标上传文件或目录。
-pub(crate) use remote::push;
+pub(crate) use remote::{human_bytes, push, resolve_ssh_target};
 pub(crate) use remote_auth::answer_askpass_if_requested;
+pub(crate) use remote_exec::run_remote_cli;
 pub(crate) use remote_list::list_remote;
 
 /// 返回本机 Center 当前活动上传目标。

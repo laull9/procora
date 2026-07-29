@@ -5,7 +5,9 @@
 `deploy` 通过 SSH 上传一个完整 Service。远端只需安装 Procora 并允许当前 SSH 用户运行它；不需要预先创建服务目录、执行 `add` 或在配置中声明 `uploads` target：
 
 ```bash
+procora deploy . --ssh prod --dry-run
 procora deploy . --ssh prod
+procora deploy
 procora deploy ./service --ssh user@server --service demo
 procora deploy . --ssh prod --timeout 45s --stable-for 5s --keep 5
 procora deploy . --ssh prod --batch
@@ -13,7 +15,11 @@ procora deploy . --ssh prod --batch
 
 第一次连接建议先执行普通 `ssh prod`，人工核对并保存主机指纹；确认 `ssh prod procora __ssh-probe` 能返回 JSON 后再部署。日常开发可省略 `--batch`，Procora 会在密钥不可用时交给 OpenSSH 从控制终端读取密码。CI 和 MCP 必须使用密钥、agent 或 SSH config 完成非交互认证，并启用 `--batch` 语义。
 
-本机先发现并完整编译声明式配置，服务名取自 `project`。`--service` 只做身份一致性校验，不是远端路径或上传目标。远端在当前用户的 Procora 数据目录下保存：
+本机先发现并完整编译声明式配置，服务名取自 `project`。`--service` 只做身份一致性校验，不是远端路径或上传目标。`--dry-run` 仍会建立只读 SSH 连接、探测平台并在本机生成临时归档，但不会调用远端部署接收器；输出包含配置入口、二进制选择、内容大小、预期 release 和可供自动化确认的完整修订。
+
+非 `--batch` 部署成功后，CLI 会在全局 Procora 数据目录的 `cli-memory/deploy.json` 中按规范化 Service 根目录和 `project` 记住 SSH 目标及远端 Procora 路径，不保存密码。之后在同一项目运行 `procora deploy` 会直接复用；显式参数始终优先，`PROCORA_SSH_TARGET` 优先于记忆。`--batch` 不读取或写入这份交互记忆，CI 应显式传入目标或环境变量。
+
+远端在当前用户的 Procora 数据目录下保存：
 
 ```text
 services/<project>/
@@ -22,13 +28,33 @@ services/<project>/
   deploy.lock
 ```
 
-部署接收器会再次校验 SHA-256、展开大小、配置入口和 `project`，再把 release 注册到 Center。命令行会实时显示 `[校验]`、`[切换]`、`[验活]`、`[回滚]` 和 `[恢复]` 阶段。全部 Task 必须进入运行状态；配置健康检查的 Task 还必须达到 `healthy`，并持续通过 `--stable-for` 稳定窗口。Task 启动失败、健康检查失败或 `--timeout` 到期都会停止新 release，恢复上一 release，并再次执行相同验收。首次部署失败时会停止失败服务。若旧 release 也无法恢复，命令明确报告自动回滚失败。
+部署接收器会再次校验 SHA-256、展开大小、配置入口和 `project`，再把 release 注册到 Center。命令行会实时显示 `[校验]`、`[切换]`、`[验活]`、`[回滚]` 和 `[恢复]` 阶段。相同 release 已经注册且处于运行状态时返回 `changed=false`，不切换、不重启也不追加部署记录；若该 Service 已停止、失败或注册被移除，则相同内容仍会重新启动和验收。全部 Task 必须进入运行状态；配置健康检查的 Task 还必须达到 `healthy`，并持续通过 `--stable-for` 稳定窗口。Task 启动失败、健康检查失败或 `--timeout` 到期都会停止新 release，恢复上一 release，并再次执行相同验收。首次部署失败时会停止失败服务。若旧 release 也无法恢复，命令明确报告自动回滚失败。
 
 部署和回滚是固定程序状态机，不调用 AI，也不根据日志文本猜测成功。release 切换由 Center 在同一服务身份内完成，并用旧根目录作为并发校验，避免删除注册记录和短暂的未注册窗口。切换前会把待部署 release 写入两阶段状态；若接收器或 SSH 会话在中途异常退出，下一次部署会先识别未完成事务并恢复最近一次已确认 release。没有配置健康检查的运行中 Task 以受管进程仍在运行为降级验收条件；需要强健康保证的服务应声明 exec 或 HTTP GET healthcheck。
 
 同名服务只有在其根目录确实属于上述 Procora 托管 release 目录时才能被后续 `deploy` 更新。用户通过 `add` 注册的同名普通目录不会被接管。`--keep` 默认保留最近 3 个 release，范围为 1–32；部署记录保存在 `state.json`，最多保留最近 100 条。
 
 本机与远端 Procora 都需要支持 `deploy`。远端版本过旧且缺少托管接收器时，客户端会直接提示升级远端 Procora。
+
+### 部署后的远端管理
+
+成功部署后，可在同一项目目录直接管理记住的 SSH 目标，也可随时用 `--ssh` 覆盖：
+
+```bash
+procora remote ps
+procora remote status
+procora remote logs demo api
+procora remote history demo
+procora remote start demo
+procora remote restart demo
+procora remote stop demo
+procora remote rm demo
+
+procora remote ps --ssh another-host
+procora remote --ssh another-host logs demo api
+```
+
+`ps` 列出远端 Center 当前托管的 Service；`logs` 读取指定 Task 的当前活动日志；其他命令复用 Procora 已有的状态、历史和生命周期语义。`rm` 只停止并移除远端 Center 注册，不删除不可变 release 与 `state.json`，下一次部署可重新注册。Service 和 Task 参数先按领域标识规则校验，再作为固定参数交给 OpenSSH，不接受路径或任意 shell 文本。`--remote-bin`、`--batch`、主机确认、密钥/一次性内存密码回退和常见远端安装路径发现与 `deploy` 一致；`--batch` 不使用当前项目的部署目标记忆。
 
 ### 三平台预编译二进制
 
@@ -88,6 +114,7 @@ tasks:
 | `--keep` | `3` | 保留 3–5 个便于审计和快速恢复 |
 | `--remote-bin` | `procora`并自动查找 | 远端非交互 PATH 特殊时显式填写 |
 | `--batch` | 关闭 | CI 使用；禁止主机确认、密码询问和路径询问 |
+| `--dry-run` | 关闭 | 发布前输出确定性计划，不上传或切换远端 |
 
 建议至少给对外服务声明 HTTP 或 exec healthcheck。没有健康检查时，Procora 只能确认受管进程在稳定窗口内没有退出，无法判断端口、数据库连接或应用内部就绪状态。
 

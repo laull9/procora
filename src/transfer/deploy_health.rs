@@ -47,6 +47,15 @@ pub(super) fn wait_until_accepted(
     }
 }
 
+/// 单次检查当前活动 Service 是否仍满足部署可用条件。
+pub(super) fn currently_accepted(project: &str) -> anyhow::Result<bool> {
+    let snapshot = crate::cli::api::service_snapshot(project)?;
+    Ok(matches!(
+        deployment_readiness(&snapshot.tasks),
+        Readiness::Ready
+    ))
+}
+
 /// 一次快照相对部署门控的判定。
 fn deployment_readiness(tasks: &[TaskView]) -> Readiness {
     for task in tasks {

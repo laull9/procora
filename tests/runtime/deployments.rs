@@ -159,6 +159,116 @@ fn managed_deploy_creates_and_updates_service_without_target() {
 }
 
 #[test]
+// 相同归档重复部署时保持当前release，不切换、不重启且不追加成功记录。
+fn managed_deploy_is_idempotent_for_active_release() {
+    let home = temporary_directory("idempotent");
+    let config = b"version: 1\nproject: demo\ntasks: {}\n";
+    let (archive, content_bytes) =
+        service_archive(&[("procora.yaml", config), ("version.txt", b"same")]);
+    let first = deploy(&home, &archive, content_bytes);
+    assert!(first.status.success());
+    let second = deploy(&home, &archive, content_bytes);
+
+    assert!(
+        second.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second.stdout),
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(stdout.contains("跳过切换与重启"), "{stdout}");
+    assert!(stdout.contains(r#""changed":false"#), "{stdout}");
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("services/demo/state.json")).unwrap()).unwrap();
+    assert_eq!(state["releases"].as_array().unwrap().len(), 1);
+    assert_eq!(state["deployments"].as_array().unwrap().len(), 1);
+
+    stop_center(&home);
+    remove_directory_when_released(&home);
+}
+
+#[test]
+// 相同release在Service已停止时会重新启动，而不是误判成无需更新。
+fn managed_deploy_restarts_stopped_active_release() {
+    let home = temporary_directory("restart-stopped");
+    let config = b"version: 1\nproject: demo\ntasks: {}\n";
+    let (archive, content_bytes) = service_archive(&[("procora.yaml", config)]);
+    assert!(deploy(&home, &archive, content_bytes).status.success());
+    let stopped = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .args(["stop", "demo"])
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(stopped.status.success());
+
+    let repeated = deploy(&home, &archive, content_bytes);
+
+    assert!(
+        repeated.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&repeated.stdout),
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&repeated.stdout);
+    assert!(stdout.contains(r#""changed":true"#), "{stdout}");
+    assert!(!stdout.contains("跳过切换与重启"), "{stdout}");
+    let listed = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .arg("list")
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&listed.stdout).contains("运行中"));
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("services/demo/state.json")).unwrap()).unwrap();
+    assert_eq!(state["deployments"].as_array().unwrap().len(), 2);
+
+    stop_center(&home);
+    remove_directory_when_released(&home);
+}
+
+#[test]
+// 相同release的Task已经退出时会重新创建进程，不会只看Service宿主状态。
+fn managed_deploy_restarts_active_release_with_unavailable_task() {
+    let home = temporary_directory("restart-unavailable-task");
+    let executable = std::env::current_exe().unwrap();
+    let config = serde_json::to_vec(&serde_json::json!({
+        "version": 1,
+        "project": "demo",
+        "tasks": {
+            "worker": {
+                "command": executable,
+                "args": [
+                    "--exact",
+                    "deployments::managed_deploy_short_lived_helper",
+                    "--nocapture"
+                ],
+                "env": {"PROCORA_DEPLOY_SHORT_LIVED_TEST": "1"}
+            }
+        }
+    }))
+    .unwrap();
+    let (archive, content_bytes) = service_archive(&[("procora.json", config.as_slice())]);
+    let first = deploy_with_config(&home, &archive, content_bytes, "procora.json");
+    assert!(first.status.success());
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let repeated = deploy_with_config(&home, &archive, content_bytes, "procora.json");
+
+    assert!(
+        repeated.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&repeated.stdout),
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&repeated.stdout);
+    assert!(stdout.contains(r#""changed":true"#), "{stdout}");
+    assert!(!stdout.contains("跳过切换与重启"), "{stdout}");
+
+    stop_center(&home);
+    remove_directory_when_released(&home);
+}
+
+#[test]
 // 两阶段状态显示上次切换中断时，下一次部署先恢复已确认release。
 fn managed_deploy_recovers_interrupted_switch_before_continuing() {
     let home = temporary_directory("interrupted");
@@ -456,6 +566,14 @@ fn managed_deploy_failing_health_helper() {
         std::env::var_os("PROCORA_DEPLOY_HEALTH_TEST").is_none(),
         "模拟健康检查失败"
     );
+}
+
+#[test]
+// 为幂等部署测试提供启动后很快正常退出的跨平台Task。
+fn managed_deploy_short_lived_helper() {
+    if std::env::var_os("PROCORA_DEPLOY_SHORT_LIVED_TEST").is_some() {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
 }
 
 /// 正常停止测试 Center。

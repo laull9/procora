@@ -12,7 +12,7 @@ use clap_complete::generate;
 
 use super::{
     Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, deploy, logs,
-    project, push, session, source, suggestion, template,
+    project, push, remote, session, source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -42,6 +42,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             restart,
         }) => push::run(source, target.as_deref(), ssh, remote_bin, batch, restart),
         Some(Command::Deploy(arguments)) => deploy::run(&arguments),
+        Some(Command::Remote(arguments)) => remote::run(arguments),
         Some(Command::Uploads {
             ssh,
             remote_bin,

@@ -124,6 +124,130 @@ fn deploy_uses_managed_receiver_without_remote_target() {
 }
 
 #[test]
+// dry-run只探测平台和构造计划，不调用远端部署接收器。
+fn deploy_dry_run_prints_plan_without_uploading() {
+    let directory = temporary_directory("managed-deploy-dry-run");
+    install_fake_ssh(&directory);
+    let source = directory.join("service");
+    fs::create_dir(&source).unwrap();
+    fs::write(
+        source.join("procora.yaml"),
+        "version: 1\nproject: demo\ntasks: {}\n",
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .args([
+            "deploy",
+            source.to_str().unwrap(),
+            "--ssh",
+            "preview-host",
+            "--dry-run",
+        ])
+        .env("PATH", path)
+        .env("PROCORA_HOME", directory.join("home"))
+        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
+        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("部署计划：demo → preview-host"), "{stdout}");
+    assert!(stdout.contains("预检完成：未修改远端"), "{stdout}");
+    assert!(stdout.contains("修订："), "{stdout}");
+    let invocation = fs::read_to_string(directory.join("ssh.log")).unwrap();
+    assert!(invocation.contains("__ssh-probe"));
+    assert!(!invocation.contains("__receive-deploy"));
+    assert!(!directory.join("ssh-header.log").exists());
+    assert!(!directory.join("home/cli-memory/deploy.json").exists());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+// 同一Service成功部署后可省略SSH并复用该项目自己的目标。
+fn deploy_remembers_successful_target_per_service() {
+    let directory = temporary_directory("managed-deploy-memory");
+    install_fake_ssh(&directory);
+    let source = directory.join("service");
+    fs::create_dir(&source).unwrap();
+    fs::write(
+        source.join("procora.yaml"),
+        "version: 1\nproject: demo\ntasks: {}\n",
+    )
+    .unwrap();
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let home = directory.join("home");
+    let first = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .args([
+            "deploy",
+            source.to_str().unwrap(),
+            "--ssh",
+            "remembered-host",
+        ])
+        .env("PATH", &path)
+        .env("PROCORA_HOME", &home)
+        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
+        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+
+    fs::write(directory.join("ssh.log"), "").unwrap();
+    let repeated = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .args(["deploy", source.to_str().unwrap()])
+        .env("PATH", path)
+        .env("PROCORA_HOME", &home)
+        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
+        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
+        .output()
+        .unwrap();
+
+    assert!(
+        repeated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&repeated.stderr);
+    assert!(
+        stderr.contains("上次成功的部署目标：remembered-host"),
+        "{stderr}"
+    );
+    let invocation = fs::read_to_string(directory.join("ssh.log")).unwrap();
+    assert!(invocation.contains("remembered-host"), "{invocation}");
+    let memory: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("cli-memory/deploy.json")).unwrap()).unwrap();
+    assert_eq!(memory["entries"][0]["project"], "demo");
+    assert_eq!(memory["entries"][0]["ssh_target"], "remembered-host");
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(home.join("cli-memory/deploy.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 // deploy按远端平台只提交匹配二进制并映射到稳定target。
 fn deploy_selects_and_submits_only_remote_platform_binary() {
     let directory = temporary_directory("managed-deploy-binary");

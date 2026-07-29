@@ -74,6 +74,14 @@ pub(crate) struct DeployResult {
     pub(crate) project: String,
     pub(crate) release: String,
     pub(crate) previous_release: Option<String>,
+    /// 相同活动 release 被幂等跳过时为 false。
+    #[serde(default = "changed_by_default")]
+    pub(crate) changed: bool,
     pub(crate) content_bytes: u64,
     pub(crate) sha256: String,
+}
+
+/// 兼容尚未返回 changed 字段的同协议旧接收端。
+const fn changed_by_default() -> bool {
+    true
 }

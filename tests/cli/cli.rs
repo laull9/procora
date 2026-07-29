@@ -58,6 +58,7 @@ fn help_command_runs() {
     assert!(stdout.contains("deps"));
     assert!(stdout.contains("clean"));
     assert!(stdout.contains("push"));
+    assert!(stdout.contains("remote"));
     assert!(stdout.contains("up"));
     assert!(stdout.contains("down"));
     assert!(stdout.contains("status"));
@@ -505,9 +506,25 @@ fn deploy_arguments_remain_stable() {
             stable_for: 5_000,
             keep: 5,
             batch: true,
+            dry_run: false,
         })) if source == std::path::Path::new("./service")
             && ssh == "prod"
             && service == "demo"
+    ));
+}
+
+#[test]
+// deploy支持明确的无副作用预检模式。
+fn deploy_dry_run_argument_is_stable() {
+    let parsed = Cli::try_parse_from(["procora", "deploy", "--ssh", "prod", "--dry-run"]).unwrap();
+
+    assert!(matches!(
+        parsed.command,
+        Some(Command::Deploy(procora::cli::DeployArgs {
+            dry_run: true,
+            batch: false,
+            ..
+        }))
     ));
 }
 

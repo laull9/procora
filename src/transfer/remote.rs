@@ -135,7 +135,7 @@ pub(crate) fn push(
 }
 
 /// 按显式参数和环境变量顺序确定 SSH 目标。
-pub(super) fn resolve_ssh_target(
+pub(crate) fn resolve_ssh_target(
     configured_target: Option<&str>,
     batch: bool,
 ) -> anyhow::Result<String> {
@@ -421,7 +421,7 @@ fn service_from_selector(selector: &str) -> &str {
 }
 
 /// 以紧凑二进制单位展示传输大小。
-pub(super) fn human_bytes(bytes: u64) -> String {
+pub(crate) fn human_bytes(bytes: u64) -> String {
     const KIB: u64 = 1024;
     const MIB: u64 = 1024 * KIB;
     const GIB: u64 = 1024 * MIB;

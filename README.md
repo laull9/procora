@@ -117,10 +117,16 @@ procora
 把当前完整 Service 部署到已安装 Procora 的 SSH 远端，不需要远端预建目录、注册 Service 或声明 `uploads` target：
 
 ```bash
-procora deploy . --ssh prod
+procora deploy --ssh prod --dry-run
+procora deploy --ssh prod
+procora deploy
+
+procora remote ps
+procora remote logs demo api
+procora remote restart demo
 ```
 
-远端会重新校验配置和归档摘要，在 Procora 数据目录中创建不可变 release，启动后等待全部 Task 运行及已声明健康检查通过稳定窗口。命令行实时显示校验、切换、验活与回滚阶段；启动、健康或稳定窗口失败时自动恢复并重新验收上一 release。两阶段状态还能让下一次部署自动收敛上次意外中断的切换。全部判断来自配置、进程状态、退出结果、健康检查和超时。
+`--dry-run` 会探测平台、选择产物并生成完整计划，但不上传或切换 Service。成功部署后，Procora 会按本地 Service 记住非敏感的 SSH 目标，之后在同一项目目录可直接运行 `procora deploy` 和 `procora remote ...`。远端会重新校验配置和归档摘要，在 Procora 数据目录中创建不可变 release，启动后等待全部 Task 运行及已声明健康检查通过稳定窗口。命令行实时显示校验、切换、验活与回滚阶段；相同 release 已在运行时幂等跳过，启动、健康或稳定窗口失败时自动恢复并重新验收上一 release。两阶段状态还能让下一次部署自动收敛上次意外中断的切换。全部判断来自配置、进程状态、退出结果、健康检查和超时。
 
 开发机与远端平台不同时，可在 `binaries` 中把 Linux、macOS universal/单架构和 Windows `.exe` 映射到任意工具链预先生成的二进制产物。`deploy` 会先探测远端，只提交匹配文件，并在远端重新核对平台、目标路径和 SHA-256；Task 使用 `${binary.<name>}` 引用 release 内的稳定绝对路径。CLI 与 MCP 两阶段部署示例见[全托管裸机部署](docs/cli.md#全托管裸机部署)和[MCP 本地服务](docs/mcp.md)。
 
@@ -137,6 +143,7 @@ procora deploy . --ssh prod
 | `procora start/stop/restart <name>` | 控制服务生命周期 |
 | `procora logs <name> <task>` | 查看、搜索或清理 Task 日志 |
 | `procora deploy [path] --ssh <host>` | 无需远端 target，全托管部署完整 Service |
+| `procora remote <操作>` | 查看或管理当前项目记住的裸机远端 |
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |
 | `procora enable/disable` | 启用或停用用户级开机自启动 |

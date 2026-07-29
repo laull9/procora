@@ -158,6 +158,7 @@ fn deploy_outcome(
         project: result.project,
         release: result.release,
         previous_release: result.previous_release,
+        changed: result.changed,
         preview,
         events,
     }

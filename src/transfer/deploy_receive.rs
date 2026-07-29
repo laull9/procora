@@ -12,7 +12,7 @@ use crate::config::UploadKind;
 
 use super::{
     archive,
-    deploy_health::wait_until_accepted,
+    deploy_health::{currently_accepted, wait_until_accepted},
     deploy_protocol::{DeployInit, DeployPhase, DeployResponse, DeployResult},
     deploy_state::{DeploymentOutcome, DeploymentRecord, ManagedState, now_millis, release_path},
     deploy_wire::{
@@ -80,7 +80,7 @@ fn receive_and_deploy(
         init.timeout_ms,
         init.stable_for_ms,
     )?;
-    ensure_registration_is_managed(&init.project, releases_root, &state)?;
+    let active_running = ensure_registration_is_managed(&init.project, releases_root, &state)?;
     state.register_release(
         &release,
         &init.sha256,
@@ -98,6 +98,24 @@ fn receive_and_deploy(
         ),
         None => None,
     };
+    if previous.as_deref() == Some(&release)
+        && active_running
+        && currently_accepted(&init.project).unwrap_or(false)
+    {
+        state.save(&state_path)?;
+        send_progress(
+            DeployPhase::Validating,
+            format!("release `{release}` 已经处于活动状态，跳过切换与重启"),
+        );
+        return Ok(DeployResult {
+            project: init.project.clone(),
+            release,
+            previous_release: previous,
+            changed: false,
+            content_bytes: init.content_bytes,
+            sha256: init.sha256.clone(),
+        });
+    }
     state.pending_release = Some(release.clone());
     state.save(&state_path)?;
 
@@ -155,6 +173,7 @@ fn commit_success(
         project: init.project.clone(),
         release,
         previous_release: previous,
+        changed: true,
         content_bytes: init.content_bytes,
         sha256: init.sha256.clone(),
     })
@@ -465,7 +484,7 @@ fn ensure_registration_is_managed(
     project: &str,
     releases_root: &Path,
     state: &ManagedState,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     if let Some(existing) = crate::cli::api::managed_deploy_services()?
         .into_iter()
         .find(|service| service.name == project)
@@ -483,8 +502,9 @@ fn ensure_registration_is_managed(
         if expected.as_deref() != Some(existing.root.as_path()) {
             bail!("托管 Service `{project}` 的活动目录与 state.json 不一致，拒绝自动切换");
         }
+        return Ok(existing.status == crate::protocol::ServiceStatusDto::Running);
     }
-    Ok(())
+    Ok(false)
 }
 
 /// 返回旧 release 的配置入口。

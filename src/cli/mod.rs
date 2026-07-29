@@ -5,6 +5,7 @@ pub mod api;
 mod autostart_command;
 mod center_runtime;
 mod deploy;
+mod deploy_memory;
 pub use deploy::DeployArgs;
 #[cfg(target_os = "windows")]
 mod elevation;
@@ -12,6 +13,8 @@ mod logs;
 mod project;
 mod push;
 mod push_memory;
+mod remote;
+pub use remote::RemoteArgs;
 mod runtime;
 /// TUI 使用的全局与临时实时会话。
 pub mod session;
@@ -133,6 +136,8 @@ pub enum Command {
     },
     /// 通过 SSH 全托管部署一个完整 Service，无需远端预先声明上传目标。
     Deploy(DeployArgs),
+    /// 通过 SSH 查看或管理裸机远端的 Procora Service。
+    Remote(RemoteArgs),
     /// 列出本机或远端当前可用的声明式上传目标与路径。
     Uploads {
         /// SSH config 别名或 `[user@]host`；省略时读取本机全局 Procora。
