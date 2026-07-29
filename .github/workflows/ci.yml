@@ -77,4 +77,5 @@ jobs:
         with:
           toolchain: stable
       - name: 运行 Windows 测试
-        run: cargo test --locked
+        # 后台 Center、Job Object 与实时防护同时参与时限制并发，避免进程型测试互相争抢启动窗口。
+        run: cargo test --locked -- --test-threads=2

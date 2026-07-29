@@ -90,10 +90,14 @@ fn read_capture(path: &Path) -> Vec<u8> {
 
 /// 构造与标准命令接口一致的捕获结果。
 fn captured_output(status: ExitStatus, stdout_path: &Path, stderr_path: &Path) -> Output {
+    let mut stderr = read_capture(stderr_path);
+    if !status.success() {
+        stderr.extend_from_slice(format!("\n部署接收器退出状态：{status}\n").as_bytes());
+    }
     Output {
         status,
         stdout: read_capture(stdout_path),
-        stderr: read_capture(stderr_path),
+        stderr,
     }
 }
 
