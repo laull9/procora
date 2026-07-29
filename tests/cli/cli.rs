@@ -625,14 +625,40 @@ fn uploads_arguments_are_stable() {
 fn update_arguments_are_stable() {
     let install = Cli::try_parse_from(["procora", "update"]).unwrap();
     let check = Cli::try_parse_from(["procora", "update", "--check"]).unwrap();
+    let customized = Cli::try_parse_from([
+        "procora",
+        "update",
+        "--github-mirror",
+        "https://mirror.example/{url}",
+        "--download-command",
+        "procora-fetch",
+    ])
+    .unwrap();
 
     assert!(matches!(
         install.command,
-        Some(Command::Update { check: false })
+        Some(Command::Update {
+            check: false,
+            github_mirror: None,
+            download_command: None,
+        })
     ));
     assert!(matches!(
         check.command,
-        Some(Command::Update { check: true })
+        Some(Command::Update {
+            check: true,
+            github_mirror: None,
+            download_command: None,
+        })
+    ));
+    assert!(matches!(
+        customized.command,
+        Some(Command::Update {
+            check: false,
+            github_mirror: Some(ref mirror),
+            download_command: Some(ref command),
+        }) if mirror == "https://mirror.example/{url}"
+            && command == std::path::Path::new("procora-fetch")
     ));
 }
 

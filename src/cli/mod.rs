@@ -170,6 +170,12 @@ pub enum Command {
         /// 只检查是否存在新版本，不下载或覆盖文件。
         #[arg(long)]
         check: bool,
+        /// GitHub 镜像前缀或包含 `{url}` 的地址模板。
+        #[arg(long, value_name = "URL")]
+        github_mirror: Option<String>,
+        /// 资产下载程序；Procora 依次传入 URL 和输出路径。
+        #[arg(long, value_name = "PROGRAM")]
+        download_command: Option<PathBuf>,
     },
     /// 启动当前用户的全局 Procora 服务器。
     Up,

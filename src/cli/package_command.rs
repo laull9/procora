@@ -208,7 +208,7 @@ pub fn run(arguments: PackageArgs) -> anyhow::Result<()> {
             stable_for,
         } => super::package_installed_command::recover(&service, timeout, stable_for),
         PackageCommand::Uninstall { service, purge } => {
-            super::package_installed_command::uninstall(&service, purge)
+            super::package_installed_command::uninstall(&service, purge).map(drop)
         }
     }
 }

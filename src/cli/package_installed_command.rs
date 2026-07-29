@@ -50,16 +50,36 @@ pub(super) fn recover(service: &str, timeout_ms: u64, stable_for_ms: u64) -> any
 }
 
 /// 解除包安装；只有 `purge` 明确为真时删除本地历史数据。
-pub(super) fn uninstall(service: &str, purge: bool) -> anyhow::Result<()> {
-    crate::transfer::uninstall_installed_package(service, purge)?;
-    if purge {
-        println!("已卸载并清理 `{service}` 的 release、状态和原始包");
-    } else {
-        println!(
+pub(super) fn uninstall(service: &str, purge: bool) -> anyhow::Result<String> {
+    let outcome = crate::transfer::uninstall_installed_package(service, purge)?;
+    let message = match (outcome.purged, outcome.registration) {
+        (true, crate::transfer::PackageRegistrationDisposition::Removed) => {
+            format!("已解除并永久删除 `{service}` 的 release、状态和原始包")
+        }
+        (true, crate::transfer::PackageRegistrationDisposition::Absent) => {
+            format!("`{service}` 未在 Center 注册；包安装数据已永久删除")
+        }
+        (true, crate::transfer::PackageRegistrationDisposition::UnrelatedPreserved(root)) => {
+            format!(
+                "包安装数据已永久删除；同名普通 Service `{service}` 保持不变：{}",
+                root.display()
+            )
+        }
+        (false, crate::transfer::PackageRegistrationDisposition::Removed) => format!(
             "已从 Center 解除 `{service}`；安装数据仍保留，可重新安装同一包或使用 `--purge` 清理"
-        );
-    }
-    Ok(())
+        ),
+        (false, crate::transfer::PackageRegistrationDisposition::Absent) => {
+            format!("`{service}` 当前未在 Center 注册；安装数据仍保留，可使用 `--purge` 永久删除")
+        }
+        (false, crate::transfer::PackageRegistrationDisposition::UnrelatedPreserved(root)) => {
+            format!(
+                "包安装未占用 Center 注册；同名普通 Service `{service}` 保持不变：{}；安装数据仍保留",
+                root.display()
+            )
+        }
+    };
+    println!("{message}");
+    Ok(message)
 }
 
 /// 列出当前用户全部已安装包。

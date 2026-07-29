@@ -69,6 +69,13 @@ procora update --check
 procora update
 ```
 
+网络需要经过 GitHub 镜像时，可在单次更新中附加镜像参数。普通前缀会放在完整 GitHub URL 前；带 `{url}` 的值按模板替换：
+
+```bash
+procora update --github-mirror https://mirror.example
+procora update --github-mirror 'https://mirror.example/fetch?url={url}'
+```
+
 可通过环境变量自定义安装：
 
 | 变量 | 用途 | 默认值 |
@@ -76,6 +83,8 @@ procora update
 | `PROCORA_VERSION` | 固定 Release 标签，如 `v0.5.1` | `latest` |
 | `PROCORA_INSTALL_DIR` | 修改安装目录 | 见上表 |
 | `PROCORA_REPO` | 指向 fork 的 `owner/repo` | `laull9/procora` |
+| `PROCORA_GITHUB_MIRROR` | GitHub 镜像前缀或 `{url}` 模板 | 不使用镜像 |
+| `PROCORA_DOWNLOAD_COMMAND` | 下载程序；依次接收 URL、输出路径 | 使用内置下载器 |
 
 例如安装指定版本：
 
@@ -84,6 +93,17 @@ curl --fail --location --proto '=https' --tlsv1.2 \
   https://raw.githubusercontent.com/laull9/procora/main/scripts/install.sh |
   PROCORA_VERSION=v0.5.1 sh
 ```
+
+镜像也可覆盖安装脚本本身与后续 Release 下载：
+
+```bash
+PROCORA_GITHUB_MIRROR=https://mirror.example
+curl --fail --location \
+  "$PROCORA_GITHUB_MIRROR/https://raw.githubusercontent.com/laull9/procora/main/scripts/install.sh" |
+  PROCORA_GITHUB_MIRROR="$PROCORA_GITHUB_MIRROR" sh
+```
+
+`procora update` 同时接受 `--download-command PROGRAM`；安装脚本使用同义环境变量。自定义程序必须把第一个参数 URL 下载到第二个参数指定的路径。镜像和自定义下载不会关闭 SHA-256 校验。
 
 ### 卸载
 
@@ -143,7 +163,7 @@ procora deploy demo.pcpkg --ssh prod
 procora push demo.pcpkg --package-entry assets --ssh prod
 ```
 
-在服务总览按 `p` 可进入包工作台，统一完成包文件操作与已安装 release 的审计、恢复和清理。完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
+在服务总览按 `p` 可进入包工作台，统一完成包文件操作与已安装 release 的审计、恢复和清理。包文件可二次确认直接删除；同名普通 Service 不会阻塞损坏包安装的独立清理，也不会被误解除。完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
 
 TUI 会随终端尺寸自动切换主从、上下和单列布局；窄屏仍保留当前对象、主操作、`?` 帮助以及 `q/Esc` 返回路径。配置表单在窄屏一次显示一个区域，通过 `Tab` 切换，不会把多个列表挤成不可用的空框。详细尺寸行为见 [CLI 与 TUI](docs/cli.md#自适应终端布局)。
 

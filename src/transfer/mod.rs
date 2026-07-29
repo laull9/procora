@@ -27,7 +27,7 @@ mod target;
 /// 把本机 Procora 包安装到不可变 release 并执行验活回滚。
 pub(crate) use deploy_package::install as install_package;
 pub(crate) use deploy_package_management::{
-    recover_installed as recover_installed_package,
+    PackageRegistrationDisposition, recover_installed as recover_installed_package,
     rollback_installed as rollback_installed_package,
     uninstall_installed as uninstall_installed_package,
 };

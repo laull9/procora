@@ -17,6 +17,7 @@ const ACCENT: Color = Color::Magenta;
 
 /// 绘制稳定快捷键与最近反馈。
 pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
+    let auto_scroll = auto_scroll_label(app);
     let controls = if app.control_allowed() {
         key_hints::adaptive(
             &[
@@ -31,10 +32,13 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
                     "x 解包",
                     "d 部署",
                     "u 导出",
+                    "Del Del 删包",
                     "R 回滚",
                     "c 恢复",
                     "U U 解除",
-                    "D D 清理",
+                    "D D 永久删除",
+                    "←→ 横移",
+                    &format!("F3 自动:{auto_scroll}"),
                     "r 刷新",
                     "? 帮助",
                     "Esc 返回",
@@ -48,13 +52,23 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
                     "i安装",
                     "d部署",
                     "u导出",
+                    "Del删包",
                     "R回滚",
                     "c恢复",
                     "U解除",
+                    "D删除",
+                    "←→横移",
                     "?帮助",
                     "Esc返回",
                 ]),
-                key_hints::join(&["j/k 选", "b 构建", "o 打开", "? 帮助", "Esc 返回"]),
+                key_hints::join(&[
+                    "j/k 选",
+                    "b 构建",
+                    "o 打开",
+                    "Del 删包",
+                    "? 帮助",
+                    "Esc 返回",
+                ]),
                 key_hints::join(&["? 帮助", "Esc 返回"]),
             ],
             area.width,
@@ -68,11 +82,20 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
                     "o 打开",
                     "v 验证",
                     "x 解包",
+                    "←→ 横移",
+                    &format!("F3 自动:{auto_scroll}"),
                     "r 刷新",
                     "? 帮助",
                     "Esc 返回",
                 ]),
-                key_hints::join(&["j/k 选", "o 打开", "v 验证", "? 帮助", "Esc 返回"]),
+                key_hints::join(&[
+                    "j/k 选",
+                    "o 打开",
+                    "v 验证",
+                    "←→ 横移",
+                    "? 帮助",
+                    "Esc 返回",
+                ]),
                 key_hints::join(&["? 帮助", "Esc 返回"]),
             ],
             area.width,
@@ -81,7 +104,11 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
     let width = usize::from(area.width);
     let mut lines = vec![Line::from(text_view::clipped(&controls, 0, width))];
     if let Some(feedback) = app.feedback() {
-        lines.push(Line::from(text_view::clipped(feedback, 0, width)));
+        lines.push(Line::from(text_view::clipped(
+            feedback,
+            app.text_offset(true),
+            width,
+        )));
     }
     frame.render_widget(
         Paragraph::new(lines)
@@ -116,7 +143,7 @@ pub(super) fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &PackageWor
             || "尚无包 · b 构建 / o 打开".to_owned(),
             |entry| {
                 entry.info.as_ref().map_or_else(
-                    || "当前包清单损坏 · v 查看错误".to_owned(),
+                    || "当前包清单损坏 · Del 删除".to_owned(),
                     |info| format!("当前包 · {}", info.manifest.project),
                 )
             },
@@ -138,12 +165,12 @@ pub(super) fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &PackageWor
         ),
     };
     let primary = match app.tab() {
-        PackageWorkspaceTab::Packages if app.control_allowed() => "b构建 o打开 v验证 i安装",
+        PackageWorkspaceTab::Packages if app.control_allowed() => "b构建 o打开 i安装 Del删包",
         PackageWorkspaceTab::Packages => "o打开 v验证 x解包",
         PackageWorkspaceTab::Installed
             if app.control_allowed() && app.selected_installed().is_some() =>
         {
-            "R回滚 c恢复 U解除"
+            "R回滚 c恢复 U解除 D删除"
         }
         PackageWorkspaceTab::Installed if app.selected_installed().is_none() => {
             "Tab到包文件 · ?帮助"
@@ -158,7 +185,7 @@ pub(super) fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &PackageWor
             app.packages().len(),
             app.installed().len()
         )),
-        Line::from(text_view::clipped(&selected, 0, width)),
+        Line::from(text_view::clipped(&selected, app.text_offset(true), width)),
     ];
     if area.height >= 7 {
         lines.push(Line::from(text_view::clipped(primary, 0, width)));
@@ -181,6 +208,8 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect, app: &PackageWorksp
     let mut lines = vec![
         help_ui::key_line("Tab", "切换包文件与已安装状态", app.plain_mode()),
         help_ui::key_line("↑↓ / j k", "选择当前列表项", app.plain_mode()),
+        help_ui::key_line("← →", "移动被折叠的当前文本", app.plain_mode()),
+        help_ui::key_line("F3", "切换全部折叠文本自动横移", app.plain_mode()),
         help_ui::key_line(
             "o / v / x",
             "打开、完整验证、按当前平台解包",
@@ -194,18 +223,23 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect, app: &PackageWorksp
             help_ui::key_line("i / t", "安装为不可变 release / 临时运行", app.plain_mode()),
             help_ui::key_line("d / u", "裸机部署 / 推送命名导出项", app.plain_mode()),
             help_ui::key_line(
+                "Delete Delete / X X",
+                "二次确认永久删除当前包文件",
+                app.plain_mode(),
+            ),
+            help_ui::key_line(
                 "R / c",
                 "回滚历史 release / 恢复 pending 安装",
                 app.plain_mode(),
             ),
             help_ui::key_line(
                 "U U",
-                "二次确认解除 Center 注册并保留安装数据",
+                "二次确认解除包托管并保留数据；同名普通 Service 保留",
                 app.plain_mode(),
             ),
             help_ui::key_line(
                 "D D",
-                "二次确认解除 Service 并永久清理安装数据",
+                "二次确认永久删除安装数据；同名普通 Service 保留",
                 app.plain_mode(),
             ),
         ]);
@@ -217,6 +251,17 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect, app: &PackageWorksp
         lines,
         app.plain_mode(),
     );
+}
+
+/// 返回与主 TUI 一致的自动横移状态标签。
+fn auto_scroll_label(app: &PackageWorkspaceApp) -> &'static str {
+    if app.auto_scroll_enabled() && app.manual_scroll_frozen() {
+        "开·冻结"
+    } else if app.auto_scroll_enabled() {
+        "开"
+    } else {
+        "关"
+    }
 }
 
 /// 绘制多个命名导出项的局部选择。

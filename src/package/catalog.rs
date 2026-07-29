@@ -127,7 +127,7 @@ fn read_service(root: &Path) -> InstalledService {
         .and_then(|name| name.to_str())
         .unwrap_or("unknown")
         .to_owned();
-    match read_state(&root.join("state.json")) {
+    match read_state(&root.join("state.json"), &fallback_project) {
         Ok(state) => {
             let active = state.active_release.clone();
             let pending = state.pending_release.clone();
@@ -168,7 +168,7 @@ fn read_service(root: &Path) -> InstalledService {
 }
 
 /// 有界读取并校验部署状态的 Service 身份。
-fn read_state(path: &Path) -> anyhow::Result<CatalogState> {
+fn read_state(path: &Path, expected_project: &str) -> anyhow::Result<CatalogState> {
     let mut file =
         fs::File::open(path).with_context(|| format!("无法读取安装状态：{}", path.display()))?;
     let size = file.metadata()?.len();
@@ -181,6 +181,12 @@ fn read_state(path: &Path) -> anyhow::Result<CatalogState> {
         .read_to_end(&mut bytes)?;
     let state: CatalogState = serde_json::from_slice(&bytes).context("安装状态不是有效 JSON")?;
     let _: crate::core::ServiceName = state.project.parse()?;
+    if state.project != expected_project {
+        bail!(
+            "安装状态声明 Service `{}`，但托管目录名称是 `{expected_project}`",
+            state.project
+        );
+    }
     Ok(state)
 }
 

@@ -1,11 +1,11 @@
 //! Procora 包工作台的导航、保护与渲染测试。
 
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
 use crossterm::event::KeyCode;
 use procora::{
     package::{InstalledRelease, InstalledService},
-    tui::{PackageWorkspaceApp, PackageWorkspaceExit, PackageWorkspaceTab},
+    tui::{PackageWorkspaceApp, PackageWorkspaceEntry, PackageWorkspaceExit, PackageWorkspaceTab},
 };
 use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
 
@@ -38,6 +38,15 @@ fn installed_service() -> InstalledService {
         ],
         packages: Vec::new(),
         error: None,
+    }
+}
+
+/// 创建即使清单损坏也必须允许删除的本地包项。
+fn broken_package() -> PackageWorkspaceEntry {
+    PackageWorkspaceEntry {
+        path: PathBuf::from("/downloads/损坏的超长包文件名称.pcpkg"),
+        info: None,
+        error: Some("清单损坏：无法读取包内 procora-package.json".to_owned()),
     }
 }
 
@@ -129,6 +138,54 @@ fn uninstall_confirmation_preserves_installed_data_intent() {
 }
 
 #[test]
+// 损坏包仍可直接删除，且必须连续两次按下明确的删除键。
+fn broken_package_delete_requires_consecutive_confirmation() {
+    let path = broken_package().path;
+    let mut app = PackageWorkspaceApp::new(vec![broken_package()], Vec::new(), None);
+    app.set_control_allowed(true);
+
+    app.handle_key(KeyCode::Delete);
+    assert_eq!(app.package_delete_confirmation(), Some(path.as_path()));
+    assert!(app.feedback().unwrap().contains("永久删除包文件"));
+    assert_eq!(app.take_exit(), None);
+
+    app.handle_key(KeyCode::Char('j'));
+    assert_eq!(app.package_delete_confirmation(), None);
+    app.handle_key(KeyCode::Char('X'));
+    app.handle_key(KeyCode::Char('X'));
+    assert_eq!(
+        app.take_exit(),
+        Some(PackageWorkspaceExit::DeletePackage(path))
+    );
+}
+
+#[test]
+// 包工作台与主TUI共享左右移动和F3自动横移语义。
+fn workspace_supports_manual_and_automatic_horizontal_movement() {
+    let mut service = installed_service();
+    service.root =
+        PathBuf::from("/managed/包含很长中文目录名称/以及更多无法在详情面板一次显示的路径/demo");
+    service.error = Some("状态文件损坏，而且错误说明需要通过左右移动才能完整阅读".to_owned());
+    let mut app = PackageWorkspaceApp::new(Vec::new(), vec![service], None);
+    app.handle_key(KeyCode::Tab);
+
+    app.handle_key(KeyCode::Right);
+    app.handle_key(KeyCode::Right);
+    assert_eq!(app.horizontal_offset(), 2);
+    app.handle_key(KeyCode::Left);
+    assert_eq!(app.horizontal_offset(), 1);
+
+    app.handle_key(KeyCode::F(3));
+    assert!(app.auto_scroll_enabled());
+    assert!(app.advance_auto_scroll(Duration::from_secs(1)));
+
+    let error_state = render_text(&app, 100, 24);
+    assert!(error_state.contains("UU解除包托管"));
+    assert!(error_state.contains("DD永久删除安装数据"));
+    assert!(error_state.contains("同名普通Service始终保留"));
+}
+
+#[test]
 // 已安装页显示活动与历史版本，并在帮助中解释恢复动作。
 fn installed_details_and_recovery_help_are_visible() {
     let mut app = PackageWorkspaceApp::new(Vec::new(), vec![installed_service()], None);
@@ -143,7 +200,9 @@ fn installed_details_and_recovery_help_are_visible() {
     let help = render_text(&app, 100, 24);
     assert!(help.contains("回滚历史release"));
     assert!(help.contains("恢复pending安装"));
-    assert!(help.contains("永久清理安装数据"));
+    assert!(help.contains("永久删除安装数据"));
+    assert!(help.contains("永久删除当前包文件"));
+    assert!(help.contains("移动被折叠的当前文本"));
 }
 
 #[test]
@@ -165,6 +224,7 @@ fn compact_workspace_keeps_primary_actions_and_navigation() {
     assert!(installed.contains("demo"));
     assert!(installed.contains("R回滚"));
     assert!(installed.contains("c恢复"));
+    assert!(installed.contains("D删除"));
 }
 
 #[test]

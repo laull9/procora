@@ -1,6 +1,6 @@
 //! 已安装 `.pcpkg` release 的显式回滚、恢复与清理。
 
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use anyhow::{Context, bail};
 
@@ -141,8 +141,31 @@ pub(crate) fn recover_installed(
     Ok(interrupted)
 }
 
+/// 解除包安装时对同名 Center 注册项采取的安全动作。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum PackageRegistrationDisposition {
+    /// 已解除位于包托管目录中的注册项。
+    Removed,
+    /// Center 中原本没有同名注册项。
+    Absent,
+    /// 同名注册项位于包托管目录之外，保持不变。
+    UnrelatedPreserved(PathBuf),
+}
+
+/// 解除或清理包安装后的精确结果。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct UninstallInstalledOutcome {
+    /// 是否永久删除了包安装目录。
+    pub(crate) purged: bool,
+    /// 对 Center 同名注册项采取的动作。
+    pub(crate) registration: PackageRegistrationDisposition,
+}
+
 /// 从 Center 解除已安装 Service，并可选择清理其包与 release 数据。
-pub(crate) fn uninstall_installed(project: &str, purge: bool) -> anyhow::Result<bool> {
+pub(crate) fn uninstall_installed(
+    project: &str,
+    purge: bool,
+) -> anyhow::Result<UninstallInstalledOutcome> {
     let _: crate::core::ServiceName = project.parse()?;
     let managed_root = crate::platform::canonicalize(&crate::cli::api::managed_services_root()?)?;
     let service_root = managed_root.join(project);
@@ -150,22 +173,25 @@ pub(crate) fn uninstall_installed(project: &str, purge: bool) -> anyhow::Result<
         bail!("本机没有已安装包 Service `{project}`");
     }
     let service_root = crate::platform::canonicalize(&service_root)?;
-    let releases_root = crate::platform::canonicalize(service_root.join("releases"))?;
-    {
+    let registration = {
         let _lock = acquire_lock(&service_root)?;
         if let Some(existing) = managed_service(project)? {
-            if existing.root.parent() != Some(releases_root.as_path()) {
-                bail!(
-                    "同名 Service `{project}` 不属于包托管目录：{}；拒绝解除",
-                    existing.root.display()
-                );
+            if existing.root.starts_with(&service_root) {
+                crate::cli::api::remove_service(project)?;
+                PackageRegistrationDisposition::Removed
+            } else {
+                PackageRegistrationDisposition::UnrelatedPreserved(existing.root)
             }
-            crate::cli::api::remove_service(project)?;
+        } else {
+            PackageRegistrationDisposition::Absent
         }
-    }
+    };
     if purge {
         fs::remove_dir_all(&service_root)
             .with_context(|| format!("无法清理安装目录 `{}`", service_root.display()))?;
     }
-    Ok(purge)
+    Ok(UninstallInstalledOutcome {
+        purged: purge,
+        registration,
+    })
 }

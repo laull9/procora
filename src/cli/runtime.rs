@@ -62,7 +62,11 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
             batch,
             json,
         }) => push::list(ssh.as_deref(), remote_bin.as_deref(), batch, json),
-        Some(Command::Update { check }) => crate::update::run(check),
+        Some(Command::Update {
+            check,
+            github_mirror,
+            download_command,
+        }) => crate::update::run(check, github_mirror.as_deref(), download_command.as_deref()),
         Some(Command::Up) => up(),
         Some(Command::Down) => down(),
         Some(Command::Status) => status(),

@@ -182,11 +182,19 @@ procora update --check
 
 # 下载、校验并安装当前平台的最新正式 Release
 procora update
+
+# 通过 GitHub 镜像下载
+procora update --github-mirror https://mirror.example
+
+# 交给自定义程序下载，程序依次接收 URL 和输出路径
+procora update --download-command /path/to/procora-fetch
 ```
 
-`procora update` 查询 GitHub 最新正式 Release，按语义版本比较当前版本，选择与安装脚本相同的六平台发布产物，并在 128 MiB 上限内流式下载。只有同名 `.sha256` 校验通过、归档中恰好只有 `procora` 或 `procora.exe` 普通文件时才会安装。Linux/macOS 在当前可执行文件目录中暂存并原子替换；Windows 启动已验证的新版本助手，在旧进程退出后完成可恢复替换和暂存清理。安装目录不可写时会保留旧版本并提示修正权限。
+`procora update` 查询 GitHub 最新正式 Release，按语义版本比较当前版本，选择与安装脚本相同的六平台发布产物，并在 128 MiB 上限内流式下载。归档下载期间会在标准错误显示百分比、已下载量、总量和平均速度；Release 未提供大小时仍显示已下载量和速度。交互终端使用单行刷新，重定向或 CI 日志按秒节流，不污染标准输出中的版本结果。
 
-如果更新前全局 Center 正在运行，新版本会在可执行文件替换后自动对账并正常重启 Center；原先离线时不会因为更新而隐式启动。`PROCORA_REPO=owner/repo` 可与安装脚本一样改为 fork 的 Release 来源。
+只有同名 `.sha256` 校验通过、归档中恰好只有 `procora` 或 `procora.exe` 普通文件时才会安装。Linux/macOS 在当前可执行文件目录中暂存并原子替换；Windows 启动已验证的新版本助手，在旧进程退出后完成可恢复替换和暂存清理。安装目录不可写时会保留旧版本并提示修正权限。
+
+如果更新前全局 Center 正在运行，新版本会在可执行文件替换后自动对账并正常重启 Center；原先离线时不会因为更新而隐式启动。`PROCORA_REPO=owner/repo` 可与安装脚本一样改为 fork 的 Release 来源。`--github-mirror URL` 覆盖 `PROCORA_GITHUB_MIRROR`，支持在完整 GitHub URL 前增加 HTTPS 前缀，或用 `{url}` 模板决定插入位置；非 GitHub 地址不会被意外改写。`--download-command PROGRAM` 覆盖 `PROCORA_DOWNLOAD_COMMAND`，程序固定接收 `URL OUTPUT` 两个参数，不经过 shell 解释。该程序负责写入目标文件，Procora 继续限制文件大小、显示进度并执行 SHA-256 校验。
 
 ## 1. 固定层级
 
@@ -218,6 +226,7 @@ TUI 会在终端 Resize 后立即重新计算布局，不要求退出重进：
 
 - 宽屏使用列表/详情主从布局；中等宽度改为上下排列。
 - 宽度低于 48 列或高度低于 16 行时，总览、Task 页和包工作台进入单列紧凑视图，只显示当前选中对象、状态、主操作、`?` 帮助和退出路径。`j/k`、方向键、`Tab`、`Enter` 等交互继续有效，不会因为列表被折叠而失去导航能力。
+- 包工作台与总览、Task 页共用 `←/→` 手动横移、触控板横向滚动和 `F3` 自动横移；长路径、摘要、错误与底栏反馈不再只能看到截断开头。包文件使用连续两次 `Delete` 或大写 `X` 删除，安装项使用 `U U` 解除、`D D` 永久删除，三种动作在底栏和帮助层分别显示。
 - 配置表单低于 72 列或 18 行时一次只显示当前项目、Task、依赖或 Profile 区域；用 `Tab`/`Shift-Tab` 切换区域，当前区域详情和 `Enter`、`n/d`、`Ctrl-S` 操作固定显示在其下方。高级文本模式优先保留正文、光标、保存和退出。
 - 帮助、运行方式选择、路径浏览、字段编辑和键值表弹层会在窄屏使用完整可用宽度，压缩为单行键位说明并截断次要描述；`Esc` 取消、`Enter` 确认和 `Ctrl-S` 保存始终优先显示。
 - 极小终端不再尝试绘制破碎边框，而是显示“终端过小”及 `Ctrl-S`、`Esc` 或 `q` 恢复入口。放大窗口后完整页面会自动恢复。
