@@ -468,6 +468,29 @@ fn push_package_entry_arguments_are_stable() {
 }
 
 #[test]
+// 已安装包的查询、回滚、恢复与清理命令保持可解析。
+fn installed_package_management_commands_are_stable() {
+    for arguments in [
+        vec!["procora", "package", "list", "--json"],
+        vec!["procora", "package", "status", "demo", "--json"],
+        vec![
+            "procora",
+            "package",
+            "rollback",
+            "demo",
+            "old-release",
+            "--timeout",
+            "20s",
+        ],
+        vec!["procora", "package", "recover", "demo"],
+        vec!["procora", "package", "uninstall", "demo", "--purge"],
+    ] {
+        let parsed = Cli::try_parse_from(arguments).unwrap();
+        assert!(matches!(parsed.command, Some(Command::Package(_))));
+    }
+}
+
+#[test]
 // push允许省略声明目标，由远端在同一SSH会话中发现目标。
 fn push_target_is_optional_for_remote_discovery() {
     let parsed = Cli::try_parse_from([

@@ -137,11 +137,13 @@ procora remote restart demo
 procora package build . --output demo.pcpkg
 procora package verify demo.pcpkg
 procora add demo.pcpkg
+procora package list
+procora package rollback demo
 procora deploy demo.pcpkg --ssh prod
 procora push demo.pcpkg --package-entry assets --ssh prod
 ```
 
-完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
+在服务总览按 `p` 可进入包工作台，统一完成包文件操作与已安装 release 的审计、恢复和清理。完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
 
 ## 常用命令
 
@@ -156,7 +158,7 @@ procora push demo.pcpkg --package-entry assets --ssh prod
 | `procora start/stop/restart <name>` | 控制服务生命周期 |
 | `procora logs <name> <task>` | 查看、搜索或清理 Task 日志 |
 | `procora deploy [path] --ssh <host>` | 无需远端 target，全托管部署完整 Service |
-| `procora package <操作>` | 构建、检查、验证、解包、安装或临时运行 `.pcpkg` |
+| `procora package <操作>` | 构建、验证、安装、运行、审计、回滚或清理 `.pcpkg` |
 | `procora remote <操作>` | 查看或管理当前项目记住的裸机远端 |
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |

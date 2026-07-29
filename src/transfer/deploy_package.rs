@@ -171,7 +171,11 @@ pub(crate) fn install(
 }
 
 /// 校验本机安装的有界验活和保留参数。
-fn validate_policy(timeout_ms: u64, stable_for_ms: u64, keep: u32) -> anyhow::Result<()> {
+pub(super) fn validate_policy(
+    timeout_ms: u64,
+    stable_for_ms: u64,
+    keep: u32,
+) -> anyhow::Result<()> {
     if timeout_ms == 0 || timeout_ms > 10 * 60 * 1_000 {
         bail!("包安装验收超时必须在 1 毫秒到 10 分钟之间");
     }
@@ -267,7 +271,7 @@ fn store_package(service_root: &Path, source: &Path, digest: &str) -> anyhow::Re
 
 /// 恢复上次在 pending 阶段中断的本机包安装。
 #[allow(clippy::too_many_arguments)]
-fn recover_interrupted(
+pub(super) fn recover_interrupted(
     project: &str,
     releases_root: &Path,
     state: &mut ManagedState,
@@ -323,7 +327,7 @@ fn recover_interrupted(
 
 /// 完成失败安装的回滚与持久记录。
 #[allow(clippy::too_many_arguments)]
-fn finish_failed(
+pub(super) fn finish_failed(
     project: &str,
     state_path: &Path,
     state: &mut ManagedState,
@@ -363,7 +367,7 @@ fn finish_failed(
 }
 
 /// 切换或首次注册包物化出的 Service。
-fn switch_release(project: &str, config_path: &Path) -> anyhow::Result<()> {
+pub(super) fn switch_release(project: &str, config_path: &Path) -> anyhow::Result<()> {
     if let Some(existing) = managed_service(project)? {
         crate::cli::api::relocate_managed_service(project, &existing.root, config_path)?;
     } else {
@@ -396,7 +400,7 @@ fn rollback(
 }
 
 /// 确认同名注册项属于统一的托管 release 根目录。
-fn ensure_registration_is_managed(
+pub(super) fn ensure_registration_is_managed(
     project: &str,
     releases_root: &Path,
     state: &ManagedState,
@@ -421,7 +425,9 @@ fn ensure_registration_is_managed(
 }
 
 /// 返回 Center 中的同名 Service。
-fn managed_service(project: &str) -> anyhow::Result<Option<crate::protocol::ServiceViewDto>> {
+pub(super) fn managed_service(
+    project: &str,
+) -> anyhow::Result<Option<crate::protocol::ServiceViewDto>> {
     Ok(crate::cli::api::managed_deploy_services()?
         .into_iter()
         .find(|service| service.name == project))
@@ -436,7 +442,11 @@ fn active_config(state: &ManagedState, releases_root: &Path) -> Option<PathBuf> 
 }
 
 /// 返回一个 release 中确实存在的配置文件。
-fn previous_config(state: &ManagedState, releases_root: &Path, release: &str) -> Option<PathBuf> {
+pub(super) fn previous_config(
+    state: &ManagedState,
+    releases_root: &Path,
+    release: &str,
+) -> Option<PathBuf> {
     let path = release_path(releases_root, release).join(state.config_path(release)?);
     path.is_file().then_some(path)
 }
@@ -457,6 +467,6 @@ fn portable_path(path: &Path) -> anyhow::Result<String> {
 }
 
 /// 向 CLI 报告本机包安装阶段。
-fn report(reporter: &mut dyn FnMut(&DeployEvent), phase: &str, message: &str) {
+pub(super) fn report(reporter: &mut dyn FnMut(&DeployEvent), phase: &str, message: &str) {
     reporter(&DeployEvent::new(phase, message));
 }

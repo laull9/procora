@@ -252,6 +252,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "↑↓/jk 选择",
             "Enter 详情",
+            "p 包工作台",
             "n 新建",
             "/ 筛选",
             "o 排序",
@@ -267,6 +268,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "↑↓/jk 选择",
             "Enter 详情",
+            "p 包工作台",
             "/ 筛选",
             "o 排序",
             "O 方向",
@@ -280,6 +282,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "j/k 选",
             "Enter 详情",
+            "p 包",
             "n 新建",
             "/ 筛选",
             "o 排序",
@@ -291,6 +294,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
         key_hints::join(&[
             "j/k 选",
             "Enter 详情",
+            "p 包",
             "/ 筛选",
             "o 排序",
             "? 帮助",
@@ -318,7 +322,7 @@ fn overview_controls(app: &OverviewApp, width: u16) -> String {
             detailed,
             medium,
             standard,
-            key_hints::join(&["j/k 选", "Enter", "? 帮助", "q 退出"]),
+            key_hints::join(&["j/k 选", "Enter", "p 包", "? 帮助", "q 退出"]),
             key_hints::join(&["? 帮助", "q 退出"]),
         ],
         width,
@@ -349,9 +353,9 @@ fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
         }));
     }
     lines.push(Line::from(if app.control_allowed() {
-        "n新建 · ?帮助 · q/Esc退出"
+        "n新建 · p包 · q/Esc退出"
     } else {
-        "Enter详情 · ?帮助 · q/Esc退出"
+        "Enter详情 · p包 · q/Esc退出"
     }));
     frame.render_widget(
         Paragraph::new(lines)
@@ -366,6 +370,7 @@ fn render_help(frame: &mut Frame<'_>, area: Rect, app: &OverviewApp) {
     let mut lines = vec![
         help_ui::key_line("↑↓ / j k", "切换服务", app.plain_mode()),
         help_ui::key_line("Enter", "打开当前服务详情", app.plain_mode()),
+        help_ui::key_line("p", "打开 Procora 包工作台", app.plain_mode()),
         help_ui::key_line("/", "按名称、路径或状态筛选", app.plain_mode()),
         help_ui::key_line("o / O", "切换排序字段 / 方向", app.plain_mode()),
         help_ui::key_line("← / →", "水平移动折叠文本", app.plain_mode()),

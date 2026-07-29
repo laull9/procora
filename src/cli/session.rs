@@ -13,6 +13,7 @@ use crate::protocol::{
 use crate::tui::{LiveSession, LogUpdate, OverviewAction, OverviewExit, OverviewSession};
 
 mod new_service;
+mod package_workspace;
 
 /// 运行全局中心的服务总览，并允许往返进入单服务详情。
 pub(super) fn run_center_overview(
@@ -56,6 +57,23 @@ pub(super) fn run_center_overview(
                     true,
                     false,
                 )?;
+                overview_session.last_services =
+                    request_services(client).map_err(anyhow::Error::from)?;
+                app.replace_services(overview_session.last_services.clone());
+            }
+            OverviewExit::OpenPackages(service_name) => {
+                let context_source = service_name.as_deref().and_then(|name| {
+                    overview_session
+                        .last_services
+                        .iter()
+                        .find(|service| service.name == name)
+                        .map(|service| service.root.clone())
+                });
+                if let Err(error) =
+                    package_workspace::run(context_source.as_deref(), control_allowed)
+                {
+                    app.set_feedback(format!("包工作台失败：{error:#}"));
+                }
                 overview_session.last_services =
                     request_services(client).map_err(anyhow::Error::from)?;
                 app.replace_services(overview_session.last_services.clone());

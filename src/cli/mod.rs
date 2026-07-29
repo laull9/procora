@@ -11,6 +11,7 @@ pub use deploy::DeployArgs;
 mod elevation;
 mod logs;
 mod package_command;
+mod package_installed_command;
 pub use package_command::PackageArgs;
 mod project;
 mod push;

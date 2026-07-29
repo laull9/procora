@@ -36,6 +36,9 @@ pub enum PackageCommand {
         /// `all`、`current` 或具体的 `os-arch[-environment]`。
         #[arg(long, default_value = "all")]
         platform: String,
+        /// 安全备份并替换已有普通包文件；失败时恢复原文件。
+        #[arg(long)]
+        force: bool,
     },
     /// 读取清单摘要，不展开或完整读取全部 Blob。
     Inspect {
@@ -90,6 +93,72 @@ pub enum PackageCommand {
         /// 要临时运行的 `.pcpkg` 文件。
         package: PathBuf,
     },
+    /// 列出本机已安装包、活动 release 和恢复状态。
+    List {
+        /// 输出稳定 JSON，适合脚本和诊断。
+        #[arg(long)]
+        json: bool,
+    },
+    /// 查看一个已安装 Service 的包和 release 详情。
+    Status {
+        /// 配置中的稳定 Service 名称。
+        service: String,
+        /// 输出稳定 JSON，适合脚本和诊断。
+        #[arg(long)]
+        json: bool,
+    },
+    /// 把已安装 Service 切换到历史 release，并在验活失败时恢复原版本。
+    Rollback {
+        /// 配置中的稳定 Service 名称。
+        service: String,
+        /// 指定 release ID；省略时选择最近一个非活动 release。
+        release: Option<String>,
+        /// 等待全部 Task 可用的最长时间。
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "30s",
+            value_parser = crate::config::parse_duration
+        )]
+        timeout: u64,
+        /// 持续可用达到该窗口后才确认回滚。
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "2s",
+            value_parser = crate::config::parse_duration
+        )]
+        stable_for: u64,
+    },
+    /// 恢复一次停留在 pending 阶段的中断安装。
+    Recover {
+        /// 配置中的稳定 Service 名称。
+        service: String,
+        /// 恢复与验活的最长时间。
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "30s",
+            value_parser = crate::config::parse_duration
+        )]
+        timeout: u64,
+        /// 恢复后持续可用达到该窗口才算成功。
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "2s",
+            value_parser = crate::config::parse_duration
+        )]
+        stable_for: u64,
+    },
+    /// 从 Center 解除包安装；默认保留 release 和原始包供恢复。
+    Uninstall {
+        /// 配置中的稳定 Service 名称。
+        service: String,
+        /// 同时永久删除该 Service 的 release、状态和原始包。
+        #[arg(long)]
+        purge: bool,
+    },
 }
 
 /// 执行一个独立包操作。
@@ -99,7 +168,8 @@ pub fn run(arguments: PackageArgs) -> anyhow::Result<()> {
             source,
             output,
             platform,
-        } => build(&source, output.as_deref(), &platform),
+            force,
+        } => build(&source, output.as_deref(), &platform, force),
         PackageCommand::Inspect {
             package: path,
             json,
@@ -117,6 +187,29 @@ pub fn run(arguments: PackageArgs) -> anyhow::Result<()> {
             keep,
         } => install_path(&package, timeout, stable_for, keep),
         PackageCommand::Run { package } => super::runtime::run_package_temporary(&package),
+        PackageCommand::List { json } => super::package_installed_command::list(json),
+        PackageCommand::Status { service, json } => {
+            super::package_installed_command::status(&service, json)
+        }
+        PackageCommand::Rollback {
+            service,
+            release,
+            timeout,
+            stable_for,
+        } => super::package_installed_command::rollback(
+            &service,
+            release.as_deref(),
+            timeout,
+            stable_for,
+        ),
+        PackageCommand::Recover {
+            service,
+            timeout,
+            stable_for,
+        } => super::package_installed_command::recover(&service, timeout, stable_for),
+        PackageCommand::Uninstall { service, purge } => {
+            super::package_installed_command::uninstall(&service, purge)
+        }
     }
 }
 
@@ -148,7 +241,7 @@ pub(super) fn install_path(
 }
 
 /// 构建包并输出可供脚本复用的稳定摘要。
-fn build(source: &Path, output: Option<&Path>, platform: &str) -> anyhow::Result<()> {
+fn build(source: &Path, output: Option<&Path>, platform: &str, force: bool) -> anyhow::Result<()> {
     let source = api::absolute_user_path(source)?;
     let discovered = crate::config::discover_path(&source)
         .with_context(|| format!("无法发现待打包 Service：{}", source.display()))?;
@@ -161,7 +254,11 @@ fn build(source: &Path, output: Option<&Path>, platform: &str) -> anyhow::Result
         api::absolute_user_path,
     )?;
     let platform = parse_build_platform(platform)?;
-    let result = package::build(&source, &output, platform)?;
+    let result = if force {
+        package::build_replacing(&source, &output, platform)?
+    } else {
+        package::build(&source, &output, platform)?
+    };
     println!("已构建 {}", result.path.display());
     println!("Service: {}", result.project);
     println!("Package: {}", result.package_digest);

@@ -82,6 +82,7 @@ fn temporary_directory(label: &str) -> PathBuf {
 
 #[test]
 // 同一输入两次构建得到逐字节一致的胖包，并可检查、验证和按当前平台物化。
+#[allow(clippy::too_many_lines)]
 fn package_round_trip_is_deterministic_and_platform_aware() {
     let directory = temporary_directory("round-trip");
     let service = directory.join("service");
@@ -108,6 +109,55 @@ fn package_round_trip_is_deterministic_and_platform_aware() {
         );
     }
     assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
+    let replaced = run(
+        &[
+            "package",
+            "build",
+            service.to_str().unwrap(),
+            "--output",
+            first.to_str().unwrap(),
+            "--force",
+        ],
+        &directory,
+    );
+    assert!(
+        replaced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replaced.stderr)
+    );
+    assert_eq!(fs::read(&first).unwrap(), fs::read(&second).unwrap());
+    let original = fs::read(&first).unwrap();
+    fs::remove_file(service.join("dist/api-current")).unwrap();
+    let failed_replace = run(
+        &[
+            "package",
+            "build",
+            service.to_str().unwrap(),
+            "--output",
+            first.to_str().unwrap(),
+            "--force",
+        ],
+        &directory,
+    );
+    assert!(!failed_replace.status.success());
+    assert_eq!(fs::read(&first).unwrap(), original);
+    fs::write(service.join("dist/api-current"), b"current-binary\n").unwrap();
+    let internal = service.join("package-demo.pcpkg");
+    fs::copy(&second, &internal).unwrap();
+    let internal_replace = run(
+        &[
+            "package",
+            "build",
+            service.to_str().unwrap(),
+            "--output",
+            internal.to_str().unwrap(),
+            "--force",
+        ],
+        &directory,
+    );
+    assert!(internal_replace.status.success());
+    assert_eq!(fs::read(&internal).unwrap(), fs::read(&second).unwrap());
+    fs::remove_file(internal).unwrap();
 
     let inspected = run(
         &["package", "inspect", first.to_str().unwrap(), "--json"],
@@ -263,6 +313,7 @@ fn package_verify_rejects_corrupted_content() {
 
 #[test]
 // 包安装复用全托管不可变release，并允许add命令直觉化接收同一个包。
+#[allow(clippy::too_many_lines)]
 fn package_install_uses_managed_release_and_add_is_idempotent() {
     let directory = temporary_directory("install");
     let service = directory.join("service");
@@ -346,6 +397,108 @@ fn package_install_uses_managed_release_and_add_is_idempotent() {
         "{}",
         String::from_utf8_lossy(&repeated.stdout)
     );
+
+    fs::write(service.join("data.txt"), "second\n").unwrap();
+    let second_package = directory.join("install-demo-second.pcpkg");
+    assert!(
+        run(
+            &[
+                "package",
+                "build",
+                service.to_str().unwrap(),
+                "--output",
+                second_package.to_str().unwrap(),
+            ],
+            &directory,
+        )
+        .status
+        .success()
+    );
+    let second_install = run_background_cli(
+        Command::new(env!("CARGO_BIN_EXE_procora"))
+            .args([
+                "package",
+                "install",
+                second_package.to_str().unwrap(),
+                "--timeout",
+                "5s",
+                "--stable-for",
+                "0ms",
+            ])
+            .env("PROCORA_HOME", &home),
+        &directory,
+        "package-second-install",
+    );
+    assert!(second_install.status.success());
+    let second_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("services/install-demo/state.json")).unwrap())
+            .unwrap();
+    assert_ne!(second_state["active_release"].as_str().unwrap(), active);
+
+    let listed = run_background_cli(
+        Command::new(env!("CARGO_BIN_EXE_procora"))
+            .args(["package", "status", "install-demo", "--json"])
+            .env("PROCORA_HOME", &home),
+        &directory,
+        "package-status",
+    );
+    assert!(listed.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(status["project"], "install-demo");
+    assert_eq!(status["releases"].as_array().unwrap().len(), 2);
+
+    let rolled_back = run_background_cli(
+        Command::new(env!("CARGO_BIN_EXE_procora"))
+            .args([
+                "package",
+                "rollback",
+                "install-demo",
+                active,
+                "--timeout",
+                "5s",
+                "--stable-for",
+                "0ms",
+            ])
+            .env("PROCORA_HOME", &home),
+        &directory,
+        "package-rollback",
+    );
+    assert!(
+        rolled_back.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rolled_back.stderr)
+    );
+    let rolled_back_state: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.join("services/install-demo/state.json")).unwrap())
+            .unwrap();
+    assert_eq!(rolled_back_state["active_release"], active);
+
+    let purged = run_background_cli(
+        Command::new(env!("CARGO_BIN_EXE_procora"))
+            .args(["package", "uninstall", "install-demo", "--purge"])
+            .env("PROCORA_HOME", &home),
+        &directory,
+        "package-uninstall",
+    );
+    assert!(
+        purged.status.success(),
+        "{}",
+        String::from_utf8_lossy(&purged.stderr)
+    );
+    assert!(!home.join("services/install-demo").exists());
+
+    let broken = home.join("services/broken-install");
+    fs::create_dir_all(broken.join("releases")).unwrap();
+    fs::write(broken.join("state.json"), b"{broken json").unwrap();
+    let purged_broken = run_background_cli(
+        Command::new(env!("CARGO_BIN_EXE_procora"))
+            .args(["package", "uninstall", "broken-install", "--purge"])
+            .env("PROCORA_HOME", &home),
+        &directory,
+        "package-purge-broken",
+    );
+    assert!(purged_broken.status.success());
+    assert!(!broken.exists());
 
     let down = run_background_cli(
         Command::new(env!("CARGO_BIN_EXE_procora"))
@@ -601,5 +754,69 @@ fn package_build_rejects_symlinks() {
         String::from_utf8_lossy(&built.stderr)
     );
     assert!(!package.exists());
+    remove_directory_when_released(&directory);
+}
+
+#[test]
+// 安装目录扫描隔离单个损坏状态，并稳定标记active与pending release。
+fn installed_catalog_preserves_valid_services_and_local_errors() {
+    let directory = temporary_directory("catalog");
+    let managed = directory.join("services");
+    let valid = managed.join("demo");
+    let broken = managed.join("broken");
+    fs::create_dir_all(valid.join("packages")).unwrap();
+    fs::create_dir_all(&broken).unwrap();
+    fs::write(
+        valid.join("state.json"),
+        r#"{
+  "project": "demo",
+  "active_release": "active-id",
+  "pending_release": "pending-id",
+  "releases": [
+    {
+      "id": "active-id",
+      "sha256": "aaaaaaaa",
+      "config_path": "procora.yaml",
+      "target_platform": null,
+      "binaries": [],
+      "deployed_at_ms": 1
+    },
+    {
+      "id": "pending-id",
+      "sha256": "bbbbbbbb",
+      "config_path": "procora.yaml",
+      "target_platform": null,
+      "binaries": [],
+      "deployed_at_ms": 2
+    }
+  ],
+  "deployments": []
+}
+"#,
+    )
+    .unwrap();
+    fs::write(broken.join("state.json"), b"{not json").unwrap();
+
+    let catalog = procora::package::installed_catalog(&managed).unwrap();
+
+    assert_eq!(catalog.services.len(), 2);
+    let demo = catalog
+        .services
+        .iter()
+        .find(|service| service.project == "demo")
+        .unwrap();
+    assert_eq!(demo.active_release.as_deref(), Some("active-id"));
+    assert_eq!(demo.pending_release.as_deref(), Some("pending-id"));
+    assert!(demo.releases.iter().any(|release| release.active));
+    assert!(demo.releases.iter().any(|release| release.pending));
+    assert!(
+        catalog
+            .services
+            .iter()
+            .find(|service| service.project == "broken")
+            .unwrap()
+            .error
+            .is_some()
+    );
     remove_directory_when_released(&directory);
 }

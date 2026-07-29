@@ -1,11 +1,15 @@
 //! 可独立构建、验证并按平台物化的 Procora Service 包。
 
 mod build;
+mod catalog;
 mod extract;
 mod manifest;
 mod read;
 
-pub use build::{PackageBuildResult, PackagePlatform, build};
+pub use build::{PackageBuildResult, PackagePlatform, build, build_replacing};
+pub use catalog::{
+    InstalledCatalog, InstalledRelease, InstalledService, StoredPackage, installed_catalog,
+};
 pub use extract::{PackageExtractResult, extract};
 pub use manifest::{
     PACKAGE_FORMAT_V1, PackageBinary, PackageBinaryVariant, PackageConfig, PackageExport,

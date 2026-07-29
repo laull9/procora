@@ -38,6 +38,8 @@ mod new_service_wizard;
 mod overview_app;
 mod overview_collection;
 mod overview_ui;
+mod package_workspace_app;
+mod package_workspace_ui;
 mod path_picker;
 mod selection;
 mod text_view;
@@ -68,7 +70,10 @@ pub use config_runner::edit_config;
 pub use log_source::LogSourceFilter;
 pub use overview_app::{OverviewAction, OverviewApp, OverviewExit};
 pub use overview_collection::OverviewSort;
-pub(crate) use path_picker::select_path_inline;
+pub use package_workspace_app::{
+    PackageWorkspaceApp, PackageWorkspaceEntry, PackageWorkspaceExit, PackageWorkspaceTab,
+};
+pub(crate) use path_picker::{select_path_inline, select_path_inline_named};
 pub use selection::{SelectionEvent, SelectionItem, SelectionState, select_inline};
 
 pub(crate) use new_service_wizard::{NewServiceChoice, run as run_new_service_wizard};
@@ -247,6 +252,40 @@ pub fn run_overview_live(
             let elapsed = now.saturating_duration_since(last_auto_scroll);
             last_auto_scroll = now;
             dirty |= app.advance_auto_scroll(elapsed);
+        }
+    })
+}
+
+/// 运行包文件与已安装 release 的工作台，直到产生一个导航或操作意图。
+///
+/// # Errors
+///
+/// 当终端初始化、绘制、读取输入或恢复失败时返回 I/O 错误。
+pub fn run_package_workspace(
+    app: &mut PackageWorkspaceApp,
+    control_allowed: bool,
+) -> io::Result<PackageWorkspaceExit> {
+    app.set_control_allowed(control_allowed);
+    ratatui::run(|terminal| {
+        let _mouse_capture = MouseCaptureGuard::enable()?;
+        let mut dirty = true;
+        loop {
+            if dirty {
+                terminal.draw(|frame| app.render(frame))?;
+                dirty = false;
+            }
+            if event::poll(INPUT_MAX_WAIT)? {
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        dirty |= app.handle_key_event(key);
+                    }
+                    Event::Resize(_, _) => dirty = true,
+                    _ => {}
+                }
+            }
+            if let Some(exit) = app.take_exit() {
+                break Ok(exit);
+            }
         }
     })
 }

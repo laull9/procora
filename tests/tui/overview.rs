@@ -127,6 +127,18 @@ fn create_key_requires_control_capability() {
 }
 
 #[test]
+// 包工作台入口在只读会话中也可使用，并携带当前服务上下文。
+fn package_workspace_is_available_from_read_only_overview() {
+    let mut app = OverviewApp::new(vec![service("api", ServiceStatusDto::Running)]);
+
+    assert!(app.handle_key(KeyCode::Char('p')));
+    assert_eq!(
+        app.take_exit(),
+        Some(OverviewExit::OpenPackages(Some("api".to_owned())))
+    );
+}
+
+#[test]
 // 总览帮助层会阻止服务动作，并由问号或退出键优先关闭。
 fn overview_help_blocks_actions_until_closed() {
     let mut app = OverviewApp::new(vec![service("api", ServiceStatusDto::Running)]);

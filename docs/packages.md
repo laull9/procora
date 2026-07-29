@@ -15,13 +15,26 @@ flowchart LR
     C --> H[push --package-entry<br/>选择命名导出项]
     G --> I[远端 release<br/>验活 / 回滚]
     F --> J[本机 Center<br/>验活 / 回滚]
+    J --> K[package list / status<br/>审计 release 与原始包]
+    K --> L[rollback / recover<br/>恢复稳定版本]
+    K --> M[uninstall<br/>保留或清理安装数据]
 ```
+
+直接运行 `procora` 时，在服务总览按 `p` 可进入“包工作台”。工作台保留两个稳定视图：
+
+- “包文件”集中完成构建、打开、验证、解包、安装、临时运行、裸机部署和命名导出推送；从某个 Service 进入时自动绑定其目录作为构建上下文。
+- “已安装”集中查看 active/pending release 与原始包；`R` 回滚最近历史版本，`c` 收敛中断安装，连续两次大写 `D` 才会解除 Service 并永久清理数据。
+
+操作离开全屏页面后显示既有的阶段进度与交互向导，完成或失败都会返回原位置并给出结果。构建和解包遇到同名目标时自动选择带编号的新路径，不会隐式覆盖。
 
 常用命令：
 
 ```bash
 # 默认构建包含全部 binaries 变体的胖包
 procora package build . --output demo.pcpkg
+
+# 只有显式 --force 才会先备份并替换已有普通文件；失败会恢复原包
+procora package build . --output demo.pcpkg --force
 
 # 只构建当前平台的薄包
 procora package build . --platform current
@@ -38,6 +51,17 @@ procora package install demo.pcpkg
 procora add demo.pcpkg
 procora package run demo.pcpkg
 procora temp-run demo.pcpkg
+
+# 审计、回滚和恢复本机安装
+procora package list
+procora package status demo
+procora package rollback demo
+procora package rollback demo <release-id>
+procora package recover demo
+
+# 默认只解除 Center 注册并保留数据；--purge 才永久清理
+procora package uninstall demo
+procora package uninstall demo --purge
 
 # 胖包会在探测 SSH 远端后只发送匹配平台内容
 procora deploy demo.pcpkg --ssh prod --dry-run
@@ -101,6 +125,8 @@ services/<project>/
 ```
 
 安装先完整验证包，再按当前平台物化到 staging，重新加载包内 Procora 配置并复核 Service 身份和二进制摘要。切换前写入 pending 状态；全部 Task 通过启动、健康检查和稳定窗口后才确认活动 release。失败会恢复并重新验收上一版本，首次安装失败则移除失败注册。相同活动 release 已可用时幂等跳过。
+
+`package rollback` 默认选择最近一个非活动 release，也可显式给出 release ID；目标版本仍需通过完整验活，失败时自动切回原活动版本。`package recover` 是幂等的中断恢复入口。`package uninstall` 默认只从 Center 解除注册并保留审计数据，只有明确指定 `--purge` 才删除 `services/<project>` 下的 release、状态和原始包。
 
 `deploy some.pcpkg` 不会先按开发机平台解包。它先通过 SSH 探测远端 OS、架构和 ABI，再从胖包选择唯一变体，生成现有托管部署归档；远端仍会独立复核平台、配置、路径、大小和 SHA-256，并继续使用原有验活与回滚状态机。薄包不包含远端所需变体时会在上传前失败。
 

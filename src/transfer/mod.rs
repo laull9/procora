@@ -3,6 +3,7 @@
 mod archive;
 mod deploy_health;
 mod deploy_package;
+mod deploy_package_management;
 mod deploy_platform;
 mod deploy_prepare;
 mod deploy_protocol;
@@ -25,6 +26,11 @@ mod target;
 
 /// 把本机 Procora 包安装到不可变 release 并执行验活回滚。
 pub(crate) use deploy_package::install as install_package;
+pub(crate) use deploy_package_management::{
+    recover_installed as recover_installed_package,
+    rollback_installed as rollback_installed_package,
+    uninstall_installed as uninstall_installed_package,
+};
 /// 运行只供 SSH 子进程调用的全托管部署接收器。
 pub(crate) use deploy_receive::run as receive_deploy;
 /// 从本机向远端全托管部署完整 Service。

@@ -37,11 +37,13 @@ struct PathPicker {
     entries: Vec<PathEntry>,
     selected: usize,
     error: Option<String>,
+    title: String,
+    instruction: String,
 }
 
 impl PathPicker {
     /// 从上次路径或当前目录创建浏览器。
-    fn new(initial: Option<&Path>) -> io::Result<Self> {
+    fn new(initial: Option<&Path>, title: &str, instruction: &str) -> io::Result<Self> {
         let current = initial
             .and_then(|path| {
                 if path.is_dir() {
@@ -58,6 +60,8 @@ impl PathPicker {
             entries: Vec::new(),
             selected: 0,
             error: None,
+            title: title.to_owned(),
+            instruction: instruction.to_owned(),
         };
         picker.refresh();
         Ok(picker)
@@ -193,10 +197,7 @@ impl PathPicker {
             ratatui::layout::Constraint::Min(1),
         ])
         .split(area);
-        let message = self
-            .error
-            .as_deref()
-            .unwrap_or("Enter 打开文件夹或选择文件；Space 选择当前文件夹；Backspace 返回上级。");
+        let message = self.error.as_deref().unwrap_or(&self.instruction);
         frame.render_widget(Paragraph::new(message), rows[0]);
         let items = self
             .entries
@@ -213,7 +214,7 @@ impl PathPicker {
             )
             .block(
                 Block::default()
-                    .title(format!("选择上传文件或文件夹 · {}", self.current.display()))
+                    .title(format!("{} · {}", self.title, self.current.display()))
                     .title_bottom("↑↓ 选择 · Enter 确认/进入 · Esc 取消")
                     .borders(Borders::ALL),
             );
@@ -230,13 +231,26 @@ enum PickerEvent {
 
 /// 以内联小 TUI 选择普通文件或目录。
 pub(crate) fn select_path_inline(initial: Option<&Path>) -> io::Result<Option<PathBuf>> {
+    select_path_inline_named(
+        initial,
+        "选择上传文件或文件夹",
+        "Enter 打开文件夹或选择文件；Space 选择当前文件夹；Backspace 返回上级。",
+    )
+}
+
+/// 以调用场景专属标题和说明运行路径浏览器。
+pub(crate) fn select_path_inline_named(
+    initial: Option<&Path>,
+    title: &str,
+    instruction: &str,
+) -> io::Result<Option<PathBuf>> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::new(
             io::ErrorKind::NotConnected,
             "当前输入输出不是交互式终端",
         ));
     }
-    let mut picker = PathPicker::new(initial)?;
+    let mut picker = PathPicker::new(initial, title, instruction)?;
     let mut terminal = InlineTerminal::new(18)?;
     let result = loop {
         terminal.draw(|frame| picker.render(frame, frame.area()))?;

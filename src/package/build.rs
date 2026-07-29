@@ -127,6 +127,58 @@ pub fn build(
     })
 }
 
+/// 构建包，并在调用者明确要求时以可恢复备份替换已有普通文件。
+///
+/// # Errors
+///
+/// 当既有目标不是普通文件、备份/恢复失败或正常构建失败时返回错误。
+pub fn build_replacing(
+    source: &Path,
+    output: &Path,
+    platform: PackagePlatform,
+) -> anyhow::Result<PackageBuildResult> {
+    let output = absolute_output(output)?;
+    if !output.exists() {
+        return build(source, &output, platform);
+    }
+    let metadata = fs::symlink_metadata(&output)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("只能替换已有普通包文件：{}", output.display());
+    }
+    let output = crate::platform::canonicalize(&output)?;
+    let discovered = crate::config::discover_path(source)
+        .with_context(|| format!("无法发现待打包 Service：{}", source.display()))?;
+    let parent = output.parent().context("包输出没有父目录")?;
+    let backup_directory = if output.starts_with(&discovered.root) {
+        discovered.root.join(".procora/package-backups")
+    } else {
+        parent.to_path_buf()
+    };
+    fs::create_dir_all(&backup_directory)?;
+    let backup = backup_directory.join(format!(".pcpkg-backup-{}", uuid::Uuid::new_v4()));
+    fs::rename(&output, &backup)
+        .with_context(|| format!("无法为已有包创建可恢复备份：{}", output.display()))?;
+    match build(source, &output, platform) {
+        Ok(result) => {
+            fs::remove_file(&backup)
+                .with_context(|| format!("新包已构建，但无法清理备份 `{}`", backup.display()))?;
+            Ok(result)
+        }
+        Err(build_error) => {
+            if output.exists() {
+                let _ = fs::remove_file(&output);
+            }
+            fs::rename(&backup, &output).with_context(|| {
+                format!(
+                    "包构建失败（{build_error:#}），且无法恢复原文件 `{}`",
+                    output.display()
+                )
+            })?;
+            Err(build_error)
+        }
+    }
+}
+
 /// 返回构建时不能作为普通 Service 文件重复收集的路径。
 fn exclusions(discovered: &crate::config::DiscoveredProject, output: &Path) -> BTreeSet<PathBuf> {
     let mut paths = BTreeSet::from([crate::platform::simplify_path(output)]);
