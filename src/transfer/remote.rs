@@ -209,6 +209,7 @@ fn transfer(
         (Ok(result), true) => Ok(result),
         (operation, _) => {
             let process_error = process_error(status, &stderr, remote_bin);
+            let stderr_text = crate::platform::decode_external_output(&stderr);
             let mut error = match operation {
                 Err(error) if stderr.is_empty() => error,
                 Ok(_) | Err(_) => process_error,
@@ -219,7 +220,7 @@ fn transfer(
                 );
             }
             if !negotiated
-                && remote_target_missing(&String::from_utf8_lossy(&stderr))
+                && remote_target_missing(&stderr_text)
                 && let Some(selector) = selector
             {
                 let service = service_from_selector(selector);
@@ -234,10 +235,8 @@ fn transfer(
                 } else {
                     classify_login_failure(status.code(), &stderr)
                 },
-                remote_missing: !negotiated
-                    && remote_command_missing(status.code(), &String::from_utf8_lossy(&stderr)),
-                target_missing: !negotiated
-                    && remote_target_missing(&String::from_utf8_lossy(&stderr)),
+                remote_missing: !negotiated && remote_command_missing(status.code(), &stderr_text),
+                target_missing: !negotiated && remote_target_missing(&stderr_text),
             })
         }
     }
@@ -406,9 +405,9 @@ pub(super) fn validate_ssh_target(target: &str) -> anyhow::Result<()> {
 pub(super) fn validate_remote_bin(value: &str) -> anyhow::Result<()> {
     if value.is_empty()
         || value.starts_with('-')
-        || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'/' | b'\\' | b':' | b'.' | b'_' | b'-' | b'~')
+        || !value.chars().all(|character| {
+            character.is_alphanumeric()
+                || matches!(character, '/' | '\\' | ':' | '.' | '_' | '-' | '~')
         })
     {
         bail!("远端 Procora 路径格式无效；请使用不含空格的命令名、Unix 路径或 Windows 绝对路径");

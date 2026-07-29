@@ -247,7 +247,9 @@ fn fetch_ssh(
     let stderr = child.stderr.take().map_or_else(String::new, |stream| {
         let mut bytes = Vec::new();
         let _ = stream.take(8 * 1024).read_to_end(&mut bytes);
-        String::from_utf8_lossy(&bytes).trim().to_owned()
+        crate::platform::decode_external_output(&bytes)
+            .trim()
+            .to_owned()
     });
     if !status.success() {
         let retryable = ssh_failure_is_transient(&stderr);

@@ -127,10 +127,21 @@ fn ssh_probe_reports_protocol_capabilities() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["transfer_protocol"]["min"], 1);
     assert_eq!(value["transfer_protocol"]["max"], 2);
+    assert!(value["platform"]["os"].is_string());
+    assert!(value["platform"]["arch"].is_string());
+    assert_eq!(value["deploy_protocol"]["max"], 2);
     assert!(
         value["capabilities"]
             .as_array()
             .unwrap()
             .contains(&serde_json::Value::String("configured_restart".to_owned()))
+    );
+    assert!(
+        value["capabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::Value::String(
+                "platform_binary_selection".to_owned()
+            ))
     );
 }

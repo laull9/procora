@@ -97,7 +97,7 @@ Git 来源契约使用真实本地仓库覆盖浅获取、完整 commit 固定�
   → 发布构建与最小启动检查
 ```
 
-常规 CI 在 Linux 执行完整质量门禁，并在 Windows x86_64 执行平台测试；Linux 额外覆盖 `systemd` feature。Release workflow 复用已成功的 `main` CI，在六个原生架构 runner 上构建产物，并分别检查 Linux 没有动态加载器或共享库依赖、Windows 没有动态 MSVC/UCRT 依赖、macOS 只依赖 Apple 系统库。平台特有用例通过 `#[cfg]` 在对应 runner 上运行：macOS 覆盖 LaunchAgent 渲染，Windows 覆盖任务计划程序、Job Object 与 UTF-16 路径。仅因断言不稳定而跳过测试不可接受；应改用事件同步、虚拟时钟或范围断言消除偶发性。
+常规 CI 在 Linux 执行完整质量门禁，并在 Windows x86_64 执行平台测试；Linux 额外覆盖 `systemd` feature。Release workflow 复用已成功的 `main` CI，在六个原生架构 runner 上构建产物，并分别检查 Linux 没有动态加载器或共享库依赖、Windows 没有动态 MSVC/UCRT 依赖、macOS 只依赖 Apple 系统库。平台特有用例通过 `#[cfg]` 在对应 runner 上运行：macOS 覆盖 LaunchAgent 渲染，Windows 覆盖任务计划程序、Job Object、中文 UTF-16 路径、UNC/扩展前缀和未配对代理项保持。跨平台单元测试另固定 UTF-8 优先、GBK/CP936、GB18030 四字节、截断序列、中文日志搜索和 GBK 远端诊断行为；机器协议继续单独断言严格 UTF-8。仅因断言不稳定而跳过测试不可接受；应改用事件同步、虚拟时钟或范围断言消除偶发性。
 
 ## 5. 质量门禁
 

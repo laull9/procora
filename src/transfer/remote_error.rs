@@ -2,6 +2,8 @@ use std::process::ExitStatus;
 
 use anyhow::anyhow;
 
+use crate::platform::decode_external_output;
+
 /// SSH 连接失败后允许的安全交互回退。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LoginFailure {
@@ -12,7 +14,7 @@ pub(super) enum LoginFailure {
 
 /// 把 SSH 退出状态和远端错误转换成可操作提示。
 pub(super) fn process_error(status: ExitStatus, stderr: &[u8], remote_bin: &str) -> anyhow::Error {
-    let message = clean_remote_error(&String::from_utf8_lossy(stderr));
+    let message = clean_remote_error(&decode_external_output(stderr));
     let detail = if message.is_empty() {
         status.to_string()
     } else {
@@ -45,7 +47,7 @@ pub(super) fn classify_login_failure(status_code: Option<i32>, stderr: &[u8]) ->
     if status_code != Some(255) {
         return LoginFailure::None;
     }
-    let message = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    let message = decode_external_output(stderr).to_ascii_lowercase();
     if message.contains("remote host identification has changed")
         || message.contains("offending host key")
     {
@@ -88,14 +90,14 @@ pub(super) fn remote_command_missing(status_code: Option<i32>, message: &str) ->
 
 /// 识别远端对上传协议或能力版本的明确拒绝。
 pub(super) fn transfer_protocol_incompatible(stderr: &[u8]) -> bool {
-    let message = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    let message = decode_external_output(stderr).to_ascii_lowercase();
     message.contains("不支持上传协议版本")
         || (message.contains("unsupported") && message.contains("protocol"))
 }
 
 /// 识别旧版远端Procora尚未提供全托管部署接收器。
 pub(super) fn managed_deploy_unsupported(stderr: &[u8]) -> bool {
-    let message = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    let message = decode_external_output(stderr).to_ascii_lowercase();
     message.contains("__receive-deploy")
         && (message.contains("unrecognized subcommand")
             || message.contains("unknown command")

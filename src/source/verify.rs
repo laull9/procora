@@ -69,8 +69,8 @@ pub(crate) fn run_version_check(
         });
     }
     let expected = verify.contains.as_deref().unwrap_or(version);
-    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let mut text = crate::platform::decode_external_output(&output.stdout).into_owned();
+    text.push_str(&crate::platform::decode_external_output(&output.stderr));
     if !text.contains(expected) {
         return Err(SourceError::Verify {
             command,

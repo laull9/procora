@@ -1,6 +1,7 @@
 //! 全托管部署接收端的有界行协议、归档写入与请求边界。
 
 use std::{
+    collections::BTreeSet,
     fs,
     io::{BufRead, Read, Write},
     path::{Component, Path},
@@ -49,6 +50,40 @@ pub(super) fn validate_init(init: &DeployInit) -> anyhow::Result<()> {
     }
     if !(1..=32).contains(&init.keep) {
         bail!("release 保留数量必须在 1..=32 内");
+    }
+    validate_binary_metadata(init)?;
+    Ok(())
+}
+
+/// 校验平台探测结果与二进制摘要的协议边界。
+fn validate_binary_metadata(init: &DeployInit) -> anyhow::Result<()> {
+    if !init.binaries.is_empty() && init.target_platform.is_none() {
+        bail!("携带二进制元数据时必须提供部署平台");
+    }
+    if let Some(platform) = &init.target_platform
+        && platform.clone().normalized().map_err(anyhow::Error::msg)? != *platform
+    {
+        bail!("部署目标平台必须使用规范化名称");
+    }
+    let mut names = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+    for binary in &init.binaries {
+        let target = Path::new(&binary.target);
+        if !names.insert(&binary.name)
+            || !targets.insert(&binary.target)
+            || binary.name.is_empty()
+            || !portable_config_path(&binary.target)
+            || !safe_relative(target)
+        {
+            bail!("部署二进制名称或 target 重复或无效");
+        }
+        if binary.bytes == 0 || binary.bytes > MAX_DEPLOY_BYTES {
+            bail!("部署二进制大小必须在 1..={MAX_DEPLOY_BYTES} 字节内");
+        }
+        if binary.sha256.len() != 64 || !binary.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            bail!("部署二进制 SHA-256 格式无效");
+        }
     }
     Ok(())
 }

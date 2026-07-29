@@ -1,7 +1,5 @@
 //! 完整 Service 的无目标全托管部署入口。
 
-use anyhow::{Context, bail};
-
 /// `procora deploy` 的完整 Service 与确定性验收参数。
 #[derive(Debug, clap::Args)]
 pub struct DeployArgs {
@@ -53,39 +51,24 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
         keep,
         batch,
     } = arguments;
-    if *timeout_ms == 0 {
-        bail!("部署验收超时必须大于零");
-    }
-    if stable_for_ms > timeout_ms {
-        bail!("部署稳定窗口不能超过验收超时");
-    }
-    let source = crate::cli::api::absolute_user_path(source)?;
-    let discovered = crate::config::discover_path(&source)
-        .with_context(|| format!("无法发现待部署 Service：{}", source.display()))?;
-    if let Some(expected) = expected_service
-        && discovered.compiled.spec.project != expected.as_str()
-    {
-        bail!(
-            "配置中的 project `{}` 与 --service `{expected}` 不一致",
-            discovered.compiled.spec.project
-        );
-    }
-    let config_path = discovered
-        .config_path
-        .strip_prefix(&discovered.root)
-        .context("配置入口不在 Service 根目录内")?
-        .to_path_buf();
-    let outcome: crate::transfer::DeployOutcome = crate::transfer::deploy(
-        &discovered.root,
-        &discovered.compiled.spec.project,
-        &config_path,
-        ssh.as_deref(),
-        remote_bin.as_deref(),
-        *timeout_ms,
-        *stable_for_ms,
-        *keep,
-        *batch,
-    )?;
+    let settings = crate::cli::api::deploy::DeploySettings {
+        source: source.clone(),
+        ssh_target: ssh.clone(),
+        remote_bin: remote_bin.clone(),
+        expected_service: expected_service.clone(),
+        timeout_ms: *timeout_ms,
+        stable_for_ms: *stable_for_ms,
+        keep: *keep,
+        batch: *batch,
+    };
+    let mut reporter = |event: &crate::transfer::DeployEvent| {
+        if matches!(event.phase.as_str(), "preflight" | "binary" | "archive") {
+            println!("{}", event.message);
+        } else {
+            eprintln!("[{}] {}", event.phase, event.message);
+        }
+    };
+    let outcome = crate::cli::api::deploy::execute(&settings, None, &mut reporter)?;
     println!("部署完成：{}，release {}", outcome.project, outcome.release);
     if let Some(previous) = outcome.previous_release {
         println!("上一版本：{previous}");

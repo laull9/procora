@@ -2,6 +2,7 @@
 
 mod byte_size;
 mod dependency;
+mod deploy_binary;
 mod diff;
 mod discovery;
 mod duration;
@@ -20,6 +21,11 @@ pub use dependency::{
     DependencyDownloadSpec, DependencyKind, DependencySshSpec, DependencyVerifySpec,
     ManagedDependencies, ManagedDependencySpec, UnpackMode,
 };
+pub use deploy_binary::{
+    DeployBinaries, DeployBinarySpec, DeployBinaryVariantSpec, DeployPlatform,
+    SelectedDeployBinary, select_deploy_binaries,
+};
+pub(crate) use deploy_binary::{RawDeployBinary, apply_deploy_binary_placeholders};
 pub use diff::{ProjectDiff, diff_projects};
 pub use discovery::{DiscoveredProject, DiscoveryError, discover_path};
 pub(crate) use duration::{

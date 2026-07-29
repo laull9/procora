@@ -3,7 +3,18 @@
 use serde::{Deserialize, Serialize};
 
 /// SSH 全托管部署协议的当前版本。
-pub(crate) const DEPLOY_PROTOCOL_VERSION: u32 = 1;
+pub(crate) const DEPLOY_PROTOCOL_VERSION: u32 = 2;
+
+/// 客户端选中并写入release的单个二进制摘要。
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct DeployBinaryMetadata {
+    pub(crate) name: String,
+    pub(crate) selector: String,
+    /// 始终使用`/`分隔的release相对路径。
+    pub(crate) target: String,
+    pub(crate) bytes: u64,
+    pub(crate) sha256: String,
+}
 
 /// 客户端在部署会话开始时发送的元数据。
 #[derive(Debug, Deserialize, Serialize)]
@@ -18,6 +29,10 @@ pub(crate) struct DeployInit {
     pub(crate) timeout_ms: u64,
     pub(crate) stable_for_ms: u64,
     pub(crate) keep: u32,
+    #[serde(default)]
+    pub(crate) target_platform: Option<crate::config::DeployPlatform>,
+    #[serde(default)]
+    pub(crate) binaries: Vec<DeployBinaryMetadata>,
 }
 
 /// 远端部署接收器可报告的确定性阶段。

@@ -145,7 +145,7 @@ impl PythonConfigRunner {
             ))
         })?;
         if !output.status.success() {
-            let diagnostic = String::from_utf8_lossy(&output.stderr);
+            let diagnostic = crate::platform::decode_external_output(&output.stderr);
             return Err(Box::new((
                 python_error(
                     path,

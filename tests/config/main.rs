@@ -7,6 +7,7 @@ mod config_reload;
 mod config_usability;
 mod dependencies;
 mod dependency_syntax;
+mod deploy_binaries;
 mod diagnostics;
 mod discovery;
 mod durations;

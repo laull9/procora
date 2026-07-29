@@ -22,9 +22,8 @@ pub(super) fn temporary_directory(label: &str) -> PathBuf {
     directory
 }
 
-/// 安装实现单连接协商协议的 ssh 测试替身。
-pub(super) fn install_fake_ssh(directory: &std::path::Path) {
-    let script = r#"#!/bin/sh
+/// 实现单连接协商、平台探测和失败注入的ssh测试替身。
+const FAKE_SSH_SCRIPT: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
 case "$FAKE_SSH_MODE" in
   auth-failure)
@@ -51,6 +50,14 @@ case "$FAKE_SSH_MODE" in
     ;;
 esac
 case "$*" in
+  *"__ssh-probe"*)
+    if [ -n "$FAKE_SSH_PLATFORM" ]; then
+      printf '%s\n' "$FAKE_SSH_PLATFORM"
+    else
+      printf '%s\n' '{"name":"procora-ssh","platform":{"os":"linux","arch":"x86_64","environment":"gnu"}}'
+    fi
+    exit 0
+    ;;
   *"__receive-deploy"*)
     if [ "$FAKE_SSH_MODE" = "old-deploy" ]; then
       printf '%s\n' "error: unrecognized subcommand '__receive-deploy'" >&2
@@ -60,7 +67,11 @@ case "$*" in
     printf '%s\n' "$header" > "$FAKE_SSH_HEADER_LOG"
     printf '%s\n' '{"type":"ready","project":"demo"}'
     archive_bytes=$(printf '%s' "$header" | sed -n 's/.*"archive_bytes":\([0-9][0-9]*\).*/\1/p')
-    dd bs=1 count="$archive_bytes" >/dev/null 2>&1
+    if [ -n "$FAKE_SSH_ARCHIVE_LOG" ]; then
+      dd bs=1 count="$archive_bytes" of="$FAKE_SSH_ARCHIVE_LOG" 2>/dev/null
+    else
+      dd bs=1 count="$archive_bytes" >/dev/null 2>&1
+    fi
     printf '%s\n' '{"type":"complete","result":{"project":"demo","release":"0123456789abcdef","previous_release":null,"content_bytes":42,"sha256":"fixture"}}'
     exit 0
     ;;
@@ -116,8 +127,11 @@ case "$header" in
     ;;
 esac
 "#;
+
+/// 安装实现单连接协商协议的ssh测试替身。
+pub(super) fn install_fake_ssh(directory: &std::path::Path) {
     let path = directory.join("ssh");
-    fs::write(&path, script).unwrap();
+    fs::write(&path, FAKE_SSH_SCRIPT).unwrap();
     let mut permissions = fs::metadata(&path).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).unwrap();

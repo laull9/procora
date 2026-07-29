@@ -27,6 +27,8 @@ const CLI_GUIDE: &str = include_str!("../docs/cli.md");
 const CONFIGURATION_GUIDE: &str = include_str!("../docs/configuration.md");
 /// 编译进二进制的运行时语义文档。
 const RUNTIME_GUIDE: &str = include_str!("../docs/runtime.md");
+/// 编译进二进制的 MCP 接入与安全工作流文档。
+const MCP_GUIDE: &str = include_str!("../docs/mcp.md");
 
 /// 只包含一个配置路径的工具参数。
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -80,6 +82,58 @@ struct ApplyParams {
     target: String,
     /// `preview_config` 返回的完整 SHA-256 修订。
     revision: String,
+}
+
+/// 裸机部署预检参数。
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DeployPreviewParams {
+    /// 本机 Service 目录或显式声明式配置文件。
+    #[serde(default = "current_directory")]
+    source: PathBuf,
+    /// SSH config 别名或`[user@]host`，MCP不进行交互询问。
+    ssh: String,
+    /// 远端Procora命令名或不含空格的路径。
+    #[serde(default)]
+    remote_bin: Option<String>,
+    /// 可选的project名称断言，防止部署错Service。
+    #[serde(default)]
+    service: Option<String>,
+    /// 等待新release可用的最长毫秒数。
+    #[serde(default = "default_deploy_timeout")]
+    timeout_ms: u64,
+    /// release持续可用后才确认成功的毫秒数。
+    #[serde(default = "default_stable_window")]
+    stable_for_ms: u64,
+    /// 远端保留的最近release数量，范围1到32。
+    #[serde(default = "default_release_keep")]
+    keep: u32,
+}
+
+/// 经过预检修订确认的裸机部署参数。
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DeployParams {
+    /// 本机 Service 目录或显式声明式配置文件。
+    #[serde(default = "current_directory")]
+    source: PathBuf,
+    /// SSH config 别名或`[user@]host`，只允许非交互式登录。
+    ssh: String,
+    /// `preview_deploy`返回的完整revision。
+    revision: String,
+    /// 远端Procora命令名或不含空格的路径。
+    #[serde(default)]
+    remote_bin: Option<String>,
+    /// 可选的project名称断言，防止部署错Service。
+    #[serde(default)]
+    service: Option<String>,
+    /// 必须与预检相同的验收超时毫秒数。
+    #[serde(default = "default_deploy_timeout")]
+    timeout_ms: u64,
+    /// 必须与预检相同的稳定窗口毫秒数。
+    #[serde(default = "default_stable_window")]
+    stable_for_ms: u64,
+    /// 必须与预检相同的release保留数量。
+    #[serde(default = "default_release_keep")]
+    keep: u32,
 }
 
 /// Procora MCP 工具与内嵌文档 Prompts 服务。
@@ -169,6 +223,62 @@ impl ProcoraMcpServer {
     fn remove_service(&self, Parameters(params): Parameters<TargetParams>) -> CallToolResult {
         tool_result(api::remove_service(&params.target))
     }
+
+    /// 探测远端并生成不会修改远端状态的精确部署预检。
+    #[tool(
+        description = "只读预检全托管裸机部署：校验配置、探测远端平台、选择二进制并返回必须确认的revision"
+    )]
+    fn preview_deploy(
+        &self,
+        Parameters(params): Parameters<DeployPreviewParams>,
+    ) -> CallToolResult {
+        tool_result(declarative_path(params.source).and_then(|source| {
+            let settings = deploy_settings(
+                source,
+                params.ssh,
+                params.remote_bin,
+                params.service,
+                params.timeout_ms,
+                params.stable_for_ms,
+                params.keep,
+            );
+            api::deploy::preview(&settings)
+        }))
+    }
+
+    /// 使用精确预检修订执行无target全托管裸机部署。
+    #[tool(
+        description = "执行全托管裸机部署；要求preview_deploy的revision，非交互上传、验活并在失败时自动回滚"
+    )]
+    fn deploy_service(&self, Parameters(params): Parameters<DeployParams>) -> CallToolResult {
+        tool_result(declarative_path(params.source).and_then(|source| {
+            let settings = deploy_settings(
+                source,
+                params.ssh,
+                params.remote_bin,
+                params.service,
+                params.timeout_ms,
+                params.stable_for_ms,
+                params.keep,
+            );
+            let mut observed = Vec::new();
+            let mut reporter = |event: &crate::transfer::DeployEvent| observed.push(event.clone());
+            api::deploy::execute(&settings, Some(&params.revision), &mut reporter).map_err(
+                |error| {
+                    if observed.is_empty() {
+                        error
+                    } else {
+                        let stages = observed
+                            .iter()
+                            .map(|event| format!("[{}] {}", event.phase, event.message))
+                            .collect::<Vec<_>>()
+                            .join("；");
+                        error.context(format!("部署失败前已完成阶段：{stages}"))
+                    }
+                },
+            )
+        }))
+    }
 }
 
 #[allow(
@@ -203,6 +313,15 @@ impl ProcoraMcpServer {
     async fn runtime_reference(&self) -> GetPromptResult {
         documentation_prompt("运行时参考", RUNTIME_GUIDE)
     }
+
+    /// 返回MCP工具、安全边界与裸机部署工作流。
+    #[prompt(
+        name = "procora_mcp_reference",
+        description = "Procora MCP工具、参数、安全边界和两阶段裸机部署的完整内嵌参考"
+    )]
+    async fn mcp_reference(&self) -> GetPromptResult {
+        documentation_prompt("MCP 接入参考", MCP_GUIDE)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -217,10 +336,10 @@ impl ServerHandler for ProcoraMcpServer {
             .with_server_info(
                 Implementation::new("procora", env!("CARGO_PKG_VERSION"))
                     .with_title("Procora MCP")
-                    .with_description("本地 Procora 配置与服务管理接口"),
+                    .with_description("本地 Procora 配置、服务管理与两阶段裸机部署接口"),
             )
             .with_instructions(
-                "优先读取匹配主题的 Prompt；修改服务前先调用只读工具确认目标和候选修订。",
+                "优先读取匹配主题的 Prompt；配置变更遵循preview_config→apply_config，裸机部署遵循preview_deploy→deploy_service，并原样传递revision。",
             )
     }
 }
@@ -266,6 +385,49 @@ fn declarative_path(path: PathBuf) -> anyhow::Result<PathBuf> {
         anyhow::bail!("MCP 不执行显式 procora.py；请在可信交互式终端中使用 Procora CLI");
     }
     Ok(path)
+}
+
+/// 构造MCP固定为非交互式认证的共享部署输入。
+#[allow(clippy::too_many_arguments)]
+fn deploy_settings(
+    source: PathBuf,
+    ssh: String,
+    remote_bin: Option<String>,
+    service: Option<String>,
+    timeout_ms: u64,
+    stable_for_ms: u64,
+    keep: u32,
+) -> api::deploy::DeploySettings {
+    api::deploy::DeploySettings {
+        source,
+        ssh_target: Some(ssh),
+        remote_bin,
+        expected_service: service,
+        timeout_ms,
+        stable_for_ms,
+        keep,
+        batch: true,
+    }
+}
+
+/// MCP省略`source`时与CLI一致使用当前目录。
+fn current_directory() -> PathBuf {
+    PathBuf::from(".")
+}
+
+/// MCP默认部署验收超时。
+fn default_deploy_timeout() -> u64 {
+    30_000
+}
+
+/// MCP默认部署稳定窗口。
+fn default_stable_window() -> u64 {
+    2_000
+}
+
+/// MCP默认`release`保留数量。
+fn default_release_keep() -> u32 {
+    3
 }
 
 /// 把编译时内嵌文档包装成可直接注入会话的 Prompt。

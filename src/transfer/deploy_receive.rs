@@ -81,7 +81,13 @@ fn receive_and_deploy(
         init.stable_for_ms,
     )?;
     ensure_registration_is_managed(&init.project, releases_root, &state)?;
-    state.register_release(&release, &init.sha256, &config_path)?;
+    state.register_release(
+        &release,
+        &init.sha256,
+        &config_path,
+        init.target_platform.as_ref(),
+        &init.binaries,
+    )?;
     let release_directory =
         prepare_release(init, &config_path, releases_root, archive_path, &release)?;
     let previous = state.active_release.clone();
@@ -307,6 +313,7 @@ fn prepare_release(
     if destination.exists() {
         let discovered = crate::config::discover_path(destination.join(config_path))?;
         ensure_project(init, &discovered.compiled.spec.project)?;
+        verify_release_binaries(init, &discovered.compiled.deploy_binaries, &destination)?;
         return crate::platform::canonicalize(&destination).map_err(Into::into);
     }
     let staging = releases_root.join(format!(".staging-{}", uuid::Uuid::new_v4()));
@@ -339,8 +346,76 @@ fn prepare_release(
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
+    if let Err(error) =
+        verify_release_binaries(init, &discovered.compiled.deploy_binaries, &staging)
+    {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
     fs::rename(&staging, &destination)?;
     crate::platform::canonicalize(&destination).map_err(Into::into)
+}
+
+/// 按远端自身平台重新选择配置变体并复核release内二进制摘要。
+fn verify_release_binaries(
+    init: &DeployInit,
+    binaries: &crate::config::DeployBinaries,
+    release_root: &Path,
+) -> anyhow::Result<()> {
+    if binaries.is_empty() {
+        if !init.binaries.is_empty() {
+            bail!("部署请求携带二进制元数据，但远端配置没有声明 binaries");
+        }
+        if init.target_platform.is_none() {
+            return Ok(());
+        }
+    }
+    let current = crate::config::DeployPlatform::current()
+        .normalized()
+        .map_err(anyhow::Error::msg)?;
+    if init.target_platform.as_ref() != Some(&current) {
+        bail!(
+            "部署目标平台在探测后发生变化：请求 {:?}，当前 {}",
+            init.target_platform
+                .as_ref()
+                .map(crate::config::DeployPlatform::key),
+            current.key()
+        );
+    }
+    if binaries.is_empty() {
+        return Ok(());
+    }
+    let selected =
+        crate::config::select_deploy_binaries(binaries, &current).map_err(anyhow::Error::msg)?;
+    if selected.len() != init.binaries.len() {
+        bail!("部署二进制数量与远端配置不一致");
+    }
+    for binary in selected {
+        let metadata = init
+            .binaries
+            .iter()
+            .find(|metadata| metadata.name == binary.name)
+            .with_context(|| format!("部署请求缺少二进制 `{}` 的摘要", binary.name))?;
+        let target = PathBuf::from(&metadata.target);
+        if metadata.selector != binary.selector || target != binary.target {
+            bail!("二进制 `{}` 的远端平台选择与请求不一致", binary.name);
+        }
+        let path = release_root.join(&binary.target);
+        let file = fs::symlink_metadata(&path)
+            .with_context(|| format!("release 缺少二进制 `{}`：{}", binary.name, path.display()))?;
+        if file.file_type().is_symlink() || !file.is_file() || file.len() != metadata.bytes {
+            bail!("二进制 `{}` 的文件类型或大小与请求不一致", binary.name);
+        }
+        let actual = archive::hash_file(&path)?;
+        if !actual.eq_ignore_ascii_case(&metadata.sha256) {
+            bail!(
+                "二进制 `{}` SHA-256 不匹配：期望 {}，实际 {actual}",
+                binary.name,
+                metadata.sha256
+            );
+        }
+    }
+    Ok(())
 }
 
 /// 将同名 Service 原子切换到新 release。

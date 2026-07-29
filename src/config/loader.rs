@@ -6,8 +6,8 @@ use std::{
 use crate::core::{ProjectSpec, TaskGraph};
 
 use super::{
-    ConfigDiagnostic, ConfigError, ConfigFormat, ManagedDependencies, TaskConfigOrigins,
-    TaskDefaultsSpec, UploadTargetSpec, raw::RawProject,
+    ConfigDiagnostic, ConfigError, ConfigFormat, DeployBinaries, ManagedDependencies,
+    TaskConfigOrigins, TaskDefaultsSpec, UploadTargetSpec, raw::RawProject,
 };
 
 mod include;
@@ -52,6 +52,8 @@ pub struct CompiledProject {
     pub graph: TaskGraph,
     /// 已通过字段与来源校验的项目级管理依赖。
     pub dependencies: ManagedDependencies,
+    /// 裸机部署按远端平台选择的本地二进制矩阵。
+    pub deploy_binaries: DeployBinaries,
     /// 以 `name` 或 `task::name` 为键的声明式上传目标。
     pub upload_targets: BTreeMap<String, UploadTargetSpec>,
     /// 顶层上传目标的原始声明，供结构化编辑器保留。
@@ -76,6 +78,8 @@ pub struct CompiledProject {
     pub task_template_names: BTreeSet<String>,
     /// 命名 Task 模板的本地声明，供结构化编辑器无展开写回。
     pub(crate) task_templates: BTreeMap<String, super::raw::RawTask>,
+    /// 裸机部署二进制原始声明，供结构化编辑器无损保留。
+    pub(crate) deploy_binary_declarations: BTreeMap<String, super::deploy_binary::RawDeployBinary>,
     /// 每个 Task 显式引用的模板名称。
     pub(crate) task_extends: BTreeMap<crate::core::TaskId, String>,
     /// Task 显式环境文件路径，供编辑器保留声明而非展开写回。
@@ -149,7 +153,7 @@ fn compile_raw(
     raw: RawProject,
     base_directory: Option<&Path>,
 ) -> Result<CompiledProject, ConfigError> {
-    let (spec, dependencies, upload_targets, declarations) =
+    let (spec, dependencies, deploy_binaries, upload_targets, declarations) =
         raw.normalize(base_directory).map_err(validation_error)?;
     let graph = TaskGraph::compile(&spec)?;
     Ok(CompiledProject {
@@ -159,6 +163,7 @@ fn compile_raw(
         spec,
         graph,
         dependencies,
+        deploy_binaries,
         upload_targets,
         upload_declarations: declarations.uploads,
         project_env: declarations.project_env,
@@ -171,6 +176,7 @@ fn compile_raw(
         profiles: declarations.profiles,
         task_template_names: declarations.task_templates.keys().cloned().collect(),
         task_templates: declarations.task_templates,
+        deploy_binary_declarations: declarations.binaries,
         task_extends: declarations.task_extends,
         task_env_files: declarations.task_env_files,
         task_inline_env: declarations.task_inline_env,

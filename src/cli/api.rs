@@ -1,5 +1,7 @@
 //! CLI、MCP 与其他本地入口共享的程序化接口。
 
+pub(crate) mod deploy;
+
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -126,6 +128,7 @@ pub fn effective_config(path: &Path) -> anyhow::Result<serde_json::Value> {
         "profiles": compiled.profile_names,
         "profile_extends": compiled.profile_extends,
         "dependencies": compiled.dependencies,
+        "binaries": compiled.deploy_binaries,
         "uploads": compiled.upload_targets,
         "env": compiled.project_env,
         "task_defaults": compiled.task_defaults,

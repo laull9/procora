@@ -108,7 +108,7 @@ fn parse(raw: &[u8]) -> Vec<StyledLine> {
     if raw.is_empty() {
         return Vec::new();
     }
-    let text = String::from_utf8_lossy(raw);
+    let text = crate::platform::decode_external_output(raw);
     let characters = text.chars().collect::<Vec<_>>();
     let mut lines = Vec::new();
     let mut line = StyledLine::default();
@@ -303,6 +303,17 @@ mod tests {
         assert_eq!(
             visible_lines(raw, "", false, LogSourceFilter::Child),
             ["child"]
+        );
+    }
+
+    #[test]
+    // GBK子进程日志在TUI中可显示并用中文搜索。
+    fn gbk_child_output_is_visible_and_searchable() {
+        let (raw, _, had_errors) = encoding_rs::GBK.encode("服务启动完成\n");
+        assert!(!had_errors);
+        assert_eq!(
+            visible_lines(&raw, "启动", true, LogSourceFilter::All),
+            ["服务启动完成"]
         );
     }
 }

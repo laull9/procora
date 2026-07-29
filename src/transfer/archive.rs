@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs,
     io::{self, Read},
     path::{Component, Path, PathBuf},
@@ -8,7 +9,7 @@ use anyhow::{Context, bail};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest, Sha256};
 
-use crate::config::UploadKind;
+use crate::config::{DeployBinaries, SelectedDeployBinary, UploadKind};
 
 /// 已在本机完整生成、可供认证回退重复发送的归档。
 pub(crate) struct PreparedArchive {
@@ -60,7 +61,9 @@ pub(crate) fn prepare(source: &Path) -> anyhow::Result<PreparedArchive> {
                 builder.append_path_with_name(source, "payload")?;
                 metadata.len()
             }
-            UploadKind::Directory => append_directory(&mut builder, source, source)?,
+            UploadKind::Directory => {
+                append_directory(&mut builder, source, source, &BTreeSet::new())?
+            }
         };
         let encoder = builder.into_inner()?;
         let file = encoder.finish()?;
@@ -82,11 +85,59 @@ pub(crate) fn prepare(source: &Path) -> anyhow::Result<PreparedArchive> {
     result
 }
 
+/// 构造只包含远端目标平台所选二进制的完整Service归档。
+pub(crate) fn prepare_deploy(
+    source: &Path,
+    binaries: &DeployBinaries,
+    selected: &[SelectedDeployBinary],
+) -> anyhow::Result<PreparedArchive> {
+    if binaries.is_empty() {
+        return prepare(source);
+    }
+    let metadata = fs::symlink_metadata(source)
+        .with_context(|| format!("无法读取部署来源 `{}`", source.display()))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        bail!("带二进制矩阵的部署来源必须是普通 Service 目录");
+    }
+    let exclusions = deploy_exclusions(source, binaries);
+    let path = temporary_archive_path()?;
+    let result = (|| {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
+        let encoder = GzEncoder::new(file, Compression::fast());
+        let mut builder = tar::Builder::new(encoder);
+        let mut content_bytes = append_directory(&mut builder, source, source, &exclusions)?;
+        for binary in selected {
+            content_bytes = content_bytes.saturating_add(append_binary(&mut builder, binary)?);
+        }
+        let encoder = builder.into_inner()?;
+        let file = encoder.finish()?;
+        file.sync_all()?;
+        let archive_bytes = file.metadata()?.len();
+        drop(file);
+        let sha256 = hash_file(&path)?;
+        Ok(PreparedArchive {
+            path: path.clone(),
+            kind: UploadKind::Directory,
+            archive_bytes,
+            content_bytes,
+            sha256,
+        })
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    result
+}
+
 /// 按名称稳定排序递归追加普通文件和目录。
 fn append_directory(
     builder: &mut tar::Builder<GzEncoder<fs::File>>,
     root: &Path,
     directory: &Path,
+    exclusions: &BTreeSet<PathBuf>,
 ) -> anyhow::Result<u64> {
     let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(fs::DirEntry::file_name);
@@ -96,6 +147,10 @@ fn append_directory(
             continue;
         }
         let path = entry.path();
+        let simplified = crate::platform::simplify_path(&path);
+        if exclusions.contains(&simplified) {
+            continue;
+        }
         let relative = path.strip_prefix(root).expect("递归路径保持在来源根内");
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
@@ -103,7 +158,7 @@ fn append_directory(
         }
         if metadata.is_dir() {
             builder.append_dir(relative, &path)?;
-            total = total.saturating_add(append_directory(builder, root, &path)?);
+            total = total.saturating_add(append_directory(builder, root, &path, exclusions)?);
         } else if metadata.is_file() {
             builder.append_path_with_name(&path, relative)?;
             total = total.saturating_add(metadata.len());
@@ -112,6 +167,72 @@ fn append_directory(
         }
     }
     Ok(total)
+}
+
+/// 返回全部平台源文件和稳定target，避免归档夹带其他平台产物或旧目标。
+fn deploy_exclusions(source: &Path, binaries: &DeployBinaries) -> BTreeSet<PathBuf> {
+    binaries
+        .values()
+        .flat_map(|binary| {
+            let target = crate::platform::simplify_path(&source.join(&binary.target));
+            std::iter::once(target)
+                .chain(binary.variants.iter().filter_map(|variant| {
+                    variant
+                        .target
+                        .as_ref()
+                        .map(|target| crate::platform::simplify_path(&source.join(target)))
+                }))
+                .chain(
+                    binary
+                        .variants
+                        .iter()
+                        .map(|variant| crate::platform::simplify_path(&variant.source)),
+                )
+        })
+        .collect()
+}
+
+/// 以固定可执行权限把一个选中本地产物写入稳定release路径。
+fn append_binary(
+    builder: &mut tar::Builder<GzEncoder<fs::File>>,
+    binary: &SelectedDeployBinary,
+) -> anyhow::Result<u64> {
+    let metadata = fs::symlink_metadata(&binary.source).with_context(|| {
+        format!(
+            "二进制 `{}` 的选中产物不存在：{}",
+            binary.name,
+            binary.source.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!(
+            "二进制 `{}` 的选中产物必须是普通文件：{}",
+            binary.name,
+            binary.source.display()
+        );
+    }
+    let mut header = tar::Header::new_gnu();
+    header.set_size(metadata.len());
+    header.set_mode(0o755);
+    header.set_mtime(
+        metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_secs()),
+    );
+    header.set_cksum();
+    let mut file = fs::File::open(&binary.source)?;
+    builder
+        .append_data(&mut header, &binary.target, &mut file)
+        .with_context(|| {
+            format!(
+                "无法把二进制 `{}` 写入 `{}`",
+                binary.name,
+                binary.target.display()
+            )
+        })?;
+    Ok(metadata.len())
 }
 
 /// 安全展开归档并返回其中普通文件的总字节数。

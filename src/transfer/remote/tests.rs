@@ -9,6 +9,7 @@ fn remote_binary_accepts_cross_platform_paths() {
     assert!(validate_remote_bin("/home/demo/.local/bin/procora").is_ok());
     assert!(validate_remote_bin("C:/Tools/procora.exe").is_ok());
     assert!(validate_remote_bin(r"C:\Tools\procora.exe").is_ok());
+    assert!(validate_remote_bin("C:/工具/进程管理/procora.exe").is_ok());
 }
 
 // 远端可执行文件仍拒绝会改变 shell 命令边界的字符。
@@ -30,6 +31,16 @@ fn windows_shell_missing_command_is_recognized() {
         "'procora' is not recognized as an internal or external command"
     ));
     assert!(!remote_command_missing(Some(1), "Permission denied"));
+}
+
+// GBK编码的Windows命令缺失诊断解码后仍能触发远端路径发现。
+#[test]
+fn gbk_windows_missing_command_is_recognized() {
+    let (encoded, _, had_errors) =
+        encoding_rs::GBK.encode("'procora' 不是内部或外部命令，也不是可运行的程序");
+    assert!(!had_errors);
+    let message = crate::platform::decode_external_output(&encoded);
+    assert!(remote_command_missing(Some(1), &message));
 }
 
 // 协议拒绝可与普通认证或远端命令错误区分。

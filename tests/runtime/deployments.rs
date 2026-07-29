@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use crate::command_support::{remove_directory_when_released, run_background_cli};
 
 /// 创建当前测试独占的临时目录。
-fn temporary_directory(label: &str) -> PathBuf {
+pub(super) fn temporary_directory(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -26,7 +26,7 @@ fn temporary_directory(label: &str) -> PathBuf {
 }
 
 /// 创建只包含普通文件的完整 Service 归档。
-fn service_archive(files: &[(&str, &[u8])]) -> (Vec<u8>, u64) {
+pub(super) fn service_archive(files: &[(&str, &[u8])]) -> (Vec<u8>, u64) {
     let encoder = GzEncoder::new(Vec::new(), Compression::fast());
     let mut archive = tar::Builder::new(encoder);
     let mut content_bytes = 0_u64;
@@ -58,7 +58,7 @@ fn deploy_with_keep(
 ) -> Output {
     let digest = format!("{:x}", Sha256::digest(archive));
     let header = serde_json::json!({
-        "protocol": 1,
+        "protocol": 2,
         "project": "demo",
         "config_path": "procora.yaml",
         "archive_bytes": archive.len(),
@@ -72,7 +72,11 @@ fn deploy_with_keep(
 }
 
 /// 把部署头和归档写入隐藏接收器。
-fn receive_deploy(home: &std::path::Path, archive: &[u8], header: &serde_json::Value) -> Output {
+pub(super) fn receive_deploy(
+    home: &std::path::Path,
+    archive: &[u8],
+    header: &serde_json::Value,
+) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_procora"))
         .arg("__receive-deploy")
         .env("PROCORA_HOME", home)
@@ -379,6 +383,62 @@ fn managed_deploy_rejects_unmanaged_name_conflict() {
 }
 
 #[test]
+// 远端在切换前复核平台选择和选中二进制SHA-256。
+fn managed_deploy_rejects_binary_digest_mismatch() {
+    let home = temporary_directory("binary-digest");
+    let platform = procora::config::DeployPlatform::current();
+    let platform_key = platform.key();
+    let config = format!(
+        r#"version: 1
+project: demo
+binaries:
+  api:
+    target: bin/api
+    variants:
+      "{platform_key}": dist/local-build
+tasks: {{}}
+"#
+    );
+    let binary = b"selected-binary";
+    let (archive, content_bytes) =
+        service_archive(&[("procora.yaml", config.as_bytes()), ("bin/api", binary)]);
+    let digest = format!("{:x}", Sha256::digest(&archive));
+    let header = serde_json::json!({
+        "protocol": 2,
+        "project": "demo",
+        "config_path": "procora.yaml",
+        "archive_bytes": archive.len(),
+        "content_bytes": content_bytes,
+        "sha256": digest,
+        "timeout_ms": 1000,
+        "stable_for_ms": 0,
+        "keep": 3,
+        "target_platform": platform,
+        "binaries": [{
+            "name": "api",
+            "selector": platform_key,
+            "target": "bin/api",
+            "bytes": binary.len(),
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        }]
+    });
+
+    let output = receive_deploy(&home, &archive, &header);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("二进制 `api` SHA-256 不匹配"), "{stderr}");
+    let listed = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .arg("list")
+        .env("PROCORA_HOME", &home)
+        .output()
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&listed.stdout).contains("demo"));
+    stop_center(&home);
+    remove_directory_when_released(&home);
+}
+
+#[test]
 // 为健康门控提供持续运行的跨平台受管进程。
 fn managed_deploy_long_running_helper() {
     if std::env::var_os("PROCORA_DEPLOY_HEALTH_TEST").is_none() {
@@ -399,7 +459,7 @@ fn managed_deploy_failing_health_helper() {
 }
 
 /// 正常停止测试 Center。
-fn stop_center(home: &std::path::Path) {
+pub(super) fn stop_center(home: &std::path::Path) {
     let output = Command::new(env!("CARGO_BIN_EXE_procora"))
         .arg("down")
         .env("PROCORA_HOME", home)
@@ -417,7 +477,7 @@ fn deploy_with_config(
 ) -> Output {
     let digest = format!("{:x}", Sha256::digest(archive));
     let header = serde_json::json!({
-        "protocol": 1,
+        "protocol": 2,
         "project": "demo",
         "config_path": config_path,
         "archive_bytes": archive.len(),

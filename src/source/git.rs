@@ -395,7 +395,9 @@ impl GitSource {
         if !output.status.success() {
             return Err(GitSourceError::Git {
                 operation,
-                message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                message: crate::platform::decode_external_output(&output.stderr)
+                    .trim()
+                    .to_owned(),
             });
         }
         Ok(output.stdout)

@@ -54,6 +54,8 @@ pub(crate) struct FormConfig {
     pub(crate) task_templates: BTreeMap<String, serde_json::Value>,
     /// 管理依赖集合。
     pub(crate) dependencies: BTreeMap<String, FormDependency>,
+    /// 结构化编辑器暂不修改但必须无损保留的部署二进制。
+    pub(crate) binaries: BTreeMap<String, serde_json::Value>,
     /// 结构化编辑器暂不修改但必须无损保留的 Service 上传目标。
     pub(crate) uploads: BTreeMap<String, serde_json::Value>,
     /// Task 集合。
@@ -191,6 +193,7 @@ impl FormConfig {
             base_directory,
             relativize_template_paths,
         );
+        let binaries = form_binaries(compiled.deploy_binary_declarations, base_directory);
         let uploads = form_raw_values(compiled.upload_declarations, None, |_, _| {});
         let mut task_extends = compiled.task_extends;
         let mut task_env_files = compiled.task_env_files;
@@ -267,6 +270,7 @@ impl FormConfig {
             task_defaults,
             task_templates,
             dependencies,
+            binaries,
             uploads,
             tasks,
             inactive_tasks,
@@ -377,6 +381,14 @@ fn form_raw_values<T: Serialize>(
         .collect()
 }
 
+/// 把部署二进制原始声明转换为保留相对来源路径的表单值。
+fn form_binaries(
+    values: BTreeMap<String, crate::config::RawDeployBinary>,
+    base_directory: Option<&Path>,
+) -> BTreeMap<String, serde_json::Value> {
+    form_raw_values(values, base_directory, relativize_binary_paths)
+}
+
 /// 把已校验 JSON 字符串数组还原为表单参数。
 fn string_array(values: &[serde_json::Value]) -> Vec<String> {
     values
@@ -434,6 +446,23 @@ fn form_dependencies(
 /// 把模板声明中的绝对运行路径还原为相对当前入口的可移植写法。
 fn relativize_template_paths(value: &mut serde_json::Value, base_directory: Option<&Path>) {
     relativize_task_paths(value, base_directory);
+}
+
+/// 把部署变体来源还原为相对配置入口的本地路径。
+fn relativize_binary_paths(value: &mut serde_json::Value, base_directory: Option<&Path>) {
+    let Some(variants) = value
+        .get_mut("variants")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    for variant in variants.values_mut() {
+        if let Some(path) = variant.as_str() {
+            *variant = serde_json::Value::String(form_path(Path::new(path), base_directory));
+        } else {
+            relativize_pointer(variant, "/source", base_directory);
+        }
+    }
 }
 
 /// 把 profile 默认工作目录还原为相对入口的可移植写法。

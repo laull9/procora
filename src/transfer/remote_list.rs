@@ -113,7 +113,7 @@ fn list_session(
             login_failure: classify_login_failure(output.status.code(), &output.stderr),
             remote_missing: remote_command_missing(
                 output.status.code(),
-                &String::from_utf8_lossy(&output.stderr),
+                &crate::platform::decode_external_output(&output.stderr),
             ),
             target_missing: false,
         });

@@ -11,5 +11,6 @@ pub(crate) const MAX_LOG_BATCH_BYTES: usize = crate::protocol::LOG_STREAM_CHUNK_
 pub(crate) fn prepare(
     discovered: &mut DiscoveredProject,
 ) -> Result<Vec<ResolvedDependency>, SourceError> {
+    crate::config::apply_deploy_binary_placeholders(&mut discovered.compiled, &discovered.root);
     DependencyManager::new(&discovered.root).prepare(&mut discovered.compiled)
 }

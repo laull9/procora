@@ -380,15 +380,21 @@ fn native_path_dialog(kind: NativePathKind) -> anyhow::Result<Option<PathBuf>> {
 
 /// 解析原生选择器的退出状态与路径输出。
 fn dialog_output(output: Output) -> anyhow::Result<Option<PathBuf>> {
-    if !output.status.success() {
-        if matches!(output.status.code(), Some(1 | 130)) {
+    let Output {
+        status,
+        stdout,
+        stderr,
+    } = output;
+    if !status.success() {
+        if matches!(status.code(), Some(1 | 130)) {
             return Ok(None);
         }
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let message = crate::platform::decode_external_output(&stderr)
+            .trim()
+            .to_owned();
         bail!("系统文件选择器失败：{message}");
     }
-    let value = String::from_utf8(output.stdout)
-        .context("系统文件选择器返回了非 UTF-8 路径")?
+    let value = crate::platform::decode_external_output(&stdout)
         .trim()
         .to_owned();
     Ok((!value.is_empty()).then(|| crate::platform::simplify_path(Path::new(&value))))

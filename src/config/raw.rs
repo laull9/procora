@@ -7,6 +7,7 @@ use crate::core::{DependencySpec, ServiceName, TaskId, TaskSpec};
 use serde::{Deserialize, Serialize};
 
 use super::ConfigDiagnostic;
+use super::deploy_binary::{RawDeployBinary, normalize_deploy_binaries};
 use super::health::normalize_healthcheck;
 use super::upload::RawUploadTarget;
 pub(crate) use profile::RawProfile;
@@ -63,6 +64,9 @@ pub(crate) struct RawProject {
     task_templates: BTreeMap<String, RawTask>,
     #[serde(default)]
     dependencies: BTreeMap<String, RawManagedDependency>,
+    /// 裸机部署时按远端平台选择的本地二进制。
+    #[serde(default)]
+    binaries: BTreeMap<String, RawDeployBinary>,
     /// Service 级上传目标。
     #[serde(default)]
     uploads: BTreeMap<String, RawUploadTarget>,
@@ -88,6 +92,8 @@ pub(crate) struct RawProject {
     declared_profiles: BTreeMap<String, profile::RawProfile>,
     #[serde(skip)]
     declared_task_templates: BTreeMap<String, RawTask>,
+    #[serde(skip)]
+    declared_binaries: BTreeMap<String, RawDeployBinary>,
     #[serde(skip)]
     declared_uploads: BTreeMap<String, RawUploadTarget>,
     #[serde(skip)]
@@ -121,7 +127,7 @@ fn required_text(
 }
 
 /// 判断依赖名称能否稳定用于占位符和目录。
-fn valid_dependency_id(value: &str) -> bool {
+pub(super) fn valid_dependency_id(value: &str) -> bool {
     !matches!(value, "" | "." | "..")
         && value
             .bytes()
@@ -241,7 +247,7 @@ fn normalize_path(path: &Path, base_directory: Option<&Path>) -> PathBuf {
 }
 
 /// 创建一条字段级配置诊断。
-fn diagnostic(path: impl Into<String>, message: impl Into<String>) -> ConfigDiagnostic {
+pub(super) fn diagnostic(path: impl Into<String>, message: impl Into<String>) -> ConfigDiagnostic {
     ConfigDiagnostic {
         path: path.into(),
         message: message.into(),

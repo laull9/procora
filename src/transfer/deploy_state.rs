@@ -10,6 +10,8 @@ use std::{
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
+use super::deploy_protocol::DeployBinaryMetadata;
+
 /// 单个已接收 release 的持久记录。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct ReleaseRecord {
@@ -17,6 +19,10 @@ pub(super) struct ReleaseRecord {
     pub(super) sha256: String,
     #[serde(default)]
     pub(super) config_path: PathBuf,
+    #[serde(default)]
+    pub(super) target_platform: Option<crate::config::DeployPlatform>,
+    #[serde(default)]
+    pub(super) binaries: Vec<DeployBinaryMetadata>,
     pub(super) deployed_at_ms: i64,
 }
 
@@ -109,9 +115,15 @@ impl ManagedState {
         id: &str,
         sha256: &str,
         config_path: &Path,
+        target_platform: Option<&crate::config::DeployPlatform>,
+        binaries: &[DeployBinaryMetadata],
     ) -> anyhow::Result<()> {
         if let Some(existing) = self.releases.iter().find(|release| release.id == id) {
-            if existing.sha256 != sha256 || existing.config_path != config_path {
+            if existing.sha256 != sha256
+                || existing.config_path != config_path
+                || existing.target_platform.as_ref() != target_platform
+                || existing.binaries != binaries
+            {
                 bail!("release ID `{id}` 与已有内容冲突，拒绝覆盖不可变版本");
             }
             return Ok(());
@@ -120,6 +132,8 @@ impl ManagedState {
             id: id.to_owned(),
             sha256: sha256.to_owned(),
             config_path: config_path.to_path_buf(),
+            target_platform: target_platform.cloned(),
+            binaries: binaries.to_vec(),
             deployed_at_ms: now_millis(),
         });
         Ok(())

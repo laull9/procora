@@ -21,6 +21,7 @@ impl RawProject {
             task_defaults: RawTaskDefaults::default(),
             task_templates: BTreeMap::default(),
             dependencies: BTreeMap::default(),
+            binaries: BTreeMap::default(),
             uploads: BTreeMap::default(),
             tasks: BTreeMap::default(),
             task_declarations: BTreeMap::default(),
@@ -33,6 +34,7 @@ impl RawProject {
             variable_references: BTreeMap::default(),
             declared_profiles: BTreeMap::default(),
             declared_task_templates: BTreeMap::default(),
+            declared_binaries: BTreeMap::default(),
             declared_uploads: BTreeMap::default(),
             declared_tasks: BTreeMap::default(),
         }
@@ -70,6 +72,9 @@ impl RawProject {
                 }
             }
         }
+        for binary in self.binaries.values_mut() {
+            binary.rebase(base);
+        }
         self.task_defaults.rebase(base);
         for profile in self.profiles.values_mut() {
             profile.rebase(base);
@@ -101,6 +106,7 @@ impl RawProject {
         self.task_defaults.overlay(higher.task_defaults);
         self.task_templates.extend(higher.task_templates);
         self.dependencies.extend(higher.dependencies);
+        self.binaries.extend(higher.binaries);
         self.uploads.extend(higher.uploads);
         self.tasks.extend(higher.tasks);
     }

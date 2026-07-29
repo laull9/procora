@@ -98,7 +98,7 @@ fn discover_unix(ssh_target: &str, auth: &SshAuth) -> anyhow::Result<Option<Stri
         return Ok(Some(path.to_owned()));
     }
     if output.status.code() == Some(255) {
-        let detail = String::from_utf8_lossy(&output.stderr);
+        let detail = crate::platform::decode_external_output(&output.stderr);
         bail!("远端 Procora 路径探测的 SSH 登录失败：{}", detail.trim());
     }
     Ok(None)
@@ -117,7 +117,7 @@ fn probe_candidate(ssh_target: &str, candidate: &str, auth: &SshAuth) -> anyhow:
         .context("无法启动本机 ssh；请先安装 OpenSSH 客户端")?;
     if !output.status.success() {
         if output.status.code() == Some(255) {
-            let detail = String::from_utf8_lossy(&output.stderr);
+            let detail = crate::platform::decode_external_output(&output.stderr);
             bail!("远端 Procora 路径探测的 SSH 登录失败：{}", detail.trim());
         }
         return Ok(false);

@@ -9,6 +9,9 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 pub mod autostart;
+mod text;
+
+pub use text::decode_external_output;
 
 #[cfg(all(target_os = "linux", feature = "systemd"))]
 pub mod systemd;

@@ -695,6 +695,30 @@ fn form_roundtrip_preserves_upload_targets() {
 }
 
 #[test]
+// 结构化编辑保存会保留暂未提供表单控件的部署二进制矩阵。
+fn form_roundtrip_preserves_deploy_binaries() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\nbinaries:\n  api:\n    target: bin/api\n    variants:\n      linux-amd64: dist/api-linux\n      macos-arm64:\n        source: dist/api-macos\n      windows-amd64:\n        source: dist/api-windows.exe\n        target: bin/api.exe\ntasks:\n  api:\n    command: '${binary.api}'\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    editor.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let saved = fs::read_to_string(&path).unwrap();
+    let compiled = procora::config::load_str(&saved, ConfigFormat::Yaml).unwrap();
+    let binary = &compiled.deploy_binaries["api"];
+    assert_eq!(binary.target, PathBuf::from("bin/api"));
+    assert_eq!(binary.variants.len(), 3);
+    assert!(saved.contains("dist/api-linux"));
+    assert!(saved.contains("dist/api-macos"));
+    assert!(saved.contains("bin/api.exe"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 // 结构化编辑保存不会丢失HTTP健康检查字段。
 fn form_roundtrip_preserves_http_health_check() {
     let path = temporary_config();

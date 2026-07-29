@@ -38,7 +38,7 @@ pub(super) fn is_enabled(definition: &DaemonAutostart) -> Result<bool, Autostart
         source,
     })?;
     Ok(query.status.success()
-        && String::from_utf8_lossy(&query.stdout).contains(&definition.endpoint))
+        && crate::platform::decode_external_output(&query.stdout).contains(&definition.endpoint))
 }
 
 /// 不受支持的平台无法查询原生托管状态。
