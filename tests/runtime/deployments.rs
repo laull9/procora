@@ -207,8 +207,13 @@ fn managed_deploy_restarts_active_release_with_unavailable_task() {
     .unwrap();
     let (archive, content_bytes) = service_archive(&[("procora.json", config.as_slice())]);
     let first = deploy_with_config(&home, &archive, content_bytes, "procora.json");
-    assert!(first.status.success());
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert!(
+        first.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    std::thread::sleep(std::time::Duration::from_millis(2500));
 
     let repeated = deploy_with_config(&home, &archive, content_bytes, "procora.json");
 
@@ -439,10 +444,16 @@ fn managed_deploy_rejects_unmanaged_name_conflict() {
         .env("PROCORA_HOME", &home)
         .output()
         .unwrap();
-    assert!(
-        String::from_utf8_lossy(&listed.stdout).contains(service.to_str().unwrap()),
-        "{}",
-        String::from_utf8_lossy(&listed.stdout)
+    let listed_text = String::from_utf8_lossy(&listed.stdout);
+    let listed_root = listed_text
+        .lines()
+        .find(|line| line.starts_with("demo\t"))
+        .and_then(|line| line.split('\t').nth(3))
+        .expect("list 应返回 demo 的服务目录");
+    assert_eq!(
+        procora::platform::canonicalize(listed_root).unwrap(),
+        procora::platform::canonicalize(&service).unwrap(),
+        "{listed_text}"
     );
 
     stop_center(&home);
@@ -530,7 +541,7 @@ fn managed_deploy_failing_health_helper() {
 // 为幂等部署测试提供启动后很快正常退出的跨平台Task。
 fn managed_deploy_short_lived_helper() {
     if std::env::var_os("PROCORA_DEPLOY_SHORT_LIVED_TEST").is_some() {
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 }
 
