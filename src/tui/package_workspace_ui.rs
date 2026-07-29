@@ -2,15 +2,15 @@
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{List, ListItem, ListState, Paragraph},
 };
 
 use super::{
-    PackageWorkspaceApp, PackageWorkspaceTab, help_ui, key_hints,
-    ui_support::{bordered_for, display_color_for, format_bytes},
+    PackageWorkspaceApp, PackageWorkspaceTab, package_workspace_controls, text_view,
+    ui_support::{bordered_for, detail_label, detail_label_width, display_color_for, format_bytes},
 };
 
 const ACCENT: Color = Color::Magenta;
@@ -18,15 +18,15 @@ const ACCENT: Color = Color::Magenta;
 /// 绘制完整包工作台和可选导出项弹层。
 pub(super) fn render(frame: &mut Frame<'_>, app: &PackageWorkspaceApp) {
     let area = frame.area();
-    if area.width < 24 || area.height < 8 {
-        render_compact(frame, area, app);
+    if area.width < 48 || area.height < 16 {
+        package_workspace_controls::render_compact(frame, area, app);
     } else {
         render_full(frame, area, app);
     }
     if app.help_visible() {
-        render_help(frame, area, app);
+        package_workspace_controls::render_help(frame, area, app);
     } else if let Some((entries, selected)) = app.export_picker() {
-        render_export_picker(frame, area, entries, selected, app);
+        package_workspace_controls::render_export_picker(frame, area, entries, selected, app);
     }
 }
 
@@ -49,7 +49,7 @@ fn render_full(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
         .split(rows[1]);
     render_list(frame, panes[0], app);
     render_details(frame, panes[1], app);
-    render_footer(frame, rows[2], app);
+    package_workspace_controls::render_footer(frame, rows[2], app);
 }
 
 /// 绘制工作台身份、上下文和两个稳定视图。
@@ -86,7 +86,10 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
         || "未绑定 Service；按 b 选择来源构建".to_owned(),
         |path| format!("上下文 Service：{}", path.display()),
     );
-    frame.render_widget(Paragraph::new(context), rows[1]);
+    frame.render_widget(
+        Paragraph::new(text_view::clipped(&context, 0, usize::from(rows[1].width))),
+        rows[1],
+    );
 }
 
 /// 绘制包文件或安装项列表。
@@ -112,7 +115,11 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
                             )
                         },
                     );
-                    ListItem::new(label)
+                    ListItem::new(text_view::clipped(
+                        &label,
+                        0,
+                        usize::from(area.width.saturating_sub(4)),
+                    ))
                 })
                 .collect::<Vec<_>>();
             let mut state = ListState::default().with_selected(Some(app.selected_package_index()));
@@ -143,11 +150,15 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
                     } else {
                         "未激活"
                     };
-                    ListItem::new(format!(
-                        "▣ {} · {} · {} release",
-                        service.project,
-                        state,
-                        service.releases.len()
+                    ListItem::new(text_view::clipped(
+                        &format!(
+                            "▣ {} · {} · {} release",
+                            service.project,
+                            state,
+                            service.releases.len()
+                        ),
+                        0,
+                        usize::from(area.width.saturating_sub(4)),
                     ))
                 })
                 .collect::<Vec<_>>();
@@ -172,8 +183,8 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
 /// 绘制当前包清单或安装状态详情。
 fn render_details(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
     let content = match app.tab() {
-        PackageWorkspaceTab::Packages => package_details(app),
-        PackageWorkspaceTab::Installed => installed_details(app),
+        PackageWorkspaceTab::Packages => package_details(app, area.width),
+        PackageWorkspaceTab::Installed => installed_details(app, area.width),
     };
     frame.render_widget(
         Paragraph::new(content).block(bordered_for(app.plain_mode()).title("详情")),
@@ -182,7 +193,7 @@ fn render_details(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) 
 }
 
 /// 生成当前包的可扫描摘要。
-fn package_details(app: &PackageWorkspaceApp) -> Text<'static> {
+fn package_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
     let Some(entry) = app.selected_package() else {
         return Text::from(vec![
             Line::from("还没有可用包。"),
@@ -193,9 +204,17 @@ fn package_details(app: &PackageWorkspaceApp) -> Text<'static> {
     let Some(info) = &entry.info else {
         return Text::from(vec![
             Line::styled("包清单不可读", Style::default().fg(Color::Red)),
-            Line::from(entry.path.display().to_string()),
+            Line::from(text_view::clipped(
+                &entry.path.display().to_string(),
+                0,
+                usize::from(width.saturating_sub(2)),
+            )),
             Line::from(""),
-            Line::from(entry.error.clone().unwrap_or_default()),
+            Line::from(text_view::clipped(
+                entry.error.as_deref().unwrap_or_default(),
+                0,
+                usize::from(width.saturating_sub(2)),
+            )),
         ]);
     };
     let variants = info
@@ -214,13 +233,14 @@ fn package_details(app: &PackageWorkspaceApp) -> Text<'static> {
         .into_iter()
         .collect::<Vec<_>>();
     Text::from(vec![
-        detail("Service", &info.manifest.project),
-        detail("格式", &info.manifest.format),
-        detail("大小", &format_bytes(info.package_bytes)),
-        detail("文件", &info.manifest.files.len().to_string()),
+        detail("Service", &info.manifest.project, width),
+        detail("格式", &info.manifest.format, width),
+        detail("大小", &format_bytes(info.package_bytes), width),
+        detail("文件", &info.manifest.files.len().to_string(), width),
         detail(
             "二进制",
             &format!("{} / {variants} 变体", info.manifest.binaries.len()),
+            width,
         ),
         detail(
             "平台",
@@ -229,6 +249,7 @@ fn package_details(app: &PackageWorkspaceApp) -> Text<'static> {
             } else {
                 platforms.join("、")
             },
+            width,
         ),
         detail(
             "导出",
@@ -242,15 +263,16 @@ fn package_details(app: &PackageWorkspaceApp) -> Text<'static> {
                     .collect::<Vec<_>>()
                     .join("、")
             },
+            width,
         ),
         Line::from(""),
-        detail("Package", &short_digest(&info.package_digest)),
-        detail("路径", &entry.path.display().to_string()),
+        detail("Package", &short_digest(&info.package_digest), width),
+        detail("路径", &entry.path.display().to_string(), width),
     ])
 }
 
 /// 生成当前安装项及最近 release 摘要。
-fn installed_details(app: &PackageWorkspaceApp) -> Text<'static> {
+fn installed_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
     let Some(service) = app.selected_installed() else {
         return Text::from(vec![
             Line::from("当前用户尚未安装 Procora 包。"),
@@ -258,17 +280,29 @@ fn installed_details(app: &PackageWorkspaceApp) -> Text<'static> {
         ]);
     };
     let mut lines = vec![
-        detail("Service", &service.project),
-        detail("Active", service.active_release.as_deref().unwrap_or("-")),
-        detail("Pending", service.pending_release.as_deref().unwrap_or("-")),
-        detail("Releases", &service.releases.len().to_string()),
-        detail("Packages", &service.packages.len().to_string()),
-        detail("目录", &service.root.display().to_string()),
+        detail("Service", &service.project, width),
+        detail(
+            "Active",
+            service.active_release.as_deref().unwrap_or("-"),
+            width,
+        ),
+        detail(
+            "Pending",
+            service.pending_release.as_deref().unwrap_or("-"),
+            width,
+        ),
+        detail("Releases", &service.releases.len().to_string(), width),
+        detail("Packages", &service.packages.len().to_string(), width),
+        detail("目录", &service.root.display().to_string(), width),
     ];
     if let Some(error) = &service.error {
         lines.push(Line::from(""));
         lines.push(Line::styled(
-            format!("状态错误：{error}"),
+            text_view::clipped(
+                &format!("状态错误：{error}"),
+                0,
+                usize::from(width.saturating_sub(2)),
+            ),
             Style::default().fg(Color::Red),
         ));
     } else if !service.releases.is_empty() {
@@ -289,185 +323,22 @@ fn installed_details(app: &PackageWorkspaceApp) -> Text<'static> {
                 .target_platform
                 .as_ref()
                 .map_or_else(|| "-".to_owned(), crate::config::DeployPlatform::key);
-            lines.push(Line::from(format!(
-                "{marker:10} {} · {platform}",
-                release.id
+            lines.push(Line::from(text_view::clipped(
+                &format!("{marker:10} {} · {platform}", release.id),
+                0,
+                usize::from(width.saturating_sub(2)),
             )));
         }
     }
     Text::from(lines)
 }
 
-/// 绘制稳定快捷键与最近反馈。
-fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
-    let controls = if app.control_allowed() {
-        key_hints::adaptive(
-            &[
-                key_hints::join(&[
-                    "Tab 视图",
-                    "j/k 选择",
-                    "b 构建",
-                    "o 打开",
-                    "v 验证",
-                    "i 安装",
-                    "t 运行",
-                    "x 解包",
-                    "d 部署",
-                    "u 导出",
-                    "R 回滚",
-                    "c 恢复",
-                    "U U 解除",
-                    "D D 清理",
-                    "r 刷新",
-                    "? 帮助",
-                    "Esc 返回",
-                ]),
-                key_hints::join(&[
-                    "Tab",
-                    "j/k",
-                    "b构建",
-                    "o打开",
-                    "v验证",
-                    "i安装",
-                    "d部署",
-                    "u导出",
-                    "R回滚",
-                    "c恢复",
-                    "U解除",
-                    "?帮助",
-                    "Esc返回",
-                ]),
-                key_hints::join(&["j/k 选", "b 构建", "o 打开", "? 帮助", "Esc 返回"]),
-            ],
-            area.width,
-        )
-    } else {
-        key_hints::adaptive(
-            &[
-                key_hints::join(&[
-                    "Tab 视图",
-                    "j/k 选择",
-                    "o 打开",
-                    "v 验证",
-                    "x 解包",
-                    "r 刷新",
-                    "? 帮助",
-                    "Esc 返回",
-                ]),
-                key_hints::join(&["j/k 选", "o 打开", "v 验证", "? 帮助", "Esc 返回"]),
-            ],
-            area.width,
-        )
-    };
-    let mut lines = vec![Line::from(controls)];
-    if let Some(feedback) = app.feedback() {
-        lines.push(Line::from(feedback.to_owned()));
-    }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .style(Style::default().fg(display_color_for(app.plain_mode(), Color::DarkGray))),
-        area,
-    );
-}
-
-/// 绘制小终端的最小恢复界面。
-fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Procora · 包工作台\n{} · {} 个包 / {} 个安装项\nTab切换 · ?帮助 · Esc返回",
-            app.tab().label(),
-            app.packages().len(),
-            app.installed().len()
-        ))
-        .alignment(Alignment::Center)
-        .block(bordered_for(app.plain_mode())),
-        area,
-    );
-}
-
-/// 绘制页面级快捷键帮助。
-fn render_help(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
-    let mut lines = vec![
-        help_ui::key_line("Tab", "切换包文件与已安装状态", app.plain_mode()),
-        help_ui::key_line("↑↓ / j k", "选择当前列表项", app.plain_mode()),
-        help_ui::key_line(
-            "o / v / x",
-            "打开、完整验证、按当前平台解包",
-            app.plain_mode(),
-        ),
-        help_ui::key_line("r", "重新扫描包与 release 状态", app.plain_mode()),
-    ];
-    if app.control_allowed() {
-        lines.extend([
-            help_ui::key_line("b", "从上下文 Service 构建确定性包", app.plain_mode()),
-            help_ui::key_line("i / t", "安装为不可变 release / 临时运行", app.plain_mode()),
-            help_ui::key_line("d / u", "裸机部署 / 推送命名导出项", app.plain_mode()),
-            help_ui::key_line(
-                "R / c",
-                "回滚历史 release / 恢复 pending 安装",
-                app.plain_mode(),
-            ),
-            help_ui::key_line(
-                "U U",
-                "二次确认解除 Center 注册并保留安装数据",
-                app.plain_mode(),
-            ),
-            help_ui::key_line(
-                "D D",
-                "二次确认解除 Service 并永久清理安装数据",
-                app.plain_mode(),
-            ),
-        ]);
-    }
-    help_ui::render(
-        frame,
-        area,
-        "快捷键帮助 · 包工作台",
-        lines,
-        app.plain_mode(),
-    );
-}
-
-/// 绘制多个命名导出项的局部选择。
-fn render_export_picker(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    entries: &[String],
-    selected: usize,
-    app: &PackageWorkspaceApp,
-) {
-    let width = area.width.saturating_sub(8).clamp(28, 64);
-    let height = u16::try_from(entries.len().saturating_add(4))
-        .unwrap_or(u16::MAX)
-        .min(area.height.saturating_sub(4))
-        .max(6);
-    let popup = centered(width, height, area);
-    frame.render_widget(Clear, popup);
-    let items = entries
-        .iter()
-        .map(|entry| ListItem::new(entry.clone()))
-        .collect::<Vec<_>>();
-    let mut state = ListState::default().with_selected(Some(selected));
-    frame.render_stateful_widget(
-        List::new(items)
-            .highlight_symbol("› ")
-            .highlight_style(highlight(app))
-            .block(
-                Block::default()
-                    .title("选择包导出项")
-                    .title_bottom("↑↓/jk 选择 · Enter 推送 · Esc 取消")
-                    .borders(Borders::ALL),
-            ),
-        popup,
-        &mut state,
-    );
-}
-
 /// 生成统一详情标签行。
-fn detail(label: &str, value: &str) -> Line<'static> {
+fn detail(label: &str, value: &str, width: u16) -> Line<'static> {
+    let value_width = usize::from(width.saturating_sub(2)).saturating_sub(detail_label_width());
     Line::from(vec![
-        Span::styled(format!("{label:<10}"), Style::default().fg(Color::DarkGray)),
-        Span::raw(value.to_owned()),
+        Span::styled(detail_label(label), Style::default().fg(Color::DarkGray)),
+        Span::raw(text_view::clipped(value, 0, value_width)),
     ])
 }
 
@@ -484,14 +355,4 @@ fn highlight(app: &PackageWorkspaceApp) -> Style {
     Style::default()
         .fg(display_color_for(app.plain_mode(), ACCENT))
         .add_modifier(Modifier::BOLD)
-}
-
-/// 在终端区域中构造固定大小弹层。
-fn centered(width: u16, height: u16, area: Rect) -> Rect {
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    }
 }

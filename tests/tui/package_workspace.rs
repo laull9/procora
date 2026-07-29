@@ -145,3 +145,53 @@ fn installed_details_and_recovery_help_are_visible() {
     assert!(help.contains("恢复pending安装"));
     assert!(help.contains("永久清理安装数据"));
 }
+
+#[test]
+// 窄屏包工作台保留当前上下文、主操作和稳定返回路径。
+fn compact_workspace_keeps_primary_actions_and_navigation() {
+    let mut app = PackageWorkspaceApp::new(Vec::new(), vec![installed_service()], None);
+    app.set_control_allowed(true);
+
+    let packages = render_text(&app, 36, 10);
+    assert!(packages.contains("尚无包"));
+    assert!(packages.contains("b构建"));
+    assert!(packages.contains("Tab切换"));
+    assert!(packages.contains("?帮助"));
+    assert!(packages.contains("Esc返回"));
+
+    app.handle_key(KeyCode::Tab);
+    let installed = render_text(&app, 36, 10);
+    assert!(installed.contains("当前安装"));
+    assert!(installed.contains("demo"));
+    assert!(installed.contains("R回滚"));
+    assert!(installed.contains("c恢复"));
+}
+
+#[test]
+// 窄屏帮助层改为单行操作说明，并让关闭方法始终可见。
+fn compact_workspace_help_reflows_instead_of_hiding_actions() {
+    let mut app = PackageWorkspaceApp::new(Vec::new(), Vec::new(), None);
+    app.set_control_allowed(true);
+    app.handle_key(KeyCode::Char('?'));
+
+    let help = render_text(&app, 36, 14);
+    assert!(help.contains("Tab·切换包文件"));
+    assert!(help.contains("b·从上下文Service"));
+    assert!(help.contains("?/Esc关闭"));
+}
+
+#[test]
+// 包工作台及帮助层在连续Resize到极小尺寸时都不会产生布局异常。
+fn workspace_resize_matrix_is_safe() {
+    let mut app = PackageWorkspaceApp::new(Vec::new(), vec![installed_service()], None);
+    app.set_control_allowed(true);
+    app.handle_key(KeyCode::Char('?'));
+
+    for width in [8, 12, 16, 24, 32, 47, 48, 72] {
+        for height in [2, 3, 4, 6, 10, 15, 16] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+        }
+    }
+}

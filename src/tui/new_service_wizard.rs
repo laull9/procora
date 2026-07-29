@@ -16,7 +16,7 @@ use super::{
     INPUT_MAX_WAIT,
     config_directory_picker::{DirectoryPicker, DirectoryPickerEvent},
     config_ui_support::{centered_rect, focus_style},
-    text_view,
+    key_hints, text_view,
 };
 
 /// 新服务向导完成后交给 CLI 的创建意图。
@@ -181,20 +181,27 @@ pub(crate) fn run(base_directory: PathBuf) -> io::Result<Option<NewServiceChoice
 fn render_directory(frame: &mut Frame<'_>, picker: &DirectoryPicker) {
     let area = frame.area();
     frame.render_widget(Clear, area);
+    let header_height = if area.height >= 10 { 4 } else { 2 };
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(5)])
+        .constraints([Constraint::Length(header_height), Constraint::Min(1)])
         .split(area);
+    let heading = if header_height >= 4 {
+        "新建托管服务 · 1/2\n选择已有服务目录，或选择一个空目录创建标准配置"
+    } else {
+        "新建服务 · 1/2\n选择托管目录"
+    };
     frame.render_widget(
-        Paragraph::new("新建托管服务 · 1/2\n选择已有服务目录，或选择一个空目录创建标准配置")
+        Paragraph::new(heading)
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL)),
         rows[0],
     );
+    let item_width = usize::from(rows[1].width.saturating_sub(4));
     let mut items = picker
         .entries()
         .map(|(label, selected)| {
-            ListItem::new(label).style(if selected {
+            ListItem::new(text_view::clipped(label, 0, item_width)).style(if selected {
                 focus_style()
             } else {
                 Style::default()
@@ -205,11 +212,23 @@ fn render_directory(frame: &mut Frame<'_>, picker: &DirectoryPicker) {
         items.push(ListItem::new(format!("⚠ {error}")));
     }
     let mut state = ListState::default().with_selected(Some(picker.selected()));
+    let title = text_view::clipped(
+        &picker.location(),
+        0,
+        usize::from(rows[1].width.saturating_sub(4)),
+    );
+    let hint = key_hints::adaptive(
+        &[
+            "↑↓ 选择 · Enter/→ 打开 · Space 选定 · ← 返回 · r 刷新 · Esc 取消".to_owned(),
+            "Enter打开 · Space选定 · Esc取消".to_owned(),
+        ],
+        rows[1].width.saturating_sub(2),
+    );
     frame.render_stateful_widget(
         List::new(items).highlight_symbol("› ").block(
             Block::default()
-                .title(picker.location())
-                .title_bottom("↑↓ 选择 · Enter/→ 打开 · Space 选定 · ← 返回 · r 刷新 · Esc 取消")
+                .title(title)
+                .title_bottom(hint)
                 .borders(Borders::ALL),
         ),
         rows[1],
@@ -219,24 +238,52 @@ fn render_directory(frame: &mut Frame<'_>, picker: &DirectoryPicker) {
 
 /// 绘制新配置的服务名称步骤并设置终端光标。
 fn render_name(frame: &mut Frame<'_>, wizard: &NewServiceWizard) {
-    let area = centered_rect(72, 9, frame.area());
+    let popup_height = frame.area().height.saturating_sub(2).clamp(5, 9);
+    let area = centered_rect(72, popup_height, frame.area());
     frame.render_widget(Clear, area);
     let directory = wizard.directory.as_deref().expect("命名步骤已经选择目录");
+    let line_width = usize::from(area.width.saturating_sub(2));
     let mut lines = vec![
-        Line::from(format!("托管目录：{}", directory.display())),
+        Line::from(text_view::clipped(
+            &format!("托管目录：{}", directory.display()),
+            0,
+            line_width,
+        )),
         Line::from(""),
-        Line::from(format!("服务名称：{}", wizard.name)),
-        Line::from(""),
-        Line::from("将创建 procora.yaml；进入服务页后按 n 新建第一个 Task。"),
+        Line::from(text_view::clipped(
+            &format!("服务名称：{}", wizard.name),
+            0,
+            line_width,
+        )),
     ];
-    if let Some(error) = &wizard.error {
-        lines.push(Line::styled(error, Style::default().fg(Color::Red)));
+    if area.height >= 8 {
+        lines.extend([
+            Line::from(""),
+            Line::from(text_view::clipped(
+                "将创建 procora.yaml；进入服务页后按 n 新建第一个 Task。",
+                0,
+                line_width,
+            )),
+        ]);
     }
+    if let Some(error) = &wizard.error {
+        lines.push(Line::styled(
+            text_view::clipped(error, 0, line_width),
+            Style::default().fg(Color::Red),
+        ));
+    }
+    let hint = key_hints::adaptive(
+        &[
+            "Enter 创建并进入编辑 · Esc 返回目录选择".to_owned(),
+            "Enter创建 · Esc返回".to_owned(),
+        ],
+        area.width.saturating_sub(2),
+    );
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
                 .title("新建托管服务 · 2/2")
-                .title_bottom("Enter 创建并进入编辑 · Esc 返回目录选择")
+                .title_bottom(hint)
                 .borders(Borders::ALL)
                 .border_style(Style::default().add_modifier(Modifier::BOLD)),
         ),

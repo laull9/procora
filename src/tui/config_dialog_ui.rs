@@ -11,7 +11,7 @@ use super::{
     config_form_dialog::Dialog,
     config_map_dialog::{MapColumn, MapEditor},
     config_ui_support::{centered_rect, focus_style},
-    text_view,
+    key_hints, text_view,
 };
 
 /// 绘制字段输入和选择器弹窗，并为普通文本字段设置终端光标。
@@ -74,17 +74,33 @@ pub(super) fn render(frame: &mut Frame<'_>, dialog: &Dialog) {
     } else {
         "直接输入；←→ 移动光标，↑↓ 切换字段，Enter 确认"
     };
+    let compact_hint = if dialog.is_task() {
+        "Ctrl-S保存 · Esc退出"
+    } else if selected_is_choice {
+        "←→选择 · Enter确认 · Esc取消"
+    } else {
+        "输入 · Enter确认 · Esc取消"
+    };
+    let hint = key_hints::adaptive(
+        &[hint.to_owned(), compact_hint.to_owned()],
+        area.width.saturating_sub(2),
+    );
+    let title = text_view::clipped(
+        &format!(
+            "{} · {}/{}",
+            dialog.title(),
+            selected.saturating_add(1),
+            field_count
+        ),
+        0,
+        usize::from(area.width.saturating_sub(4)),
+    );
     frame.render_widget(
         Paragraph::new(lines)
             .scroll((u16::try_from(scroll).unwrap_or(u16::MAX), 0))
             .block(
                 Block::default()
-                    .title(format!(
-                        "{} · {}/{}",
-                        dialog.title(),
-                        selected.saturating_add(1),
-                        field_count
-                    ))
+                    .title(title)
                     .borders(Borders::ALL)
                     .title_bottom(hint),
             ),
@@ -109,10 +125,11 @@ fn render_directory_picker(frame: &mut Frame<'_>, picker: &DirectoryPicker) {
         .max(8);
     let area = centered_rect(78, height, frame.area());
     frame.render_widget(Clear, area);
+    let item_width = usize::from(area.width.saturating_sub(4));
     let mut items = picker
         .entries()
         .map(|(label, selected)| {
-            ListItem::new(label).style(if selected {
+            ListItem::new(text_view::clipped(label, 0, item_width)).style(if selected {
                 focus_style()
             } else {
                 Style::default()
@@ -120,13 +137,37 @@ fn render_directory_picker(frame: &mut Frame<'_>, picker: &DirectoryPicker) {
         })
         .collect::<Vec<_>>();
     if let Some(error) = picker.error() {
-        items.push(ListItem::new(format!("⚠ {error}")));
+        items.push(ListItem::new(text_view::clipped(
+            &format!("⚠ {error}"),
+            0,
+            item_width,
+        )));
     }
     let mut state = ListState::default().with_selected(Some(picker.selected()));
+    let title = text_view::clipped(
+        &format!(
+            "{} · {}",
+            if area.width >= 40 {
+                "选择运行目录"
+            } else {
+                "目录"
+            },
+            picker.location()
+        ),
+        0,
+        usize::from(area.width.saturating_sub(4)),
+    );
+    let hint = key_hints::adaptive(
+        &[
+            "↑↓ 选择 · Enter/→ 打开 · Space 选定当前目录 · ← 返回 · Esc 取消".to_owned(),
+            "Enter打开 · Space选定 · Esc取消".to_owned(),
+        ],
+        area.width.saturating_sub(2),
+    );
     let list = List::new(items).highlight_symbol("› ").block(
         Block::default()
-            .title(format!("选择运行目录 · {}", picker.location()))
-            .title_bottom("↑↓ 选择 · Enter/→ 打开 · Space 选定当前目录 · ← 返回 · Esc 取消")
+            .title(title)
+            .title_bottom(hint)
             .borders(Borders::ALL),
     );
     frame.render_stateful_widget(list, area, &mut state);
@@ -165,7 +206,13 @@ fn render_map_editor(frame: &mut Frame<'_>, editor: &MapEditor) {
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title("键值表编辑")
-        .title_bottom("Tab 切换键/值 · ↑↓ 换行 · Ctrl-N/D 增删 · Enter 应用 · Esc 取消")
+        .title_bottom(key_hints::adaptive(
+            &[
+                "Tab 切换键/值 · ↑↓ 换行 · Ctrl-N/D 增删 · Enter 应用 · Esc 取消".to_owned(),
+                "Tab换列 · Enter应用 · Esc取消".to_owned(),
+            ],
+            area.width.saturating_sub(2),
+        ))
         .borders(Borders::ALL);
     let inner = block.inner(area);
     frame.render_widget(block, area);

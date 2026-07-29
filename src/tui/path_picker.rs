@@ -13,7 +13,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 
-use super::inline_terminal::InlineTerminal;
+use super::{inline_terminal::InlineTerminal, key_hints, text_view};
 
 /// 路径浏览器中一条可执行项目。
 #[derive(Clone, Debug)]
@@ -192,17 +192,34 @@ impl PathPicker {
 
     /// 绘制内联路径浏览器。
     fn render(&self, frame: &mut Frame<'_>, area: Rect) {
+        let header_height = if area.height >= 6 { 2 } else { 1 };
         let rows = ratatui::layout::Layout::vertical([
-            ratatui::layout::Constraint::Length(2),
+            ratatui::layout::Constraint::Length(header_height),
             ratatui::layout::Constraint::Min(1),
         ])
         .split(area);
         let message = self.error.as_deref().unwrap_or(&self.instruction);
-        frame.render_widget(Paragraph::new(message), rows[0]);
+        let header_width = usize::from(rows[0].width);
+        let mut header = vec![Line::from(text_view::clipped(message, 0, header_width))];
+        if header_height > 1 {
+            header.push(Line::from(text_view::clipped(
+                &format!("当前位置：{}", self.current.display()),
+                0,
+                header_width,
+            )));
+        }
+        frame.render_widget(Paragraph::new(header), rows[0]);
+        let item_width = usize::from(rows[1].width.saturating_sub(4));
         let items = self
             .entries
             .iter()
-            .map(|entry| ListItem::new(Line::from(Span::raw(entry.label.clone()))))
+            .map(|entry| {
+                ListItem::new(Line::from(Span::raw(text_view::clipped(
+                    &entry.label,
+                    0,
+                    item_width,
+                ))))
+            })
             .collect::<Vec<_>>();
         let mut state = ListState::default().with_selected(Some(self.selected));
         let list = List::new(items)
@@ -214,8 +231,18 @@ impl PathPicker {
             )
             .block(
                 Block::default()
-                    .title(format!("{} · {}", self.title, self.current.display()))
-                    .title_bottom("↑↓ 选择 · Enter 确认/进入 · Esc 取消")
+                    .title(text_view::clipped(
+                        &self.title,
+                        0,
+                        usize::from(rows[1].width.saturating_sub(4)),
+                    ))
+                    .title_bottom(key_hints::adaptive(
+                        &[
+                            "↑↓ 选择 · Enter 确认/进入 · Esc 取消".to_owned(),
+                            "Enter确认/进入 · Esc取消".to_owned(),
+                        ],
+                        rows[1].width.saturating_sub(2),
+                    ))
                     .borders(Borders::ALL),
             );
         frame.render_stateful_widget(list, rows[1], &mut state);

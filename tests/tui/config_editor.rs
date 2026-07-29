@@ -972,3 +972,116 @@ fn escape_cancels_form_delete_without_exiting() {
     assert!(editor.message().contains("取消删除"));
     fs::remove_file(path).unwrap();
 }
+
+#[test]
+// 窄屏结构化编辑器只显示当前区域，并把切区、编辑和保存放在详情顶部。
+fn compact_form_keeps_current_pane_and_primary_actions() {
+    let path = temporary_config();
+    fs::write(
+        &path,
+        "version: 1\nproject: demo\ntasks:\n  api:\n    command: echo\n",
+    )
+    .unwrap();
+    let mut editor = ConfigEditor::open(&path).unwrap();
+
+    let backend = TestBackend::new(40, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let project = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(project.contains("项目"));
+    assert!(project.contains("Tab换区"));
+    assert!(project.contains("Enter编辑"));
+    assert!(project.contains("Ctrl-S保存"));
+
+    press(&mut editor, KeyCode::Tab);
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let tasks = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+    assert!(tasks.contains("Tasks"));
+    assert!(tasks.contains("api"));
+    assert!(!tasks.contains("Profiles"));
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
+// 窄屏高级文本模式仍显示正文、保存和退出恢复路径。
+fn compact_text_editor_remains_editable() {
+    let editor = ConfigEditor::from_text(
+        "很长的配置目录/procora.yaml",
+        ConfigFormat::Yaml,
+        "version: 1\nproject: demo\ntasks: {}\n",
+    );
+    let backend = TestBackend::new(24, 8);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+
+    assert!(text.contains("version:1"));
+    assert!(text.contains("Ctrl-S保存"));
+    assert!(text.contains("Esc退出"));
+}
+
+#[test]
+// 极小配置终端不尝试挤压表单，直接给出可恢复操作。
+fn tiny_editor_explains_size_and_recovery() {
+    let editor = ConfigEditor::from_text(
+        "procora.yaml",
+        ConfigFormat::Yaml,
+        "version: 1\nproject: demo\ntasks: {}\n",
+    );
+    let backend = TestBackend::new(14, 4);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| editor.render(frame)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+
+    assert!(text.contains("终端过小"));
+    assert!(text.contains("Ctrl-S保存"));
+}
+
+#[test]
+// 配置编辑器和未保存退出选择在连续Resize到极小尺寸时都能安全重排。
+fn editor_resize_matrix_with_exit_prompt_is_safe() {
+    let mut editor = ConfigEditor::from_text(
+        "含中文目录/procora.yaml",
+        ConfigFormat::Yaml,
+        "version: 1\nproject: demo\ntasks: {}\n",
+    );
+    press(&mut editor, KeyCode::End);
+    type_text(&mut editor, " # changed");
+    press(&mut editor, KeyCode::Esc);
+
+    for width in [8, 12, 16, 24, 32, 47, 48, 72] {
+        for height in [2, 3, 4, 6, 10, 15, 18] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal.draw(|frame| editor.render(frame)).unwrap();
+        }
+    }
+}

@@ -145,6 +145,8 @@ procora push demo.pcpkg --package-entry assets --ssh prod
 
 在服务总览按 `p` 可进入包工作台，统一完成包文件操作与已安装 release 的审计、恢复和清理。完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
 
+TUI 会随终端尺寸自动切换主从、上下和单列布局；窄屏仍保留当前对象、主操作、`?` 帮助以及 `q/Esc` 返回路径。配置表单在窄屏一次显示一个区域，通过 `Tab` 切换，不会把多个列表挤成不可用的空框。详细尺寸行为见 [CLI 与 TUI](docs/cli.md#自适应终端布局)。
+
 ## 常用命令
 
 | 命令 | 作用 |

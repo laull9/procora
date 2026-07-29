@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use super::inline_terminal::InlineTerminal;
+use super::{inline_terminal::InlineTerminal, key_hints, text_view};
 
 /// 可复用选择栏中的一个选项。
 #[derive(Clone, Debug)]
@@ -101,22 +101,37 @@ impl<T: Clone> SelectionState<T> {
 
     /// 绘制带边框和统一键位提示的选择栏。
     pub fn render(&self, frame: &mut Frame<'_>, area: Rect, title: &str, message: &str) {
+        let message_height = if area.height >= 8 { 2 } else { 1 };
         let rows = ratatui::layout::Layout::vertical([
-            ratatui::layout::Constraint::Length(2),
+            ratatui::layout::Constraint::Length(message_height),
             ratatui::layout::Constraint::Min(1),
         ])
         .split(area);
-        frame.render_widget(Paragraph::new(message).wrap(Wrap { trim: false }), rows[0]);
+        frame.render_widget(
+            Paragraph::new(text_view::clipped(message, 0, usize::from(rows[0].width)))
+                .wrap(Wrap { trim: false }),
+            rows[0],
+        );
+        let item_width = usize::from(rows[1].width.saturating_sub(4));
         let items = self
             .items
             .iter()
             .map(|item| {
+                let label = text_view::clipped(&item.label, 0, item_width);
+                let remaining = item_width
+                    .saturating_sub(text_view::width(&label))
+                    .saturating_sub(3);
+                let description = text_view::clipped(&item.description, 0, remaining);
                 ListItem::new(Line::from(vec![
                     ratatui::text::Span::styled(
-                        item.label.clone(),
+                        label,
                         Style::default().add_modifier(Modifier::BOLD),
                     ),
-                    ratatui::text::Span::raw(format!("  {}", item.description)),
+                    ratatui::text::Span::raw(if description.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {description}")
+                    }),
                 ]))
             })
             .collect::<Vec<_>>();
@@ -126,8 +141,18 @@ impl<T: Clone> SelectionState<T> {
             .highlight_style(Style::default().fg(Color::Cyan))
             .block(
                 Block::default()
-                    .title(title)
-                    .title_bottom("↑↓ 选择 · Enter 确认 · Esc 取消")
+                    .title(text_view::clipped(
+                        title,
+                        0,
+                        usize::from(rows[1].width.saturating_sub(4)),
+                    ))
+                    .title_bottom(key_hints::adaptive(
+                        &[
+                            "↑↓ 选择 · Enter 确认 · Esc 取消".to_owned(),
+                            "Enter确认 · Esc取消".to_owned(),
+                        ],
+                        rows[1].width.saturating_sub(2),
+                    ))
                     .borders(Borders::ALL),
             );
         frame.render_stateful_widget(list, rows[1], &mut state);

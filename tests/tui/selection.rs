@@ -2,6 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use procora::tui::{SelectionEvent, SelectionItem, SelectionState};
+use ratatui::{Terminal, backend::TestBackend, buffer::Cell};
 
 /// 创建无修饰按键。
 fn key(code: KeyCode) -> KeyEvent {
@@ -40,4 +41,31 @@ fn selection_state_supports_consistent_cancellation() {
         state.handle_key(key(KeyCode::Char('q'))),
         SelectionEvent::Cancelled
     );
+}
+
+#[test]
+// 窄选择栏截断次要说明，但始终保留确认和取消入口。
+fn compact_selection_keeps_labels_and_recovery_keys() {
+    let state = SelectionState::new(vec![
+        SelectionItem::new("全局服务", "由 Center 持续托管并在后台运行", 1),
+        SelectionItem::new("临时服务", "只在当前终端会话内运行", 2),
+    ]);
+    let backend = TestBackend::new(24, 6);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| state.render(frame, frame.area(), "选择运行方式", "请选择服务运行方式"))
+        .unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(Cell::symbol)
+        .collect::<String>()
+        .replace(' ', "");
+
+    assert!(text.contains("全局服务"));
+    assert!(text.contains("临时服务"));
+    assert!(text.contains("Enter确认"));
+    assert!(text.contains("Esc取消"));
 }

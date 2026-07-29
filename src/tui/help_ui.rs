@@ -2,13 +2,13 @@
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use super::ui_support::display_color_for;
+use super::{text_view, ui_support::display_color_for};
 
 /// 快捷键帮助浮层的显示状态。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -62,7 +62,7 @@ pub(crate) fn render(
     mut lines: Vec<Line<'static>>,
     plain: bool,
 ) {
-    if area.width < 24 || area.height < 6 {
+    if area.width < 16 || area.height < 4 {
         frame.render_widget(
             Paragraph::new("? / Esc 关闭帮助")
                 .alignment(Alignment::Center)
@@ -71,45 +71,79 @@ pub(crate) fn render(
         );
         return;
     }
-    lines.push(Line::default());
-    lines.push(key_line("? / Esc / q", "关闭帮助", plain));
     let desired_width = if area.width >= 76 {
         72
     } else {
         area.width.saturating_sub(2)
     };
+    let compact = desired_width < 48;
+    if compact {
+        let line_width = usize::from(desired_width.saturating_sub(2));
+        lines = lines
+            .into_iter()
+            .map(|line| compact_line(&line, line_width))
+            .collect();
+    } else {
+        lines.push(Line::default());
+        lines.push(key_line("? / Esc / q", "关闭帮助", plain));
+    }
     let desired_height = u16::try_from(lines.len())
         .unwrap_or(u16::MAX)
         .saturating_add(2)
         .min(area.height.saturating_sub(2));
     let popup = centered(area, desired_width, desired_height.max(5));
     frame.render_widget(Clear, popup);
+    let title = text_view::clipped(title, 0, usize::from(popup.width.saturating_sub(4)));
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {title} "));
+    if compact {
+        block = block.title_bottom("?/Esc 关闭");
+    }
     frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" {title} ")),
-        ),
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(block),
         popup,
     );
 }
 
+/// 在窄帮助层中把固定双栏压成一行，并保留键位强调。
+fn compact_line(line: &Line<'static>, width: usize) -> Line<'static> {
+    let Some(keys) = line.spans.first() else {
+        return Line::default();
+    };
+    let key_text = keys.content.trim();
+    let key_text = text_view::clipped(key_text, 0, width);
+    let key_width = text_view::width(&key_text);
+    let description = line
+        .spans
+        .iter()
+        .skip(1)
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    let separator = " · ";
+    let remaining = width
+        .saturating_sub(key_width)
+        .saturating_sub(text_view::width(separator));
+    if description.is_empty() || remaining == 0 {
+        return Line::styled(key_text, keys.style);
+    }
+    Line::from(vec![
+        Span::styled(key_text, keys.style),
+        Span::raw(separator),
+        Span::raw(text_view::clipped(&description, 0, remaining)),
+    ])
+}
+
 /// 返回指定尺寸的居中矩形。
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(area.height.saturating_sub(height) / 2),
-            Constraint::Length(height),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(area.width.saturating_sub(width) / 2),
-            Constraint::Length(width),
-            Constraint::Min(0),
-        ])
-        .split(vertical[1])[1]
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
 }
