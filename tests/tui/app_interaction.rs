@@ -3,7 +3,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use procora::core::TaskId;
 use procora::protocol::ServiceActionDto;
 use procora::tui::{ActiveTab, App, LogSourceFilter};
@@ -47,6 +47,35 @@ fn horizontal_mouse_scroll_moves_text_viewport() {
     app.handle_mouse(mouse(MouseEventKind::ScrollRight));
     assert_eq!(app.horizontal_offset(), 1);
     app.handle_mouse(mouse(MouseEventKind::ScrollLeft));
+    assert_eq!(app.horizontal_offset(), 0);
+}
+
+#[test]
+// 部分终端把触控板横移编码为Shift加纵向滚轮，仍应保持横移语义。
+fn shifted_vertical_wheel_moves_text_viewport() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_mouse(mouse_with_modifiers(
+        MouseEventKind::ScrollDown,
+        KeyModifiers::SHIFT,
+    ));
+    assert_eq!(app.horizontal_offset(), 1);
+    assert_eq!(app.selected_index(), 0);
+    app.handle_mouse(mouse_with_modifiers(
+        MouseEventKind::ScrollUp,
+        KeyModifiers::SHIFT,
+    ));
+    assert_eq!(app.horizontal_offset(), 0);
+}
+
+#[test]
+// h和l为方向键序列不可用的远端终端提供水平移动兜底。
+fn vim_horizontal_keys_move_text_viewport() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_key(KeyCode::Char('l'));
+    assert_eq!(app.horizontal_offset(), 1);
+    app.handle_key(KeyCode::Char('h'));
     assert_eq!(app.horizontal_offset(), 0);
 }
 
@@ -130,6 +159,20 @@ fn ctrl_c_requests_clean_exit() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(app.should_quit());
+}
+
+#[test]
+// 增强键盘协议的重复事件交给状态层后应继续执行水平移动。
+fn repeated_key_events_keep_scrolling() {
+    let mut app = App::new(support::snapshot());
+
+    app.handle_key_event(KeyEvent::new_with_kind(
+        KeyCode::Right,
+        KeyModifiers::NONE,
+        KeyEventKind::Repeat,
+    ));
+
+    assert_eq!(app.horizontal_offset(), 1);
 }
 
 #[test]
@@ -330,10 +373,15 @@ fn unchanged_state_and_empty_logs_do_not_redraw() {
 
 /// 创建不依赖真实终端坐标的滚轮事件。
 fn mouse(kind: MouseEventKind) -> MouseEvent {
+    mouse_with_modifiers(kind, KeyModifiers::NONE)
+}
+
+/// 创建带指定修饰键且不依赖真实终端坐标的鼠标事件。
+fn mouse_with_modifiers(kind: MouseEventKind, modifiers: KeyModifiers) -> MouseEvent {
     MouseEvent {
         kind,
         column: 0,
         row: 0,
-        modifiers: KeyModifiers::NONE,
+        modifiers,
     }
 }

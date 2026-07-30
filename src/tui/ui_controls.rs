@@ -148,7 +148,9 @@ fn task_controls(app: &App, width: u16) -> String {
 
 /// 返回日志页的平台键位与鼠标操作提示。
 fn log_controls(app: &App, width: u16) -> String {
-    let (page, boundary) = if app.mac_key_hints() {
+    let (page, boundary) = if app.remote_key_hints() {
+        ("PgUp/PgDn（macOS Fn+↑/↓）", "Home/End（macOS Fn+←/→）")
+    } else if app.mac_key_hints() {
         ("Fn+↑/↓ 翻页", "Fn+←/→ 首尾")
     } else {
         ("PgUp/PgDn 翻页", "Home/End 首尾")
@@ -213,11 +215,13 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect, app: &App) {
         help_ui::key_line("↑↓ / j k", "切换 Task", app.plain_mode()),
         help_ui::key_line("Tab / Shift-Tab", "前后切换页面", app.plain_mode()),
         help_ui::key_line("1 / 2 / 3", "直达任务、依赖、日志页", app.plain_mode()),
-        help_ui::key_line("← / →", "水平移动折叠文本", app.plain_mode()),
+        help_ui::key_line("← / → / h / l", "水平移动折叠文本", app.plain_mode()),
         help_ui::key_line("F3", "切换全局自动横移", app.plain_mode()),
     ];
     if app.active_tab() == ActiveTab::Logs {
-        let page = if app.mac_key_hints() {
+        let page = if app.remote_key_hints() {
+            "PgUp/PgDn/Home/End · macOS Fn+方向键"
+        } else if app.mac_key_hints() {
             "Fn+↑↓ / Fn+←→"
         } else {
             "PgUp/PgDn/Home/End"

@@ -27,7 +27,7 @@ fn archive_files(path: &std::path::Path) -> std::collections::BTreeMap<String, (
     files
 }
 /// 安装把SSH调用转交给真实本地接收器的测试替身。
-fn install_local_receiver_ssh(directory: &std::path::Path) {
+pub(super) fn install_local_receiver_ssh(directory: &std::path::Path) {
     let script = r#"#!/bin/sh
 printf '%s\n' "$*" > "$LOCAL_SSH_LOG"
 export PROCORA_HOME="$PROCORA_REMOTE_HOME"

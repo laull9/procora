@@ -105,6 +105,8 @@ enum KeyHintPlatform {
     Standard,
     /// 使用 macOS 键盘上的 Fn 组合键名称。
     MacOs,
+    /// SSH 客户端系统未知，同时展示标准与 macOS 键位。
+    Remote,
 }
 
 /// 服务页退出键的上层导航语义。
@@ -161,7 +163,9 @@ impl App {
             control_allowed: false,
             exit_navigation: ExitNavigation::default(),
             plain_mode: super::ui_environment::terminal_plain_mode(),
-            key_hint_platform: if cfg!(target_os = "macos") {
+            key_hint_platform: if super::ui_environment::terminal_remote_session() {
+                KeyHintPlatform::Remote
+            } else if cfg!(target_os = "macos") {
                 KeyHintPlatform::MacOs
             } else {
                 KeyHintPlatform::Standard
@@ -228,8 +232,8 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
             KeyCode::Tab => self.switch_adjacent_tab(true),
             KeyCode::BackTab => self.switch_adjacent_tab(false),
-            KeyCode::Left => self.scroll_horizontal(false),
-            KeyCode::Right => self.scroll_horizontal(true),
+            KeyCode::Left | KeyCode::Char('h') => self.scroll_horizontal(false),
+            KeyCode::Right | KeyCode::Char('l') => self.scroll_horizontal(true),
             KeyCode::F(3) => self.toggle_auto_scroll(),
             KeyCode::Char('1') => self.switch_to_tab(ActiveTab::Tasks),
             KeyCode::Char('2') => self.switch_to_tab(ActiveTab::Dependencies),
@@ -285,7 +289,9 @@ impl App {
         key: KeyEvent,
         page_lines: usize,
     ) -> bool {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(key.code, KeyCode::Char('c' | 'C'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
             let changed = !self.should_quit;
             self.should_quit = true;
             changed
@@ -303,17 +309,25 @@ impl App {
             self.current_log_scroll(),
             self.horizontal_scroll,
         );
-        match (self.active_tab, mouse.kind) {
-            (ActiveTab::Logs, MouseEventKind::ScrollUp) => {
+        match (self.active_tab, mouse.kind, mouse.modifiers) {
+            (_, MouseEventKind::ScrollUp, modifiers) if modifiers.contains(KeyModifiers::SHIFT) => {
+                self.scroll_horizontal(false);
+            }
+            (_, MouseEventKind::ScrollDown, modifiers)
+                if modifiers.contains(KeyModifiers::SHIFT) =>
+            {
+                self.scroll_horizontal(true);
+            }
+            (ActiveTab::Logs, MouseEventKind::ScrollUp, _) => {
                 self.scroll_log_up(LOG_WHEEL_LINES);
             }
-            (ActiveTab::Logs, MouseEventKind::ScrollDown) => {
+            (ActiveTab::Logs, MouseEventKind::ScrollDown, _) => {
                 self.scroll_log_down(LOG_WHEEL_LINES);
             }
-            (_, MouseEventKind::ScrollUp) => self.select_previous(),
-            (_, MouseEventKind::ScrollDown) => self.select_next(),
-            (_, MouseEventKind::ScrollLeft) => self.scroll_horizontal(false),
-            (_, MouseEventKind::ScrollRight) => self.scroll_horizontal(true),
+            (_, MouseEventKind::ScrollUp, _) => self.select_previous(),
+            (_, MouseEventKind::ScrollDown, _) => self.select_next(),
+            (_, MouseEventKind::ScrollLeft, _) => self.scroll_horizontal(false),
+            (_, MouseEventKind::ScrollRight, _) => self.scroll_horizontal(true),
             _ => {}
         }
         confirmation_cancelled
@@ -434,6 +448,20 @@ impl App {
     /// 返回是否展示 macOS 的 Fn 组合键提示。
     pub const fn mac_key_hints(&self) -> bool {
         matches!(self.key_hint_platform, KeyHintPlatform::MacOs)
+    }
+
+    /// 设置是否展示适合未知 SSH 客户端系统的跨平台键位提示。
+    pub const fn set_remote_key_hints(&mut self, enabled: bool) {
+        self.key_hint_platform = if enabled {
+            KeyHintPlatform::Remote
+        } else {
+            KeyHintPlatform::Standard
+        };
+    }
+
+    /// 返回是否应同时展示标准与 macOS 日志键位。
+    pub const fn remote_key_hints(&self) -> bool {
+        matches!(self.key_hint_platform, KeyHintPlatform::Remote)
     }
 
     /// 返回当前项目快照。

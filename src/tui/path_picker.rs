@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -282,7 +282,7 @@ pub(crate) fn select_path_inline_named(
     let result = loop {
         terminal.draw(|frame| picker.render(frame, frame.area()))?;
         if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
+            && super::input::key_activates(key.kind)
         {
             match picker.handle_key(key.code) {
                 PickerEvent::Pending => {}

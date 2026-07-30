@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use ratatui::text::Line;
 
-/// 折叠文本自动滚动的恒定阅读速度。
-pub(crate) const AUTO_SCROLL_CHARS_PER_SECOND: u128 = 4;
+/// 折叠文本自动滚动的恒定终端列速度。
+pub(crate) const AUTO_SCROLL_COLUMNS_PER_SECOND: u128 = 4;
 /// 手动横移后当前高亮文本不受自动滚动影响的时长。
 const MANUAL_SCROLL_FREEZE: Duration = Duration::from_secs(10);
 
@@ -151,7 +151,7 @@ pub(crate) fn clipped(text: &str, offset: usize, max_width: usize) -> String {
         return text.to_owned();
     }
     let characters = text.chars().collect::<Vec<_>>();
-    let start = offset.min(characters.len());
+    let start = character_index_at_column(&characters, offset);
     let prefix = usize::from(start > 0);
     let mut result = if prefix == 1 {
         "…".to_owned()
@@ -182,6 +182,17 @@ pub(crate) fn clipped(text: &str, offset: usize, max_width: usize) -> String {
     result
 }
 
+/// 把终端显示列偏移转换为不会切开宽字符的字符索引。
+fn character_index_at_column(characters: &[char], offset: usize) -> usize {
+    let mut index = 0;
+    let mut skipped = 0_usize;
+    while index < characters.len() && skipped < offset {
+        skipped = skipped.saturating_add(width(&characters[index].to_string()));
+        index += 1;
+    }
+    index
+}
+
 /// 只有文本真实超过可见宽度时才允许手动或自动偏移生效。
 const fn overflowing_offset(text_width: usize, offset: usize, max_width: usize) -> usize {
     if text_width > max_width { offset } else { 0 }
@@ -189,7 +200,7 @@ const fn overflowing_offset(text_width: usize, offset: usize, max_width: usize) 
 
 /// 按真实经过时间换算自动滚动字符数，并保留不足一个字符的时间余量。
 pub(crate) fn auto_scroll_steps(remainder: &mut Duration, elapsed: Duration) -> usize {
-    let nanos_per_character = 1_000_000_000_u128 / AUTO_SCROLL_CHARS_PER_SECOND;
+    let nanos_per_character = 1_000_000_000_u128 / AUTO_SCROLL_COLUMNS_PER_SECOND;
     let total = remainder.as_nanos().saturating_add(elapsed.as_nanos());
     let steps = total / nanos_per_character;
     let remaining = total % nanos_per_character;
@@ -219,7 +230,11 @@ pub(crate) fn input_view(text: &str, cursor: usize, max_width: usize) -> InputVi
         }
         start += 1;
     }
-    let text = clipped(text, start, max_width);
+    let offset = characters[..start]
+        .iter()
+        .map(|character| width(&character.to_string()))
+        .sum();
+    let text = clipped(text, offset, max_width);
     let prefix = usize::from(start > 0);
     let cursor_x = prefix
         + characters[start..cursor]
@@ -242,6 +257,13 @@ mod tests {
     // 未溢出的文本不受水平偏移影响。
     fn short_text_ignores_horizontal_offset() {
         assert_eq!(clipped("short", 3, 10), "short");
+    }
+
+    #[test]
+    // 水平偏移按终端显示列计算且不会从中文宽字符中间开始。
+    fn horizontal_offset_respects_wide_character_columns() {
+        assert_eq!(clipped("中文abcdef", 1, 6), "…文ab…");
+        assert_eq!(clipped("中文abcdef", 2, 6), "…文ab…");
     }
 
     #[test]

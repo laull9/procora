@@ -1,6 +1,6 @@
 use std::io::{self, IsTerminal};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -181,7 +181,8 @@ pub fn select_inline<T: Clone>(
     let result = loop {
         terminal.draw(|frame| state.render(frame, frame.area(), title, message))?;
         match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match state.handle_key(key) {
+            Event::Key(key) if super::input::key_activates(key.kind) => match state.handle_key(key)
+            {
                 SelectionEvent::Pending => {}
                 SelectionEvent::Selected(value) => break Some(value),
                 SelectionEvent::Cancelled => break None,

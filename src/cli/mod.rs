@@ -10,6 +10,7 @@ pub use deploy::DeployArgs;
 #[cfg(target_os = "windows")]
 mod elevation;
 mod logs;
+mod package_build_command;
 mod package_command;
 mod package_installed_command;
 pub use package_command::PackageArgs;

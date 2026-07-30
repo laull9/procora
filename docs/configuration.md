@@ -505,7 +505,7 @@ tasks:
 
 平台键格式为 `os-arch` 或 `os-arch-environment`。当前支持 `linux`、`macos`、`windows`、`freebsd`，以及 `x86_64`、`aarch64`、`x86`、`arm`；常用别名包括 `amd64`、`x64`、`arm64`、`darwin`、`osx`、`glibc`。环境可以是 `gnu`、`musl` 或 `msvc`。带环境的精确项优先于同 OS/架构的通用项。macOS 还接受 `macos-universal`/`macos-universal2`，用于真正的双架构 Mach-O；精确的 `macos-amd64` 或 `macos-arm64` 仍优先。
 
-该声明只影响 `procora deploy` 的归档选择，不执行编译，也不调用 AI。任意语言和工具链都应先在本地构建系统或 CI 中生成各个平台文件，再由 Procora 自动探测、选择、上传、验摘要和回滚。
+该声明本身只影响 `procora deploy` 的归档选择，不隐式执行编译，也不调用 AI。任意语言和工具链都可以先在本地构建系统或 CI 中生成各个平台文件；构建 `.pcpkg` 时，也可由用户显式传入一个或多个 `package build --prepare <COMMAND>`，在打包前运行 Python 等可信脚本。随后 Procora 自动探测、选择、上传、验摘要和回滚。
 
 ## 声明式远端上传目标
 

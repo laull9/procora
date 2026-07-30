@@ -77,7 +77,7 @@ impl App {
                 self.log_source_filter,
             )
             .iter()
-            .map(|line| line.chars().count())
+            .map(|line| crate::tui::text_view::width(line))
             .max()
             .unwrap_or(0)
         })

@@ -66,6 +66,35 @@ fn run(arguments: &[&str], current_dir: &Path) -> Output {
         .unwrap()
 }
 
+/// 通过测试SSH部署一个包并保留发送归档。
+#[cfg(unix)]
+fn deploy_package_with_fake_ssh(directory: &Path, package: &Path, archive: &Path) -> Output {
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    Command::new(env!("CARGO_BIN_EXE_procora"))
+        .args([
+            "deploy",
+            package.to_str().unwrap(),
+            "--ssh",
+            "package-host",
+            "--batch",
+            "--timeout",
+            "1s",
+            "--stable-for",
+            "0ms",
+        ])
+        .env("PATH", path)
+        .env("PROCORA_HOME", directory.join("home"))
+        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
+        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
+        .env("FAKE_SSH_ARCHIVE_LOG", archive)
+        .output()
+        .unwrap()
+}
+
 /// 创建当前测试独占的临时目录。
 fn temporary_directory(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -513,9 +542,10 @@ fn package_install_uses_managed_release_and_add_is_idempotent() {
 
 #[cfg(unix)]
 #[test]
-// deploy探测远端后只从胖包物化匹配平台，并沿用现有SSH托管部署协议。
+// deploy只物化匹配平台，且同一胖包跨时间生成完全相同的预检和归档。
 fn package_deploy_selects_remote_platform_without_leaking_other_binaries() {
     use std::io::Read;
+    use std::time::Duration;
 
     use flate2::read::GzDecoder;
 
@@ -560,31 +590,8 @@ tasks: {}
         String::from_utf8_lossy(&built.stderr)
     );
 
-    let path = format!(
-        "{}:{}",
-        directory.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
     let archive_path = directory.join("deploy.tar.gz");
-    let deployed = Command::new(env!("CARGO_BIN_EXE_procora"))
-        .args([
-            "deploy",
-            package.to_str().unwrap(),
-            "--ssh",
-            "package-host",
-            "--batch",
-            "--timeout",
-            "1s",
-            "--stable-for",
-            "0ms",
-        ])
-        .env("PATH", path)
-        .env("PROCORA_HOME", directory.join("home"))
-        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
-        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"))
-        .env("FAKE_SSH_ARCHIVE_LOG", &archive_path)
-        .output()
-        .unwrap();
+    let deployed = deploy_package_with_fake_ssh(&directory, &package, &archive_path);
     assert!(
         deployed.status.success(),
         "{}",
@@ -593,6 +600,22 @@ tasks: {}
     let header = fs::read_to_string(directory.join("ssh-header.log")).unwrap();
     assert!(header.contains(r#""target_platform":{"os":"linux","arch":"x86_64""#));
     assert!(header.contains(r#""selector":"linux-x86_64""#));
+    let first_archive = fs::read(&archive_path).unwrap();
+    let first_stdout = deployed.stdout;
+
+    std::thread::sleep(Duration::from_millis(1_100));
+    let repeated = deploy_package_with_fake_ssh(&directory, &package, &archive_path);
+    assert!(
+        repeated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert_eq!(repeated.stdout, first_stdout);
+    assert_eq!(
+        fs::read_to_string(directory.join("ssh-header.log")).unwrap(),
+        header
+    );
+    assert_eq!(fs::read(&archive_path).unwrap(), first_archive);
 
     let decoder = GzDecoder::new(fs::File::open(archive_path).unwrap());
     let mut archive = tar::Archive::new(decoder);
@@ -609,6 +632,104 @@ tasks: {}
     assert_eq!(files["bin/api"], b"linux\n");
     assert!(!files.contains_key("bin/api.exe"));
     assert!(!files.keys().any(|path| path.starts_with("dist/")));
+    remove_directory_when_released(&directory);
+}
+
+#[cfg(unix)]
+#[test]
+// 同一逻辑包重复交给真实接收器时复用活动release且不追加部署历史。
+fn repeated_package_deploy_is_idempotent_end_to_end() {
+    use std::time::Duration;
+
+    let directory = temporary_directory("deploy-idempotent");
+    crate::cli_deploy::install_local_receiver_ssh(&directory);
+    let service = directory.join("service");
+    fs::create_dir(&service).unwrap();
+    fs::write(
+        service.join("procora.yaml"),
+        "version: 1\nproject: package-idempotent\ntasks: {}\n",
+    )
+    .unwrap();
+    fs::write(service.join("payload.bin"), vec![0x5a; 2 * 1024 * 1024]).unwrap();
+    let package = directory.join("package-idempotent.pcpkg");
+    let built = run(
+        &[
+            "package",
+            "build",
+            service.to_str().unwrap(),
+            "--output",
+            package.to_str().unwrap(),
+        ],
+        &directory,
+    );
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let remote_home = directory.join("remote-home");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let deploy = || {
+        Command::new(env!("CARGO_BIN_EXE_procora"))
+            .args([
+                "deploy",
+                package.to_str().unwrap(),
+                "--ssh",
+                "local-receiver",
+                "--batch",
+                "--timeout",
+                "2s",
+                "--stable-for",
+                "0ms",
+            ])
+            .env("PATH", &path)
+            .env("LOCAL_SSH_LOG", directory.join("ssh.log"))
+            .env("PROCORA_REMOTE_HOME", &remote_home)
+            .env("PROCORA_TEST_BINARY", env!("CARGO_BIN_EXE_procora"))
+            .output()
+            .unwrap()
+    };
+    let first = deploy();
+    assert!(
+        first.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first.stdout),
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(String::from_utf8_lossy(&first.stdout).contains("部署完成"));
+
+    std::thread::sleep(Duration::from_millis(1_100));
+    let repeated = deploy();
+    assert!(
+        repeated.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&repeated.stdout),
+        String::from_utf8_lossy(&repeated.stderr)
+    );
+    assert!(String::from_utf8_lossy(&repeated.stdout).contains("无需更新"));
+    let state: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            remote_home
+                .join("services/package-idempotent")
+                .join("state.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(state["releases"].as_array().unwrap().len(), 1);
+    assert_eq!(state["deployments"].as_array().unwrap().len(), 1);
+
+    let stopped = Command::new(env!("CARGO_BIN_EXE_procora"))
+        .arg("down")
+        .env("PROCORA_HOME", &remote_home)
+        .output()
+        .unwrap();
+    assert!(stopped.status.success());
     remove_directory_when_released(&directory);
 }
 

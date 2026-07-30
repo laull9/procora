@@ -155,11 +155,13 @@ procora remote restart demo
 
 ```bash
 procora package build . --output demo.pcpkg
+procora package build . --prepare "python scripts/build_package.py"
 procora package verify demo.pcpkg
 procora add demo.pcpkg
 procora package list
 procora package rollback demo
 procora deploy demo.pcpkg --ssh prod
+procora package build . --prepare "python scripts/build_package.py" --deploy prod
 procora push demo.pcpkg --package-entry assets --ssh prod
 ```
 

@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use flate2::{Compression, GzBuilder, read::GzDecoder, write::GzEncoder};
 use sha2::{Digest, Sha256};
 
 use crate::config::{DeployBinaries, SelectedDeployBinary, UploadKind};
@@ -91,12 +91,19 @@ pub(crate) fn prepare_deploy(
     binaries: &DeployBinaries,
     selected: &[SelectedDeployBinary],
 ) -> anyhow::Result<PreparedArchive> {
-    if binaries.is_empty() {
-        return prepare(source);
-    }
     let metadata = fs::symlink_metadata(source)
         .with_context(|| format!("无法读取部署来源 `{}`", source.display()))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+    if metadata.file_type().is_symlink() {
+        bail!("部署来源不能是符号链接：{}", source.display());
+    }
+    let kind = if metadata.is_file() {
+        UploadKind::File
+    } else if metadata.is_dir() {
+        UploadKind::Directory
+    } else {
+        bail!("部署来源必须是普通文件或目录：{}", source.display());
+    };
+    if !binaries.is_empty() && kind != UploadKind::Directory {
         bail!("带二进制矩阵的部署来源必须是普通 Service 目录");
     }
     let exclusions = deploy_exclusions(source, binaries);
@@ -106,9 +113,17 @@ pub(crate) fn prepare_deploy(
             .write(true)
             .create_new(true)
             .open(&path)?;
-        let encoder = GzEncoder::new(file, Compression::fast());
+        let encoder = GzBuilder::new().mtime(0).write(file, Compression::fast());
         let mut builder = tar::Builder::new(encoder);
-        let mut content_bytes = append_directory(&mut builder, source, source, &exclusions)?;
+        let mut content_bytes = match kind {
+            UploadKind::File => {
+                append_deterministic_file(&mut builder, source, Path::new("payload"), &metadata)?;
+                metadata.len()
+            }
+            UploadKind::Directory => {
+                append_deterministic_directory(&mut builder, source, source, &exclusions)?
+            }
+        };
         for binary in selected {
             content_bytes = content_bytes.saturating_add(append_binary(&mut builder, binary)?);
         }
@@ -120,7 +135,7 @@ pub(crate) fn prepare_deploy(
         let sha256 = hash_file(&path)?;
         Ok(PreparedArchive {
             path: path.clone(),
-            kind: UploadKind::Directory,
+            kind,
             archive_bytes,
             content_bytes,
             sha256,
@@ -132,7 +147,7 @@ pub(crate) fn prepare_deploy(
     result
 }
 
-/// 按名称稳定排序递归追加普通文件和目录。
+/// 按名称稳定排序递归追加保留宿主元数据的普通文件和目录。
 fn append_directory(
     builder: &mut tar::Builder<GzEncoder<fs::File>>,
     root: &Path,
@@ -167,6 +182,103 @@ fn append_directory(
         }
     }
     Ok(total)
+}
+
+/// 按名称稳定排序递归追加规范化部署文件和目录。
+fn append_deterministic_directory(
+    builder: &mut tar::Builder<GzEncoder<fs::File>>,
+    root: &Path,
+    directory: &Path,
+    exclusions: &BTreeSet<PathBuf>,
+) -> anyhow::Result<u64> {
+    let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    let mut total = 0_u64;
+    for entry in entries {
+        if entry.file_name() == ".procora" {
+            continue;
+        }
+        let path = entry.path();
+        let simplified = crate::platform::simplify_path(&path);
+        if exclusions.contains(&simplified) {
+            continue;
+        }
+        let relative = path.strip_prefix(root).expect("递归路径保持在来源根内");
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            bail!("目录包含不支持的符号链接：{}", path.display());
+        }
+        if metadata.is_dir() {
+            append_deterministic_entry(builder, relative, 0, 0o755, tar::EntryType::Directory)?;
+            total = total.saturating_add(append_deterministic_directory(
+                builder, root, &path, exclusions,
+            )?);
+        } else if metadata.is_file() {
+            append_deterministic_file(builder, &path, relative, &metadata)?;
+            total = total.saturating_add(metadata.len());
+        } else {
+            bail!("目录包含不支持的特殊文件：{}", path.display());
+        }
+    }
+    Ok(total)
+}
+
+/// 以规范化权限和宿主无关头写入一个部署文件。
+fn append_deterministic_file(
+    builder: &mut tar::Builder<GzEncoder<fs::File>>,
+    source: &Path,
+    target: &Path,
+    metadata: &fs::Metadata,
+) -> anyhow::Result<()> {
+    let mut header = deterministic_header(metadata.len(), normalized_file_mode(metadata));
+    let mut file = fs::File::open(source)?;
+    builder.append_data(&mut header, target, &mut file)?;
+    Ok(())
+}
+
+/// 写入不携带宿主身份、时间或文件系统权限细节的条目。
+fn append_deterministic_entry(
+    builder: &mut tar::Builder<GzEncoder<fs::File>>,
+    target: &Path,
+    size: u64,
+    mode: u32,
+    entry_type: tar::EntryType,
+) -> anyhow::Result<()> {
+    let mut header = deterministic_header(size, mode);
+    header.set_entry_type(entry_type);
+    header.set_cksum();
+    builder.append_data(&mut header, target, io::empty())?;
+    Ok(())
+}
+
+/// 创建可重复生成的 tar 头。
+fn deterministic_header(size: u64, mode: u32) -> tar::Header {
+    let mut header = tar::Header::new_gnu();
+    header.set_size(size);
+    header.set_mode(mode);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_mtime(0);
+    header.set_cksum();
+    header
+}
+
+/// 把宿主权限收敛为普通或可执行文件两类。
+#[cfg(unix)]
+fn normalized_file_mode(metadata: &fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+
+    if metadata.permissions().mode() & 0o111 == 0 {
+        0o644
+    } else {
+        0o755
+    }
+}
+
+/// 非 Unix 来源的普通文件不携带宿主权限。
+#[cfg(not(unix))]
+const fn normalized_file_mode(_: &fs::Metadata) -> u32 {
+    0o644
 }
 
 /// 返回全部平台源文件和稳定target，避免归档夹带其他平台产物或旧目标。
@@ -211,17 +323,7 @@ fn append_binary(
             binary.source.display()
         );
     }
-    let mut header = tar::Header::new_gnu();
-    header.set_size(metadata.len());
-    header.set_mode(0o755);
-    header.set_mtime(
-        metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |duration| duration.as_secs()),
-    );
-    header.set_cksum();
+    let mut header = deterministic_header(metadata.len(), 0o755);
     let mut file = fs::File::open(&binary.source)?;
     builder
         .append_data(&mut header, &binary.target, &mut file)

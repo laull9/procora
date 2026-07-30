@@ -142,7 +142,9 @@ impl PackageWorkspaceApp {
 
     /// 处理带修饰键的工作台输入。
     pub fn handle_key_event(&mut self, key: KeyEvent) -> bool {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if matches!(key.code, KeyCode::Char('c' | 'C'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
             self.exit = Some(PackageWorkspaceExit::Back);
             return true;
         }
@@ -187,8 +189,8 @@ impl PackageWorkspaceApp {
             KeyCode::Tab | KeyCode::BackTab => self.switch_tab(),
             KeyCode::Down | KeyCode::Char('j') => self.select_next(),
             KeyCode::Up | KeyCode::Char('k') => self.select_previous(),
-            KeyCode::Left => self.scroll_horizontal(false),
-            KeyCode::Right => self.scroll_horizontal(true),
+            KeyCode::Left | KeyCode::Char('h') => self.scroll_horizontal(false),
+            KeyCode::Right | KeyCode::Char('l') => self.scroll_horizontal(true),
             KeyCode::F(3) => self.horizontal_scroll.toggle_auto(),
             KeyCode::Char('r') => self.exit = Some(PackageWorkspaceExit::Refresh),
             KeyCode::Char('o') => self.exit = Some(PackageWorkspaceExit::OpenPackage),
@@ -241,11 +243,17 @@ impl PackageWorkspaceApp {
         if confirmation_cancelled {
             self.feedback = Some("已取消删除或解除确认".to_owned());
         }
-        match mouse.kind {
-            MouseEventKind::ScrollUp => self.select_previous(),
-            MouseEventKind::ScrollDown => self.select_next(),
-            MouseEventKind::ScrollLeft => self.scroll_horizontal(false),
-            MouseEventKind::ScrollRight => self.scroll_horizontal(true),
+        match (mouse.kind, mouse.modifiers) {
+            (MouseEventKind::ScrollUp, modifiers) if modifiers.contains(KeyModifiers::SHIFT) => {
+                self.scroll_horizontal(false);
+            }
+            (MouseEventKind::ScrollDown, modifiers) if modifiers.contains(KeyModifiers::SHIFT) => {
+                self.scroll_horizontal(true);
+            }
+            (MouseEventKind::ScrollUp, _) => self.select_previous(),
+            (MouseEventKind::ScrollDown, _) => self.select_next(),
+            (MouseEventKind::ScrollLeft, _) => self.scroll_horizontal(false),
+            (MouseEventKind::ScrollRight, _) => self.scroll_horizontal(true),
             _ => {}
         }
         confirmation_cancelled

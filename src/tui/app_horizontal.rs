@@ -15,12 +15,12 @@ pub(super) fn page_text_maximum(app: &App, global: bool) -> usize {
                     .collect::<Vec<_>>()
                     .join(", ");
                 [
-                    task.task_id.as_str().chars().count(),
-                    task.command.chars().count(),
-                    dependencies.chars().count(),
+                    crate::tui::text_view::width(task.task_id.as_str()),
+                    crate::tui::text_view::width(&task.command),
+                    crate::tui::text_view::width(&dependencies),
                     task.message
                         .as_deref()
-                        .map_or(0, |value| value.chars().count()),
+                        .map_or(0, crate::tui::text_view::width),
                 ]
                 .into_iter()
                 .max()
@@ -30,7 +30,7 @@ pub(super) fn page_text_maximum(app: &App, global: bool) -> usize {
                 app.snapshot()
                     .tasks
                     .iter()
-                    .map(|task| task.task_id.as_str().chars().count())
+                    .map(|task| crate::tui::text_view::width(task.task_id.as_str()))
                     .max()
                     .unwrap_or(0)
             } else {
@@ -45,10 +45,10 @@ pub(super) fn page_text_maximum(app: &App, global: bool) -> usize {
                     .dependencies
                     .iter()
                     .map(ToString::to_string)
-                    .map(|value| value.chars().count())
+                    .map(|value| crate::tui::text_view::width(&value))
                     .max()
                     .unwrap_or(0);
-                dependency.saturating_add(task.task_id.as_str().chars().count() + 4)
+                dependency.saturating_add(crate::tui::text_view::width(task.task_id.as_str()) + 4)
             })
             .max()
             .unwrap_or(0),
@@ -58,12 +58,11 @@ pub(super) fn page_text_maximum(app: &App, global: bool) -> usize {
     };
     if global {
         content_maximum
-            .max(app.snapshot().project.chars().count().saturating_add(12))
-            .max(app.feedback().map_or(0, |value| value.chars().count()))
-            .max(
-                app.selected_task()
-                    .map_or(0, |task| task.task_id.as_str().chars().count()),
-            )
+            .max(crate::tui::text_view::width(&app.snapshot().project).saturating_add(12))
+            .max(app.feedback().map_or(0, crate::tui::text_view::width))
+            .max(app.selected_task().map_or(0, |task| {
+                crate::tui::text_view::width(task.task_id.as_str())
+            }))
     } else {
         content_maximum
     }
