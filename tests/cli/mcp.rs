@@ -147,6 +147,108 @@ fn mcp_preview_and_deploy_share_the_managed_deployment_core() {
 }
 
 #[test]
+#[cfg(unix)]
+// MCP包部署的重复预检完全一致，且预检revision可直接确认部署。
+fn mcp_package_preview_revision_is_stable_for_deploy() {
+    use std::fs;
+
+    use crate::{
+        cli_uploads::{install_fake_ssh, temporary_directory},
+        command_support::remove_directory_when_released,
+    };
+
+    let directory = temporary_directory("mcp-package-deploy");
+    install_fake_ssh(&directory);
+    let source = directory.join("service");
+    write_mcp_deploy_service(&source);
+    let package = directory.join("demo.pcpkg");
+    let built = std::process::Command::new(env!("CARGO_BIN_EXE_procora"))
+        .args([
+            "package",
+            "build",
+            source.to_str().unwrap(),
+            "--output",
+            package.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let transport = TokioChildProcess::new(
+                tokio::process::Command::new(env!("CARGO_BIN_EXE_procora")).configure(|command| {
+                    command
+                        .arg("mcp")
+                        .env("PATH", path)
+                        .env("FAKE_SSH_LOG", directory.join("ssh.log"))
+                        .env("FAKE_SSH_HEADER_LOG", directory.join("ssh-header.log"));
+                }),
+            )
+            .unwrap();
+            let client = ().serve(transport).await.unwrap();
+            let arguments = rmcp::object!({
+                "source": package,
+                "ssh": "mock-host",
+                "timeout_ms": 1000,
+                "stable_for_ms": 0,
+                "keep": 2
+            });
+            let first = client
+                .call_tool(
+                    CallToolRequestParams::new("preview_deploy").with_arguments(arguments.clone()),
+                )
+                .await
+                .unwrap();
+            assert_eq!(first.is_error, Some(false));
+            let first = first.structured_content.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+            let repeated = client
+                .call_tool(CallToolRequestParams::new("preview_deploy").with_arguments(arguments))
+                .await
+                .unwrap();
+            assert_eq!(repeated.structured_content.as_ref(), Some(&first));
+
+            let revision = first["revision"].as_str().unwrap();
+            let deployed = client
+                .call_tool(CallToolRequestParams::new("deploy_service").with_arguments(
+                    rmcp::object!({
+                        "source": package,
+                        "ssh": "mock-host",
+                        "revision": revision,
+                        "timeout_ms": 1000,
+                        "stable_for_ms": 0,
+                        "keep": 2
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(deployed.is_error, Some(false));
+            assert_eq!(
+                deployed.structured_content.unwrap()["preview"]["revision"],
+                revision
+            );
+            client.cancel().await.unwrap();
+        });
+
+    let invocations = fs::read_to_string(directory.join("ssh.log")).unwrap();
+    assert_eq!(invocations.matches("__receive-deploy").count(), 1);
+    remove_directory_when_released(&directory);
+}
+
+#[test]
 // 服务通过真实MCP会话暴露工具和四份内嵌参考文档。
 fn server_exposes_tools_and_embedded_documentation() {
     tokio::runtime::Builder::new_multi_thread()

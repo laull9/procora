@@ -8,11 +8,8 @@ use std::{
 use anyhow::{Context, bail};
 use clap::{Args, Subcommand};
 
-use super::api;
-use crate::{
-    config::DeployPlatform,
-    package::{self, PackagePlatform},
-};
+use super::{api, package_build_command::PackageBuildArgs};
+use crate::{config::DeployPlatform, package};
 
 /// `procora package` 的嵌套参数。
 #[derive(Debug, Args)]
@@ -26,20 +23,7 @@ pub struct PackageArgs {
 #[derive(Debug, Subcommand)]
 pub enum PackageCommand {
     /// 从 Service 目录构建确定性 `.pcpkg`。
-    Build {
-        /// 配置文件或可自动发现配置的 Service 目录。
-        #[arg(default_value = ".")]
-        source: PathBuf,
-        /// 输出文件；省略时使用当前目录的 `<service>.pcpkg`。
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// `all`、`current` 或具体的 `os-arch[-environment]`。
-        #[arg(long, default_value = "all")]
-        platform: String,
-        /// 安全备份并替换已有普通包文件；失败时恢复原文件。
-        #[arg(long)]
-        force: bool,
-    },
+    Build(PackageBuildArgs),
     /// 读取清单摘要，不展开或完整读取全部 Blob。
     Inspect {
         /// 要检查的 `.pcpkg` 文件。
@@ -164,12 +148,7 @@ pub enum PackageCommand {
 /// 执行一个独立包操作。
 pub fn run(arguments: PackageArgs) -> anyhow::Result<()> {
     match arguments.command {
-        PackageCommand::Build {
-            source,
-            output,
-            platform,
-            force,
-        } => build(&source, output.as_deref(), &platform, force),
+        PackageCommand::Build(arguments) => super::package_build_command::run(&arguments),
         PackageCommand::Inspect {
             package: path,
             json,
@@ -237,35 +216,6 @@ pub(super) fn install_path(
             outcome.project, outcome.release
         );
     }
-    Ok(())
-}
-
-/// 构建包并输出可供脚本复用的稳定摘要。
-fn build(source: &Path, output: Option<&Path>, platform: &str, force: bool) -> anyhow::Result<()> {
-    let source = api::absolute_user_path(source)?;
-    let discovered = crate::config::discover_path(&source)
-        .with_context(|| format!("无法发现待打包 Service：{}", source.display()))?;
-    let output = output.map_or_else(
-        || {
-            crate::platform::current_dir()
-                .context("无法读取当前目录")
-                .map(|current| current.join(format!("{}.pcpkg", discovered.compiled.spec.project)))
-        },
-        api::absolute_user_path,
-    )?;
-    let platform = parse_build_platform(platform)?;
-    let result = if force {
-        package::build_replacing(&source, &output, platform)?
-    } else {
-        package::build(&source, &output, platform)?
-    };
-    println!("已构建 {}", result.path.display());
-    println!("Service: {}", result.project);
-    println!("Package: {}", result.package_digest);
-    println!(
-        "内容: {} 个普通文件，{} 个二进制变体，{} 字节",
-        result.files, result.binary_variants, result.package_bytes
-    );
     Ok(())
 }
 
@@ -352,15 +302,6 @@ fn extract(path: &Path, output: &Path, platform: &str) -> anyhow::Result<()> {
         result.files, result.content_bytes
     );
     Ok(())
-}
-
-/// 解析构建平台范围。
-fn parse_build_platform(value: &str) -> anyhow::Result<PackagePlatform> {
-    match value {
-        "all" => Ok(PackagePlatform::All),
-        "current" => Ok(PackagePlatform::Target(current_platform()?)),
-        value => Ok(PackagePlatform::Target(parse_platform(value)?)),
-    }
 }
 
 /// 解析解包使用的唯一目标平台。

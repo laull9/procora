@@ -6,7 +6,8 @@
 
 ```mermaid
 flowchart LR
-    A[Service 目录<br/>配置 + 文件 + binaries] --> B[procora package build]
+    A[Service 目录<br/>配置 + 文件] --> P[可选 prepare 命令<br/>编译 / 生成资源]
+    P --> B[procora package build]
     B --> C[demo.pcpkg<br/>manifest + 内容寻址 Blob]
     C --> D[inspect / verify]
     C --> E[extract<br/>选择一个平台]
@@ -33,12 +34,24 @@ flowchart LR
 # 默认构建包含全部 binaries 变体的胖包
 procora package build . --output demo.pcpkg
 
-# 只有显式 --force 才会先备份并替换已有普通文件；失败会恢复原包
+# 相同输入重复执行会复用已有包；内容不同时才需要显式替换
 procora package build . --output demo.pcpkg --force
 
 # 只构建当前平台的薄包
 procora package build . --platform current
 procora package build . --platform linux-x86_64-gnu
+
+# 先运行一个或多个显式准备命令，再收集产物构建包
+procora package build . \
+  --prepare "python scripts/build_package.py"
+procora package build . \
+  --prepare "cargo build --release" \
+  --prepare "python scripts/collect_assets.py"
+
+# 准备、构建并通过现有验活/回滚协议直接部署
+procora package build . \
+  --prepare "python scripts/build_package.py" \
+  --deploy prod
 
 # 读取清单、完整验证 Blob、按平台解包
 procora package inspect demo.pcpkg
@@ -73,6 +86,39 @@ procora push demo.pcpkg --package-entry assets --ssh prod
 
 `push --package-entry assets` 未显式给出 `--target` 时默认使用 `<project>::assets`。普通资产通常使用默认的 `--package-platform current`；若导出路径依赖某个二进制变体，可显式传入 `--package-platform os-arch[-environment]`。
 
+## 构建准备与一键部署
+
+`--prepare <COMMAND>` 用于在打包前生成 `binaries` 引用的编译产物、前端静态资源或其他派生文件。该参数可以重复，每条命令都在 Service 根目录按声明顺序执行；任一命令失败就立即停止，不创建新包，也不会因 `--force` 提前移动已有包。
+
+命令文本只负责安全拆分程序和参数，不经过 shell，不会隐式解释管道、重定向、变量替换或 `&&`。Python 脚本可直接写成：
+
+```bash
+procora package build . --prepare "python scripts/build_package.py"
+```
+
+需要 shell 语义时必须显式选择解释器，例如 `--prepare 'sh -c "make && make assets"'`；Windows 可显式使用 PowerShell。脚本继承当前用户环境，并额外获得以下稳定上下文：
+
+| 环境变量 | 含义 |
+| --- | --- |
+| `PROCORA_PACKAGE_SOURCE` | 规范化后的 Service 根目录 |
+| `PROCORA_PACKAGE_OUTPUT` | 将要写入的 `.pcpkg` 绝对路径 |
+| `PROCORA_PACKAGE_PLATFORM` | `all` 或规范化目标平台键 |
+| `PROCORA_PACKAGE_PROJECT` | 配置中的 Service 名称 |
+
+准备命令只应生成包输入，不应自行调用 `procora package build` 或直接写入 `PROCORA_PACKAGE_OUTPUT`。Procora 会在命令全部成功后重新发现并校验配置、收集文件、生成确定性包并执行完整自校验。
+
+`--deploy <SSH_TARGET>` 把成功构建或确认未变化的包直接交给现有裸机部署流程：
+
+```bash
+procora package build . \
+  --platform all \
+  --prepare "python scripts/build_package.py" \
+  --deploy prod \
+  --batch
+```
+
+部署仍会探测远端平台、只选择匹配变体、复核摘要、验活并在失败时回滚。部署失败不会删除刚构建且已经验证的包，修复远端问题后可直接运行 `procora deploy <包> --ssh <目标>` 重试。
+
 ## 包内容与确定性
 
 `.pcpkg` v1 是 zstd 压缩的确定性 tar：
@@ -86,6 +132,7 @@ signatures/...
 - `manifest.json` 必须是第一个条目，格式标识为 `procora.package/v1`。
 - 普通文件和二进制都通过 `sha256:<hex>` 引用 Blob；相同内容只保存一次。
 - tar 条目顺序、所有者、时间戳和模式被规范化；输入内容与可执行位不变时，重复构建得到相同字节。
+- 已有输出是同一逻辑包时，普通 `package build` 幂等成功并报告“包未变化”；已有输出内容不同时仍拒绝覆盖，只有 `--force` 会先创建可恢复备份再替换。
 - 逻辑 package digest 是规范清单的 SHA-256。按平台物化后的 release digest 只取决于该平台实际得到的路径和 Blob，因此向胖包增加其他平台变体不会改变当前平台 release。
 - `signatures/` 是保留命名空间；v1 能安全跳过有界签名条目，但当前版本尚未实现签名创建或信任策略。
 
@@ -110,7 +157,7 @@ target/
 !public/example.secret
 ```
 
-配置入口不能被忽略。`binaries` 声明的构建产物不受普通忽略规则替代：被选中的变体必须是存在的非空普通文件，否则构建失败。
+配置入口不能被忽略。`binaries` 声明的构建产物不受普通忽略规则替代：准备命令完成后，被选中的变体必须是存在的非空普通文件，否则构建失败。
 
 ## 与本机和裸机 release 的关系
 
