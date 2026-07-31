@@ -3,10 +3,11 @@
 use std::path::PathBuf;
 
 use procora::mcp::ProcoraMcpServer;
+#[cfg(unix)]
+use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::{
     ServiceExt,
     model::{CallToolRequestParams, GetPromptRequestParams},
-    transport::{ConfigureCommandExt, TokioChildProcess},
 };
 
 /// 返回仓库根目录中的基础配置夹具。
@@ -348,9 +349,7 @@ fn server_exposes_tools_and_embedded_documentation() {
 fn mcp_package_tools_build_verify_and_extract() {
     use std::fs;
 
-    use crate::{
-        cli_uploads::temporary_directory, command_support::remove_directory_when_released,
-    };
+    use crate::{command_support::remove_directory_when_released, temporary_directory};
 
     let directory = temporary_directory("mcp-package-tools");
     let service = directory.join("service");

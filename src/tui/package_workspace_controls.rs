@@ -24,7 +24,7 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
                 key_hints::join(&[
                     "Tab 视图",
                     "j/k 选择",
-                    "b 构建",
+                    "b/B 构建/构建部署",
                     "o 打开",
                     "v 验证",
                     "i 安装",
@@ -46,7 +46,7 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
                 key_hints::join(&[
                     "Tab",
                     "j/k",
-                    "b构建",
+                    "b/B构建/部署",
                     "o打开",
                     "v验证",
                     "i安装",
@@ -63,7 +63,7 @@ pub(super) fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &PackageWork
                 ]),
                 key_hints::join(&[
                     "j/k 选",
-                    "b 构建",
+                    "b/B 构建/部署",
                     "o 打开",
                     "Del 删包",
                     "? 帮助",
@@ -140,7 +140,7 @@ pub(super) fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &PackageWor
     }
     let selected = match app.tab() {
         PackageWorkspaceTab::Packages => app.selected_package().map_or_else(
-            || "尚无包 · b 构建 / o 打开".to_owned(),
+            || "尚无包 · B 构建部署 / b 构建 / o 打开".to_owned(),
             |entry| {
                 entry.info.as_ref().map_or_else(
                     || "当前包清单损坏 · Del 删除".to_owned(),
@@ -165,7 +165,9 @@ pub(super) fn render_compact(frame: &mut Frame<'_>, area: Rect, app: &PackageWor
         ),
     };
     let primary = match app.tab() {
-        PackageWorkspaceTab::Packages if app.control_allowed() => "b构建 o打开 i安装 Del删包",
+        PackageWorkspaceTab::Packages if app.control_allowed() => {
+            "B构建部署 b构建 o打开 i安装 Del删包"
+        }
         PackageWorkspaceTab::Packages => "o打开 v验证 x解包",
         PackageWorkspaceTab::Installed
             if app.control_allowed() && app.selected_installed().is_some() =>
@@ -220,6 +222,7 @@ pub(super) fn render_help(frame: &mut Frame<'_>, area: Rect, app: &PackageWorksp
     if app.control_allowed() {
         lines.extend([
             help_ui::key_line("b", "从上下文 Service 构建确定性包", app.plain_mode()),
+            help_ui::key_line("B", "构建包、预检计划并确认裸机部署", app.plain_mode()),
             help_ui::key_line("i / t", "安装为不可变 release / 临时运行", app.plain_mode()),
             help_ui::key_line("d / u", "裸机部署 / 推送命名导出项", app.plain_mode()),
             help_ui::key_line(

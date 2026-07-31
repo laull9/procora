@@ -99,6 +99,39 @@ fn mutating_actions_require_control_capability() {
 }
 
 #[test]
+// 构建部署使用独立快捷键，且继续受控制能力和包文件视图约束。
+fn build_and_deploy_preserves_permissions_and_tab_scope() {
+    let mut app = PackageWorkspaceApp::new(Vec::new(), vec![installed_service()], None);
+
+    assert!(!app.handle_key(KeyCode::Char('B')));
+    assert_eq!(app.take_exit(), None);
+
+    app.set_control_allowed(true);
+    assert!(app.handle_key(KeyCode::Char('B')));
+    assert_eq!(app.take_exit(), Some(PackageWorkspaceExit::BuildAndDeploy));
+
+    app.handle_key(KeyCode::Tab);
+    assert!(app.handle_key(KeyCode::Char('B')));
+    assert_eq!(app.take_exit(), None);
+    assert!(app.feedback().unwrap().contains("切换到“包文件”"));
+}
+
+#[test]
+// 构建或打开新包后可精确选中新路径，并恢复包文件视图。
+fn selecting_new_package_path_avoids_redeploying_old_package() {
+    let first = broken_package();
+    let mut second = broken_package();
+    second.path = PathBuf::from("/downloads/demo-2.pcpkg");
+    let expected = second.path.clone();
+    let mut app = PackageWorkspaceApp::new(vec![first, second], vec![installed_service()], None);
+    app.handle_key(KeyCode::Tab);
+
+    assert!(app.select_package_path(&expected));
+    assert_eq!(app.tab(), PackageWorkspaceTab::Packages);
+    assert_eq!(app.selected_package().unwrap().path, expected);
+}
+
+#[test]
 // 永久清理必须连续两次大写D，其他按键会取消确认。
 fn purge_requires_consecutive_uppercase_confirmation() {
     let mut app = PackageWorkspaceApp::new(Vec::new(), vec![installed_service()], None);
@@ -213,6 +246,7 @@ fn compact_workspace_keeps_primary_actions_and_navigation() {
 
     let packages = render_text(&app, 36, 10);
     assert!(packages.contains("尚无包"));
+    assert!(packages.contains("B构建部署"));
     assert!(packages.contains("b构建"));
     assert!(packages.contains("Tab切换"));
     assert!(packages.contains("?帮助"));
@@ -237,6 +271,7 @@ fn compact_workspace_help_reflows_instead_of_hiding_actions() {
     let help = render_text(&app, 36, 14);
     assert!(help.contains("Tab·切换包文件"));
     assert!(help.contains("b·从上下文Service"));
+    assert!(help.contains("B·构建包"));
     assert!(help.contains("?/Esc关闭"));
 }
 

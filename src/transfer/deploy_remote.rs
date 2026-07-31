@@ -47,10 +47,11 @@ pub(crate) fn preview_deploy(
     timeout_ms: u64,
     stable_for_ms: u64,
     keep: u32,
+    batch: bool,
 ) -> anyhow::Result<DeployPreview> {
     let mut remote_bin = configured_remote_bin.unwrap_or("procora").to_owned();
     remote::validate_remote_bin(&remote_bin)?;
-    let ssh_target = remote::resolve_ssh_target(Some(configured_target), true)?;
+    let ssh_target = remote::resolve_ssh_target(Some(configured_target), batch)?;
     let mut auth = SshAuth::automatic();
     let prepared = prepare_deployment(
         source,
@@ -59,7 +60,7 @@ pub(crate) fn preview_deploy(
         configured_remote_bin,
         &mut remote_bin,
         &mut auth,
-        true,
+        batch,
     )?;
     build_preview(
         source,

@@ -1,10 +1,32 @@
 //! 完整 Service 的无目标全托管部署入口。
 
-use std::env;
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 
 use super::deploy_memory::{DeployTargetMemory, load_target, save_target};
+
+/// 交互式部署确认后的结果。
+pub(super) enum ReviewedDeploy {
+    /// 用户在计划确认阶段取消，远端未被修改。
+    Cancelled { project: String },
+    /// 部署完成或确认远端已经运行相同 release。
+    Completed {
+        project: String,
+        release: String,
+        changed: bool,
+        ssh_target: String,
+    },
+}
+
+/// 已解析部署目标记忆的共享请求。
+struct DeployRequest {
+    memory_root: PathBuf,
+    settings: crate::cli::api::deploy::DeploySettings,
+}
 
 /// `procora deploy` 的完整 Service 与确定性验收参数。
 #[derive(Debug, clap::Args)]
@@ -50,18 +72,72 @@ pub struct DeployArgs {
 
 /// 校验本地 Service 并通过 SSH 交给远端 Procora 全托管。
 pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
-    let DeployArgs {
-        source,
-        ssh,
-        remote_bin,
-        service: expected_service,
-        timeout: timeout_ms,
-        stable_for: stable_for_ms,
-        keep,
-        batch,
-        dry_run,
-    } = arguments;
-    let source = crate::cli::api::absolute_user_path(source)?;
+    let mut request = prepare_request(arguments, None)?;
+    if arguments.dry_run {
+        if request.settings.ssh_target.is_none() {
+            request.settings.ssh_target = Some(crate::transfer::resolve_ssh_target(
+                None,
+                request.settings.batch,
+            )?);
+        }
+        let preview = crate::cli::api::deploy::preview(&request.settings)?;
+        print_preview(&preview);
+        println!(
+            "预检完成：未修改远端；执行相同命令并移除 `--dry-run` 即可部署。\n修订：{}",
+            preview.revision
+        );
+        return Ok(());
+    }
+    let outcome = execute_and_report(&request.settings, None)?;
+    remember_target(&request.memory_root, request.settings.batch, &outcome);
+    Ok(())
+}
+
+/// 预检并展示完整计划，确认后复核修订并执行部署。
+pub(super) fn run_reviewed(
+    arguments: &DeployArgs,
+    memory_root: Option<&Path>,
+) -> anyhow::Result<ReviewedDeploy> {
+    let mut request = prepare_request(arguments, memory_root)?;
+    if request.settings.ssh_target.is_none() {
+        request.settings.ssh_target = Some(crate::transfer::resolve_ssh_target(
+            None,
+            request.settings.batch,
+        )?);
+    }
+    let preview = crate::cli::api::deploy::preview(&request.settings)?;
+    print_preview(&preview);
+    let confirmed = crate::tui::select_inline(
+        "确认远端裸机部署",
+        "预检未修改远端；确认后将上传、切换并验活，失败时自动回滚。",
+        vec![
+            crate::tui::SelectionItem::new("确认部署（推荐）", "复核当前修订并执行完整部署", true),
+            crate::tui::SelectionItem::new("取消", "保留本地包且不修改远端", false),
+        ],
+    )?
+    .unwrap_or(false);
+    if !confirmed {
+        return Ok(ReviewedDeploy::Cancelled {
+            project: preview.project,
+        });
+    }
+    request.settings.remote_bin = Some(preview.remote_bin.clone());
+    let outcome = execute_and_report(&request.settings, Some(&preview.revision))?;
+    remember_target(&request.memory_root, request.settings.batch, &outcome);
+    Ok(ReviewedDeploy::Completed {
+        project: outcome.project,
+        release: outcome.release,
+        changed: outcome.changed,
+        ssh_target: outcome.preview.ssh_target,
+    })
+}
+
+/// 解析部署来源、服务身份和可复用的目标记忆。
+fn prepare_request(
+    arguments: &DeployArgs,
+    memory_root_override: Option<&Path>,
+) -> anyhow::Result<DeployRequest> {
+    let source = crate::cli::api::absolute_user_path(&arguments.source)?;
     let (memory_root, project) = if crate::package::is_package_path(&source) {
         let info = crate::package::inspect(&source)?;
         (source.clone(), info.manifest.project)
@@ -70,8 +146,9 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
             .with_context(|| format!("无法发现待部署 Service：{}", source.display()))?;
         (discovered.root, discovered.compiled.spec.project)
     };
-    let remembered = if ssh.is_none()
-        && !batch
+    let memory_root = memory_root_override.map_or(memory_root, crate::platform::simplify_path);
+    let remembered = if arguments.ssh.is_none()
+        && !arguments.batch
         && env::var("PROCORA_SSH_TARGET")
             .ok()
             .is_none_or(|value| value.trim().is_empty())
@@ -86,34 +163,34 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
             target.project, target.ssh_target
         );
     }
-    let ssh_target = ssh
+    let ssh_target = arguments
+        .ssh
         .clone()
         .or_else(|| remembered.as_ref().map(|target| target.ssh_target.clone()));
-    let remote_bin = remote_bin
+    let remote_bin = arguments
+        .remote_bin
         .clone()
         .or_else(|| remembered.as_ref().map(|target| target.remote_bin.clone()));
-    let mut settings = crate::cli::api::deploy::DeploySettings {
-        source,
-        ssh_target,
-        remote_bin,
-        expected_service: expected_service.clone(),
-        timeout_ms: *timeout_ms,
-        stable_for_ms: *stable_for_ms,
-        keep: *keep,
-        batch: *batch,
-    };
-    if *dry_run {
-        if settings.ssh_target.is_none() {
-            settings.ssh_target = Some(crate::transfer::resolve_ssh_target(None, settings.batch)?);
-        }
-        let preview = crate::cli::api::deploy::preview(&settings)?;
-        print_preview(&preview);
-        println!(
-            "预检完成：未修改远端；执行相同命令并移除 `--dry-run` 即可部署。\n修订：{}",
-            preview.revision
-        );
-        return Ok(());
-    }
+    Ok(DeployRequest {
+        memory_root,
+        settings: crate::cli::api::deploy::DeploySettings {
+            source,
+            ssh_target,
+            remote_bin,
+            expected_service: arguments.service.clone(),
+            timeout_ms: arguments.timeout,
+            stable_for_ms: arguments.stable_for,
+            keep: arguments.keep,
+            batch: arguments.batch,
+        },
+    })
+}
+
+/// 执行部署并输出稳定的阶段与结果摘要。
+fn execute_and_report(
+    settings: &crate::cli::api::deploy::DeploySettings,
+    expected_revision: Option<&str>,
+) -> anyhow::Result<crate::transfer::DeployOutcome> {
     let mut reporter = |event: &crate::transfer::DeployEvent| {
         if matches!(event.phase.as_str(), "preflight" | "binary" | "archive") {
             println!("{}", event.message);
@@ -121,10 +198,10 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
             eprintln!("[{}] {}", event.phase, event.message);
         }
     };
-    let outcome = crate::cli::api::deploy::execute(&settings, None, &mut reporter)?;
+    let outcome = crate::cli::api::deploy::execute(settings, expected_revision, &mut reporter)?;
     if outcome.changed {
         println!("部署完成：{}，release {}", outcome.project, outcome.release);
-        if let Some(previous) = outcome.previous_release {
+        if let Some(previous) = &outcome.previous_release {
             println!("上一版本：{previous}");
         }
     } else {
@@ -133,17 +210,21 @@ pub(super) fn run(arguments: &DeployArgs) -> anyhow::Result<()> {
             outcome.project, outcome.release
         );
     }
+    Ok(outcome)
+}
+
+/// 非批处理成功后按稳定 Service 身份保存非敏感目标。
+fn remember_target(memory_root: &Path, batch: bool, outcome: &crate::transfer::DeployOutcome) {
     if !batch
         && let Err(error) = save_target(DeployTargetMemory {
-            root: memory_root,
-            project: outcome.project,
-            ssh_target: outcome.preview.ssh_target,
-            remote_bin: outcome.preview.remote_bin,
+            root: memory_root.to_path_buf(),
+            project: outcome.project.clone(),
+            ssh_target: outcome.preview.ssh_target.clone(),
+            remote_bin: outcome.preview.remote_bin.clone(),
         })
     {
         eprintln!("警告：部署已完成，但无法保存部署目标记忆：{error:#}");
     }
-    Ok(())
 }
 
 /// 以适合人工确认的稳定格式打印无副作用部署计划。

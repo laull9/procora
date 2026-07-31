@@ -43,6 +43,7 @@ pub(crate) fn preview(settings: &DeploySettings) -> anyhow::Result<DeployPreview
             settings.timeout_ms,
             settings.stable_for_ms,
             settings.keep,
+            settings.batch,
         )
     } else {
         crate::transfer::preview_deploy(
@@ -55,6 +56,7 @@ pub(crate) fn preview(settings: &DeploySettings) -> anyhow::Result<DeployPreview
             settings.timeout_ms,
             settings.stable_for_ms,
             settings.keep,
+            settings.batch,
         )
     }
 }

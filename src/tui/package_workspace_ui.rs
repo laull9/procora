@@ -83,7 +83,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
     .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(Line::from(tabs)), rows[0]);
     let context = app.context_source().map_or_else(
-        || "未绑定 Service；按 b 选择来源构建".to_owned(),
+        || "未绑定 Service；按 B 构建部署，或按 b 仅构建".to_owned(),
         |path| format!("上下文 Service：{}", path.display()),
     );
     frame.render_widget(
@@ -130,7 +130,7 @@ fn render_list(frame: &mut Frame<'_>, area: Rect, app: &PackageWorkspaceApp) {
             let mut state = ListState::default().with_selected(Some(app.selected_package_index()));
             frame.render_stateful_widget(
                 List::new(if items.is_empty() {
-                    vec![ListItem::new("尚无包文件 · b 构建 / o 打开")]
+                    vec![ListItem::new("尚无包文件 · b 构建 / o 打开 · B 构建部署")]
                 } else {
                     items
                 })
@@ -204,7 +204,7 @@ fn package_details(app: &PackageWorkspaceApp, width: u16) -> Text<'static> {
         return Text::from(vec![
             Line::from("还没有可用包。"),
             Line::from(""),
-            Line::from("按 b 从 Service 构建，或按 o 打开已有 .pcpkg。"),
+            Line::from("按 B 构建并部署，按 b 仅构建，或按 o 打开已有 .pcpkg。"),
         ]);
     };
     let Some(info) = &entry.info else {

@@ -50,6 +50,8 @@ pub enum PackageWorkspaceExit {
     OpenPackage,
     /// 从当前上下文 Service 构建包。
     BuildPackage,
+    /// 从当前上下文 Service 构建包并进入部署确认。
+    BuildAndDeploy,
     /// 完整验证选中包。
     Verify(PathBuf),
     /// 安装选中包。
@@ -197,6 +199,13 @@ impl PackageWorkspaceApp {
             KeyCode::Char('b') if self.control_allowed => {
                 self.exit = Some(PackageWorkspaceExit::BuildPackage);
             }
+            KeyCode::Char('B') if self.control_allowed => {
+                if self.tab == PackageWorkspaceTab::Packages {
+                    self.exit = Some(PackageWorkspaceExit::BuildAndDeploy);
+                } else {
+                    self.feedback = Some("切换到“包文件”后再构建并部署".to_owned());
+                }
+            }
             KeyCode::Char('v') => self.package_action(PackageWorkspaceExit::Verify),
             KeyCode::Char('i') if self.control_allowed => {
                 self.package_action(PackageWorkspaceExit::Install);
@@ -304,6 +313,17 @@ impl PackageWorkspaceApp {
                     .min(self.installed.len().saturating_sub(1))
             });
         self.horizontal_scroll.reset_position();
+    }
+
+    /// 选中一次操作刚生成或显式打开的包，并返回包文件视图。
+    pub fn select_package_path(&mut self, path: &std::path::Path) -> bool {
+        let Some(index) = self.packages.iter().position(|entry| entry.path == path) else {
+            return false;
+        };
+        self.tab = PackageWorkspaceTab::Packages;
+        self.selected_package = index;
+        self.horizontal_scroll.reset_position();
+        true
     }
 
     /// 设置当前会话是否允许产生运行副作用。

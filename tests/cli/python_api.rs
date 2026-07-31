@@ -2,7 +2,7 @@
 
 use std::{fs, path::Path, process::Command};
 
-use crate::{cli_uploads::temporary_directory, command_support::remove_directory_when_released};
+use crate::{command_support::remove_directory_when_released, temporary_directory};
 
 /// 返回当前平台约定的 Python 解释器。
 fn interpreter() -> &'static str {

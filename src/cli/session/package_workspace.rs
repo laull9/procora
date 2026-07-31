@@ -27,9 +27,19 @@ pub(super) fn run(context_source: Option<&Path>, control_allowed: bool) -> anyho
         let result = execute(exit, context_source, &mut opened);
         match result {
             Ok(WorkspaceFlow::Back) => return Ok(()),
-            Ok(WorkspaceFlow::Continue(feedback)) => {
+            Ok(flow) => {
+                let (feedback, selected_package) = match flow {
+                    WorkspaceFlow::Back => unreachable!("返回流程已经提前处理"),
+                    WorkspaceFlow::Continue(feedback) => (feedback, None),
+                    WorkspaceFlow::ContinueSelecting { feedback, path } => (feedback, Some(path)),
+                };
                 match load_workspace(context_source, &opened) {
-                    Ok((packages, installed)) => app.replace_data(packages, installed),
+                    Ok((packages, installed)) => {
+                        app.replace_data(packages, installed);
+                        if let Some(path) = selected_package {
+                            app.select_package_path(&path);
+                        }
+                    }
                     Err(error) => app.set_feedback(format!("刷新失败：{error:#}")),
                 }
                 app.set_feedback(feedback);
@@ -43,6 +53,7 @@ pub(super) fn run(context_source: Option<&Path>, control_allowed: bool) -> anyho
 enum WorkspaceFlow {
     Back,
     Continue(String),
+    ContinueSelecting { feedback: String, path: PathBuf },
 }
 
 /// 执行离开全屏 TUI 后的包操作。
@@ -58,6 +69,7 @@ fn execute(
         }
         PackageWorkspaceExit::OpenPackage => open_package(opened),
         PackageWorkspaceExit::BuildPackage => build_package(context_source, opened),
+        PackageWorkspaceExit::BuildAndDeploy => build_and_deploy(context_source, opened),
         PackageWorkspaceExit::Verify(path) => {
             let info = package::verify(&path)?;
             Ok(WorkspaceFlow::Continue(format!(
@@ -79,18 +91,9 @@ fn execute(
         }
         PackageWorkspaceExit::Extract(path) => extract_package(&path),
         PackageWorkspaceExit::Deploy(path) => {
-            super::super::deploy::run(&super::super::deploy::DeployArgs {
-                source: path,
-                ssh: None,
-                remote_bin: None,
-                service: None,
-                timeout: 30_000,
-                stable_for: 2_000,
-                keep: 3,
-                batch: false,
-                dry_run: false,
-            })?;
-            Ok(WorkspaceFlow::Continue("远端裸机部署已完成".to_owned()))
+            let memory_root = context_memory_root(context_source, &path);
+            let feedback = deploy_package_reviewed(&path, memory_root.as_deref(), None)?;
+            Ok(WorkspaceFlow::Continue(feedback))
         }
         PackageWorkspaceExit::PushExport { package, entry } => {
             super::super::push::run(super::super::push::PushRequest {
@@ -156,10 +159,10 @@ fn open_package(opened: &mut BTreeSet<PathBuf>) -> anyhow::Result<WorkspaceFlow>
     }
     package::inspect(&path)?;
     opened.insert(path.clone());
-    Ok(WorkspaceFlow::Continue(format!(
-        "已加入包：{}",
-        path.display()
-    )))
+    Ok(WorkspaceFlow::ContinueSelecting {
+        feedback: format!("已加入包：{}", path.display()),
+        path,
+    })
 }
 
 /// 从上下文或用户选择的 Service 构建胖包或当前平台薄包。
@@ -167,6 +170,46 @@ fn build_package(
     context_source: Option<&Path>,
     opened: &mut BTreeSet<PathBuf>,
 ) -> anyhow::Result<WorkspaceFlow> {
+    let built = build_package_artifact(context_source)?;
+    opened.insert(built.result.path.clone());
+    Ok(WorkspaceFlow::ContinueSelecting {
+        feedback: format!(
+            "构建完成：{} · {} 个文件 / {} 个二进制变体",
+            built.result.path.display(),
+            built.result.files,
+            built.result.binary_variants
+        ),
+        path: built.result.path,
+    })
+}
+
+/// 构建成功后预检并确认部署，失败或取消时仍保留并选中新包。
+fn build_and_deploy(
+    context_source: Option<&Path>,
+    opened: &mut BTreeSet<PathBuf>,
+) -> anyhow::Result<WorkspaceFlow> {
+    let built = build_package_artifact(context_source)?;
+    let path = built.result.path.clone();
+    opened.insert(path.clone());
+    let feedback = match deploy_package_reviewed(
+        &path,
+        Some(&built.service_root),
+        Some(&built.result.project),
+    ) {
+        Ok(feedback) => format!("包已构建；{feedback}"),
+        Err(error) => format!("包已构建并保留，但部署失败：{error:#}"),
+    };
+    Ok(WorkspaceFlow::ContinueSelecting { feedback, path })
+}
+
+/// 一次构建产生的包与稳定 Service 身份。
+struct BuiltPackage {
+    service_root: PathBuf,
+    result: package::PackageBuildResult,
+}
+
+/// 选择来源与平台并构建经过自校验的包文件。
+fn build_package_artifact(context_source: Option<&Path>) -> anyhow::Result<BuiltPackage> {
     let source = match context_source {
         Some(source) => source.to_path_buf(),
         None => select_path_inline_named(
@@ -206,13 +249,58 @@ fn build_package(
         output.display()
     );
     let result = package::build(&source, &output, platform)?;
-    opened.insert(result.path.clone());
-    Ok(WorkspaceFlow::Continue(format!(
-        "构建完成：{} · {} 个文件 / {} 个二进制变体",
-        result.path.display(),
-        result.files,
-        result.binary_variants
-    )))
+    Ok(BuiltPackage {
+        service_root: discovered.root,
+        result,
+    })
+}
+
+/// 使用完整预检计划确认一次包部署，并生成返回工作台的结果摘要。
+fn deploy_package_reviewed(
+    path: &Path,
+    memory_root: Option<&Path>,
+    expected_service: Option<&str>,
+) -> anyhow::Result<String> {
+    let outcome = super::super::deploy::run_reviewed(
+        &super::super::deploy::DeployArgs {
+            source: path.to_path_buf(),
+            ssh: None,
+            remote_bin: None,
+            service: expected_service.map(str::to_owned),
+            timeout: 30_000,
+            stable_for: 2_000,
+            keep: 3,
+            batch: false,
+            dry_run: false,
+        },
+        memory_root,
+    )?;
+    Ok(match outcome {
+        super::super::deploy::ReviewedDeploy::Cancelled { project } => {
+            format!("`{project}` 部署已取消，远端未修改")
+        }
+        super::super::deploy::ReviewedDeploy::Completed {
+            project,
+            release,
+            changed,
+            ssh_target,
+        } if changed => {
+            format!("`{project}` 已部署到 {ssh_target}，release {release}")
+        }
+        super::super::deploy::ReviewedDeploy::Completed {
+            project,
+            release,
+            ssh_target,
+            ..
+        } => format!("`{project}` 在 {ssh_target} 已运行 release {release}，无需更新"),
+    })
+}
+
+/// 仅当包与当前上下文 Service 身份一致时复用稳定的部署目标记忆。
+fn context_memory_root(context_source: Option<&Path>, package_path: &Path) -> Option<PathBuf> {
+    let discovered = crate::config::discover_path(context_source?).ok()?;
+    let info = package::inspect(package_path).ok()?;
+    (discovered.compiled.spec.project == info.manifest.project).then_some(discovered.root)
 }
 
 /// 为解包生成不会覆盖既有内容的相邻目录。
