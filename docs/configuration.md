@@ -422,7 +422,7 @@ include 当前采用完整 Task、模板和依赖条目覆盖；profile 共享�
 
 ## 7. Python 配置前端
 
-Python 配置不嵌入核心引擎。只有用户显式传入文件名精确为 `procora.py` 的路径时才执行；目录发现永远只扫描四种声明式 `procora.*` 文件，不会自动执行脚本：
+Python 配置不嵌入核心引擎。显式传入文件名精确为 `procora.py` 的路径，或让目录发现选中唯一合法的 `procora.py` 时执行：
 
 ```text
 procora.py
@@ -432,7 +432,9 @@ procora.py
   → 与数据格式相同的校验和规范化管线
 ```
 
-默认解释器为 Unix 的 `python3` 或 Windows 的 `python`，也可由嵌入方通过 `PythonConfigRunner` 显式注入。Procora 不经过 shell，以 `-I -S -X utf8` 启动解释器，清空继承环境，只传入固定上下文，关闭 stdin，并用进程组或 Job Object 托管整个进程树。脚本限制 1 MiB、执行限制 5 秒、stdout 限制 1 MiB、stderr 限制 256 KiB；超时、状态查询失败和退出后遗留后代都会触发整树回收。非零退出保留有界 stderr 诊断，stdout 必须是且只能是一个 JSON 文档。
+默认解释器为 Unix 的 `python3` 或 Windows 的 `python`，也可由嵌入方通过 `PythonConfigRunner` 显式注入。Procora 不经过 shell，以 `-I -S -X utf8` 启动解释器，清空继承环境，只传入固定上下文，并通过受控引导代码按“同版本官方 Python API、脚本目录、标准库”的顺序构造 `sys.path`；用户 site-packages 不会成为隐式模块来源，项目可显式拆分并导入自己的 `.py` 模块。stdin 保持关闭，进程树由进程组或 Job Object 托管。脚本限制 1 MiB、执行限制 5 秒、stdout 限制 1 MiB、stderr 限制 256 KiB；超时、状态查询失败和退出后遗留后代都会触发整树回收。非零退出保留有界 stderr 诊断，stdout 必须是且只能是一个 JSON 文档。
+
+官方 `procora` Python 包提供 `Project`、`Task`、脚本化包构建和 MCP 客户端；`Project` 在配置模式下自动输出 JSON，仍由本节共享管线校验。安装与完整用法见 [Python API 与脚本化构建](python.md)。
 
 生成结果不能声明 `include`，并且仍需通过与声明式格式相同的未知字段、语义、路径和任务图校验。脚本字节、本次生成的原始 stdout 和生成结果显式声明的 `env_file` 一起进入候选 SHA-256，因此 preview 与 apply 会重新执行并拒绝生成结果已经变化的过期修订。脚本自行读取但未声明为配置输入的其他业务文件不会自动加入监听集合；若它们改变，用户需要再次 preview，apply 阶段仍会通过重执行发现差异。
 

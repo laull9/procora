@@ -21,6 +21,14 @@ try {
     Write-Warning "未能停用开机自启动，正在强制删除程序：$($_.Exception.Message)"
 }
 
+$python = Get-Command python -ErrorAction SilentlyContinue
+if ($python) {
+    & $binary python uninstall --interpreter $python.Source --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "无法移除 Python API 路径文件，请运行 procora python uninstall。"
+    }
+}
+
 Remove-Item $binary -Force
 Write-Host "已删除 $binary"
 Write-Host "运行状态、数据库和服务日志均已保留。"

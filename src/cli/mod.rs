@@ -15,6 +15,8 @@ mod package_command;
 mod package_installed_command;
 pub use package_command::PackageArgs;
 mod project;
+mod python_command;
+pub use python_command::PythonArgs;
 mod push;
 mod push_memory;
 mod push_package;
@@ -149,6 +151,8 @@ pub enum Command {
     Deploy(DeployArgs),
     /// 构建、检查、验证或解包可移植的 Procora Service 包。
     Package(PackageArgs),
+    /// 安装、检查或移除随 Procora 分发的 Python API。
+    Python(PythonArgs),
     /// 通过 SSH 查看或管理裸机远端的 Procora Service。
     Remote(RemoteArgs),
     /// 列出本机或远端当前可用的声明式上传目标与路径。

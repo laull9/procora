@@ -39,11 +39,37 @@ impl DaemonAutostart {
 
     /// 生成 Windows 任务计划程序使用的完整执行动作。
     pub fn windows_task_action(&self) -> String {
-        daemon_arguments(self)
+        [
+            "wscript.exe".to_owned(),
+            "//B".to_owned(),
+            "//Nologo".to_owned(),
+            self.windows_launcher_path().to_string_lossy().into_owned(),
+        ]
+        .iter()
+        .map(|argument| windows_argument(argument))
+        .collect::<Vec<_>>()
+        .join(" ")
+    }
+
+    /// 返回无控制台启动中心进程的 Windows Script Host 脚本路径。
+    pub fn windows_launcher_path(&self) -> PathBuf {
+        sibling_path(&self.database, "center-start.vbs")
+    }
+
+    /// 生成 UTF-16LE 编码的无窗口 Windows 启动脚本。
+    pub fn windows_launcher_script(&self) -> Vec<u8> {
+        let command = daemon_arguments(self)
             .iter()
             .map(|argument| windows_argument(argument))
             .collect::<Vec<_>>()
             .join(" ")
+            .replace('"', "\"\"");
+        let script = format!(
+            "Set procoraShell = CreateObject(\"WScript.Shell\")\r\nprocoraExitCode = procoraShell.Run(\"{command}\", 0, True)\r\nWScript.Quit procoraExitCode\r\n"
+        );
+        let mut bytes = vec![0xff, 0xfe];
+        bytes.extend(script.encode_utf16().flat_map(u16::to_le_bytes));
+        bytes
     }
 }
 

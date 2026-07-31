@@ -44,6 +44,8 @@ irm https://raw.githubusercontent.com/laull9/procora/main/scripts/install.ps1 | 
 
 已有安装可运行 `procora update --check` 查询最新正式 Release，或运行 `procora update` 自动下载当前平台归档、验证同名 `.sha256` 并替换当前可执行文件。Linux/macOS 使用同目录原子替换；Windows 在当前进程退出后由新版本更新助手完成可恢复替换。更新前正在运行的全局 Center 会由新版本自动对账重启，原本离线则保持离线。自更新和安装脚本都支持用 `PROCORA_REPO=owner/repo` 选择 fork，用 `PROCORA_GITHUB_MIRROR=https://mirror.example` 选择 GitHub 镜像；自更新还可使用等价的 `--github-mirror` 参数，并在归档下载时显示进度、大小和速度。
 
+Python API 源码编译进同一个二进制，不增加 Release 归档条目。安装脚本在找到 Python 3 时自动运行 `procora python install`，无需 pip 或额外下载；找不到解释器时保留 CLI 安装并给出稍后执行命令。卸载脚本在删除二进制前移除由 Procora 管理的 `.pth`，但保留用户数据目录中的 API 文件以便升级或重装复用。
+
 镜像前缀会得到 `https://mirror.example/https://github.com/...` 形式的地址；需要其他形式时使用 `https://mirror.example/fetch?url={url}` 模板。自定义下载程序只改变传输方式，脚本和自更新仍独立验证 SHA-256。要让首次安装也经过镜像，下载脚本本身时使用同一前缀：
 
 ```bash

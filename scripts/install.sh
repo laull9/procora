@@ -118,6 +118,16 @@ install -m 0755 "$temporary/procora" "$staged"
 mv -f "$staged" "$install_dir/procora"
 staged=
 
+if command -v python3 >/dev/null 2>&1; then
+  if "$install_dir/procora" python install --interpreter python3 --quiet; then
+    printf '%s\n' "Procora Python API 已安装到当前用户的 Python 3 环境"
+  else
+    printf '%s\n' "警告：Procora 已安装，但 Python API 自动安装失败；可稍后运行 procora python install。" >&2
+  fi
+else
+  printf '%s\n' "提示：未找到 Python 3；安装后可运行 procora python install 启用 Python API。"
+fi
+
 printf 'Procora 已安装到 %s\n' "$install_dir/procora"
 case ":${PATH:-}:" in
   *":$install_dir:"*) ;;

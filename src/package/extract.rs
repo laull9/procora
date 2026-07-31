@@ -17,7 +17,7 @@ use super::{
 };
 
 /// 成功物化的平台 release 摘要。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PackageExtractResult {
     /// 实际选择的平台。
     pub platform: crate::config::DeployPlatform,

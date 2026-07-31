@@ -21,3 +21,4 @@ mod cli_usability;
 mod embedded_session;
 mod mcp;
 mod new_service;
+mod python_api;

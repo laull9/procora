@@ -158,7 +158,7 @@ fn assert_uninstall_safety(root: &Path, install_dir: &Path, binary: &Path) {
     let disable_log = root.join("disable.log");
     write_executable(
         binary,
-        "#!/bin/sh\nprintf '%s\\n' \"$1\" > \"$PROCORA_TEST_DISABLE_LOG\"\n",
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$PROCORA_TEST_DISABLE_LOG\"\n",
     );
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/uninstall.sh");
     let uninstalled = Command::new("sh")
@@ -173,7 +173,10 @@ fn assert_uninstall_safety(root: &Path, install_dir: &Path, binary: &Path) {
         String::from_utf8_lossy(&uninstalled.stderr)
     );
     assert!(!binary.exists());
-    assert_eq!(fs::read_to_string(disable_log).unwrap(), "disable\n");
+    assert_eq!(
+        fs::read_to_string(disable_log).unwrap(),
+        "disable\npython\n"
+    );
 
     write_executable(binary, "#!/bin/sh\nexit 9\n");
     let refused = Command::new("sh")

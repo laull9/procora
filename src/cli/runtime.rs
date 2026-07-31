@@ -12,7 +12,7 @@ use clap_complete::generate;
 
 use super::{
     Cli, Command, ServerArgs, ServerCommand, api, autostart_command, center_runtime, deploy, logs,
-    package_command, project, push, remote, session, source, suggestion, template,
+    package_command, project, push, python_command, remote, session, source, suggestion, template,
 };
 
 /// 分发默认路径行为和全部顶层命令。
@@ -55,6 +55,7 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         }),
         Some(Command::Deploy(arguments)) => deploy::run(&arguments),
         Some(Command::Package(arguments)) => package_command::run(arguments),
+        Some(Command::Python(arguments)) => python_command::run(arguments),
         Some(Command::Remote(arguments)) => remote::run(arguments),
         Some(Command::Uploads {
             ssh,
@@ -122,7 +123,10 @@ pub fn dispatch(command: Option<Command>, target: Option<&Path>) -> anyhow::Resu
         }) => crate::update::apply_windows(&source, &destination, restart_center),
         #[cfg(target_os = "windows")]
         Some(Command::CleanupUpdate { path }) => crate::update::cleanup_windows(&path),
-        Some(Command::ReconcileUpdate) => center_runtime::ensure_center().map(|_| ()),
+        Some(Command::ReconcileUpdate) => {
+            crate::python::ensure_package()?;
+            center_runtime::ensure_center().map(|_| ())
+        }
         Some(Command::Daemon { endpoint, database }) => {
             run_center_server(&endpoint, &database).context("全局 Procora 服务器退出")
         }

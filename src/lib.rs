@@ -24,6 +24,8 @@ pub mod platform;
 pub mod process;
 /// 本地 IPC 的版本化传输对象。
 pub mod protocol;
+/// 与当前二进制同版本分发的 Python API 安装支持。
+pub mod python;
 /// 配置来源、依赖下载和变更监听。
 pub mod source;
 /// SQLite 状态持久化。

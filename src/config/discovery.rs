@@ -47,7 +47,9 @@ pub enum DiscoveryError {
         source: ConfigError,
     },
     /// 目录中没有约定名称的配置文件。
-    #[error("服务目录 `{0}` 中没有 procora.yaml、procora.yml、procora.toml 或 procora.json")]
+    #[error(
+        "服务目录 `{0}` 中没有 procora.py、procora.yaml、procora.yml、procora.toml 或 procora.json"
+    )]
     NotFound(PathBuf),
     /// 目录中存在候选文件，但没有一个是合法 Procora 配置。
     #[error("服务目录 `{directory}` 中没有合法的 Procora 配置: {details}")]
@@ -107,7 +109,7 @@ fn discover_explicit(config_path: PathBuf) -> Result<DiscoveredProject, Discover
     })
 }
 
-/// 扫描目录中的 `procora.*` 并选择唯一能完整编译的配置文件。
+/// 扫描目录中的 `procora.*` 声明式或 Python 入口并选择唯一合法配置。
 fn discover_directory(root: PathBuf) -> Result<DiscoveredProject, DiscoveryError> {
     let entries = fs::read_dir(&root).map_err(|source| DiscoveryError::ReadDirectory {
         path: root.clone(),
@@ -119,7 +121,7 @@ fn discover_directory(root: PathBuf) -> Result<DiscoveredProject, DiscoveryError
         .filter(|path| {
             path.is_file()
                 && path.file_stem().is_some_and(|stem| stem == "procora")
-                && ConfigFormat::from_path(path).is_some()
+                && (ConfigFormat::from_path(path).is_some() || super::is_python_config(path))
         })
         .collect::<Vec<_>>();
     candidates.sort();

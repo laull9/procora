@@ -37,8 +37,12 @@ pub(super) fn is_enabled(definition: &DaemonAutostart) -> Result<bool, Autostart
         action: "查询 Windows 自启动任务",
         source,
     })?;
-    Ok(query.status.success()
-        && crate::platform::decode_external_output(&query.stdout).contains(&definition.endpoint))
+    if !query.status.success() {
+        return Ok(false);
+    }
+    let launcher = definition.windows_launcher_path();
+    Ok(std::fs::read(&launcher)
+        .is_ok_and(|content| content == definition.windows_launcher_script()))
 }
 
 /// 不受支持的平台无法查询原生托管状态。

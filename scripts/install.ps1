@@ -89,6 +89,17 @@ try {
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
     $destination = Join-Path $installDir "procora.exe"
     Copy-Item $executable $destination -Force
+    $python = Get-Command python -ErrorAction SilentlyContinue
+    if ($python) {
+        & $destination python install --interpreter $python.Source --quiet
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Procora Python API 已安装到当前用户的 Python 3 环境"
+        } else {
+            Write-Warning "Procora 已安装，但 Python API 自动安装失败；可稍后运行 procora python install。"
+        }
+    } else {
+        Write-Host "提示：未找到 Python 3；安装后可运行 procora python install 启用 Python API。"
+    }
     Write-Host "Procora 已安装到 $destination"
 
     $pathEntries = $env:PATH -split ';'

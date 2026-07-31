@@ -277,6 +277,15 @@ fn server_exposes_tools_and_embedded_documentation() {
                 "preview_config",
                 "apply_config",
                 "remove_service",
+                "build_package",
+                "inspect_package",
+                "verify_package",
+                "extract_package",
+                "install_package",
+                "list_installed_packages",
+                "rollback_package",
+                "recover_package",
+                "uninstall_package",
                 "preview_deploy",
                 "deploy_service",
             ] {
@@ -307,7 +316,7 @@ fn server_exposes_tools_and_embedded_documentation() {
                 .unwrap();
             assert_eq!(rejected.is_error, Some(true));
             let error = rejected.content[0].as_text().unwrap();
-            assert!(error.text.contains("MCP 不执行显式 procora.py"));
+            assert!(error.text.contains("allow_python=true"));
 
             let prompts = client.list_all_prompts().await.unwrap();
             for name in [
@@ -332,4 +341,86 @@ fn server_exposes_tools_and_embedded_documentation() {
             client.cancel().await.unwrap();
             server.await.unwrap().unwrap();
         });
+}
+
+#[test]
+// MCP包工具共享确定性构建、校验与安全物化实现。
+fn mcp_package_tools_build_verify_and_extract() {
+    use std::fs;
+
+    use crate::{
+        cli_uploads::temporary_directory, command_support::remove_directory_when_released,
+    };
+
+    let directory = temporary_directory("mcp-package-tools");
+    let service = directory.join("service");
+    fs::create_dir(&service).unwrap();
+    fs::write(
+        service.join("procora.yaml"),
+        "version: 1\nproject: mcp-package\ntasks: {}\n",
+    )
+    .unwrap();
+    fs::write(service.join("asset.txt"), "content").unwrap();
+    let package = directory.join("mcp-package.pcpkg");
+    let extracted = directory.join("extracted");
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let (server_transport, client_transport) = tokio::io::duplex(1024 * 1024);
+            let server = tokio::spawn(async move {
+                let running = ProcoraMcpServer::default().serve(server_transport).await?;
+                running.waiting().await?;
+                anyhow::Ok(())
+            });
+            let client = ().serve(client_transport).await.unwrap();
+
+            let built = client
+                .call_tool(CallToolRequestParams::new("build_package").with_arguments(
+                    rmcp::object!({
+                        "source": service,
+                        "output": package,
+                        "platform": "all"
+                    }),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(built.is_error, Some(false));
+            assert_eq!(built.structured_content.unwrap()["project"], "mcp-package");
+
+            for tool in ["inspect_package", "verify_package"] {
+                let result = client
+                    .call_tool(
+                        CallToolRequestParams::new(tool)
+                            .with_arguments(rmcp::object!({ "package": package })),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(result.is_error, Some(false), "工具 {tool} 失败");
+                assert_eq!(
+                    result.structured_content.unwrap()["manifest"]["project"],
+                    "mcp-package"
+                );
+            }
+
+            let result = client
+                .call_tool(
+                    CallToolRequestParams::new("extract_package").with_arguments(rmcp::object!({
+                        "package": package,
+                        "output": extracted,
+                        "platform": "current"
+                    })),
+                )
+                .await
+                .unwrap();
+            assert_eq!(result.is_error, Some(false));
+            assert!(extracted.join("asset.txt").is_file());
+
+            client.cancel().await.unwrap();
+            server.await.unwrap().unwrap();
+        });
+
+    remove_directory_when_released(&directory);
 }

@@ -107,6 +107,8 @@ procora package build . --prepare "python scripts/build_package.py"
 
 准备命令只应生成包输入，不应自行调用 `procora package build` 或直接写入 `PROCORA_PACKAGE_OUTPUT`。Procora 会在命令全部成功后重新发现并校验配置、收集文件、生成确定性包并执行完整自校验。
 
+Python 用户可直接运行 `python -m procora .`，默认输出 `dist/<service>.pcpkg`；或在脚本中调用 `procora.build()` 并读取 `BuildResult`。两种方式最终都调用同一 Rust 构建器和构建后自校验，详见 [Python API 与脚本化构建](python.md)。
+
 `--deploy <SSH_TARGET>` 把成功构建或确认未变化的包直接交给现有裸机部署流程：
 
 ```bash

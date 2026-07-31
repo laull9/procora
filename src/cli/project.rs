@@ -1,6 +1,6 @@
 use std::{fs, io::IsTerminal, path::Path};
 
-use crate::config::{DiscoveredProject, discover_path, is_python_config};
+use crate::config::{DiscoveredProject, discover_path, path_selects_python};
 use crate::source::DependencyManager;
 use anyhow::{Context, bail};
 
@@ -15,7 +15,7 @@ pub(crate) fn edit(path: Option<&Path>) -> anyhow::Result<()> {
         || crate::platform::current_dir().context("无法读取当前目录"),
         |path| Ok(path.to_path_buf()),
     )?;
-    if is_python_config(&target) {
+    if path_selects_python(&target) {
         bail!("内置配置编辑器不执行或改写 procora.py；请使用可信的外部代码编辑器")
     }
     let discovered = discover_path(&target)
@@ -144,7 +144,7 @@ pub(crate) fn prepare(discovered: &mut DiscoveredProject) -> anyhow::Result<()> 
 
 /// 对精确 Python 入口给出用户可见的可信代码执行提示。
 pub(crate) fn warn_python_execution(path: &Path) {
-    if is_python_config(path) {
+    if path_selects_python(path) {
         eprintln!(
             "警告：procora.py 将以当前用户权限执行可信代码；受控辅助进程提供资源边界，但不是安全沙箱。"
         );

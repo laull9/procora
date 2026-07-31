@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | [CLI 与中心服务器](cli.md) | 默认入口、服务发现、三平台裸机部署、定位和生命周期命令 | 所有用户与 CLI 开发者 |
 | [Procora Service 包](packages.md) | `.pcpkg` 格式、构建、验证、本机安装、裸机部署和 push 导出项 | 发布与部署用户 |
+| [Python API 与脚本化构建](python.md) | Python 配置模型、自动安装、约定式包构建和 MCP 客户端 | Python 与自动化用户 |
 | [MCP 本地服务](mcp.md) | stdio 接入、两阶段裸机部署、工具、Prompts 与安全边界 | MCP 客户端用户与开发者 |
 | [总体架构](architecture.md) | 分层、crate 边界、依赖方向、数据流和关键决策 | 所有贡献者 |
 | [配置设计](configuration.md) | 多格式加载、规范化模型、任务图和热更新 | 配置与引擎开发者 |

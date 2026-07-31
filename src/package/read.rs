@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::manifest::PackageManifest;
@@ -16,7 +17,7 @@ const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_PACKAGE_ENTRIES: u64 = 100_000;
 
 /// 已读取并完成结构校验的包信息。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PackageInfo {
     /// 稳定包清单。
     pub manifest: PackageManifest,

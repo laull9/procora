@@ -418,7 +418,10 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use std::process::Command;
+    use std::{fs, path::PathBuf, process::Command};
+
+    use anyhow::Context as _;
+    use directories::ProjectDirs;
 
     use super::{
         AutostartBackend, AutostartError, DaemonAutostart, WINDOWS_TASK_NAME, run_cleanup_command,
@@ -427,6 +430,29 @@ mod platform {
 
     /// 创建登录触发任务并立即启动中心 daemon。
     pub(super) fn enable(definition: &DaemonAutostart) -> Result<AutostartBackend, AutostartError> {
+        let launcher = definition.windows_launcher_path();
+        let parent = launcher.parent().expect("Windows 启动脚本路径必须有父目录");
+        fs::create_dir_all(parent).map_err(|source| AutostartError::Io {
+            action: "创建 Windows 中心数据目录",
+            source,
+        })?;
+        let temporary = launcher.with_extension("vbs.tmp");
+        fs::write(&temporary, definition.windows_launcher_script()).map_err(|source| {
+            AutostartError::Io {
+                action: "写入 Windows 无窗口启动脚本",
+                source,
+            }
+        })?;
+        if launcher.exists() {
+            fs::remove_file(&launcher).map_err(|source| AutostartError::Io {
+                action: "替换 Windows 无窗口启动脚本",
+                source,
+            })?;
+        }
+        fs::rename(&temporary, &launcher).map_err(|source| AutostartError::Io {
+            action: "安装 Windows 无窗口启动脚本",
+            source,
+        })?;
         run_cleanup_command(
             "schtasks.exe",
             &["/End".into(), "/TN".into(), WINDOWS_TASK_NAME.into()],
@@ -463,7 +489,28 @@ mod platform {
                 ],
             )?;
         }
+        let launcher = launcher_path()?;
+        if launcher.exists() {
+            fs::remove_file(&launcher).map_err(|source| AutostartError::Io {
+                action: "删除 Windows 无窗口启动脚本",
+                source,
+            })?;
+        }
         Ok(AutostartBackend::WindowsTask)
+    }
+
+    /// 返回与 Center 数据库同目录的 Windows 启动脚本路径。
+    fn launcher_path() -> Result<PathBuf, AutostartError> {
+        let home = if let Some(path) = std::env::var_os("PROCORA_HOME") {
+            PathBuf::from(path)
+        } else {
+            ProjectDirs::from("dev", "procora", "Procora")
+                .context("当前平台没有 Procora 用户数据目录")
+                .map_err(|_| AutostartError::MissingUserDirectory)?
+                .data_local_dir()
+                .to_path_buf()
+        };
+        Ok(crate::platform::simplify_path(&home).join("center-start.vbs"))
     }
 }
 

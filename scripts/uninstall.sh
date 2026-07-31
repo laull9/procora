@@ -21,6 +21,11 @@ if [ -x "$binary" ] && ! "$binary" disable; then
   printf '%s\n' "警告：未能停用开机自启动，正在强制删除程序。" >&2
 fi
 
+if command -v python3 >/dev/null 2>&1; then
+  "$binary" python uninstall --interpreter python3 --quiet ||
+    printf '%s\n' "警告：无法移除 Python API 路径文件，请运行 procora python uninstall。" >&2
+fi
+
 rm -f "$binary"
 printf '已删除 %s\n' "$binary"
 printf '%s\n' "运行状态、数据库和服务日志均已保留。"

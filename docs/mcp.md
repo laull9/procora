@@ -29,6 +29,8 @@ MCP 协议内容只写入 stdout，诊断写入 stderr。直接在终端运行�
 | 看最终默认值和二进制矩阵 | `effective_config` |
 | 修改正在运行的配置 | `preview_config → apply_config` |
 | 把完整Service部署到裸机 | `preview_deploy → deploy_service` |
+| 构建并验证 Service 包 | `build_package → verify_package` |
+| 审计或恢复已安装包 | `list_installed_packages`、`rollback_package`、`recover_package` |
 | 只启停本地已注册Service | `manage_service` |
 | 排查历史状态 | `service_history` |
 
@@ -51,6 +53,15 @@ MCP 协议内容只写入 stdout，诊断写入 stderr。直接在终端运行�
 | `preview_config` | 预览候选修订和 Task 影响 | 否 |
 | `apply_config` | 应用已预览且仍精确匹配的修订 | 是 |
 | `remove_service` | 停止并移除注册，不删除服务目录 | 是 |
+| `build_package` | 构建确定性 `.pcpkg` | 是，写入本机包文件 |
+| `inspect_package` | 读取包清单与逻辑摘要 | 否 |
+| `verify_package` | 流式验证清单和全部 Blob | 否 |
+| `extract_package` | 为具体平台物化到新目录 | 是，创建本机目录 |
+| `install_package` | 安装不可变 release，验活失败自动回滚 | 是 |
+| `list_installed_packages` | 列出包、release 与 pending 状态 | 否 |
+| `rollback_package` | 切换到历史 release 并验活 | 是 |
+| `recover_package` | 收敛中断的 pending 切换 | 可能 |
+| `uninstall_package` | 解除注册；`purge` 可清理安装数据 | 是 |
 | `preview_deploy` | 校验本地Service，SSH探测平台，选择二进制并构造归档摘要 | 只读连接远端；不上传、不切换Service |
 | `deploy_service` | 复核预检revision，上传完整Service、验活并按需回滚 | 是，修改指定SSH远端的托管Service |
 
@@ -69,6 +80,9 @@ MCP 协议内容只写入 stdout，诊断写入 stderr。直接在终端运行�
 | `timeout_ms` | 否 | `30000` | 新release验收总时限，最大600000 |
 | `stable_for_ms` | 否 | `2000` | 持续可用后才确认成功 |
 | `keep` | 否 | `3` | 保留release数，范围1–32 |
+| `allow_python` | 否 | `false` | 明确允许执行可信的 `procora.py` |
+
+`allow_python` 同样适用于 `build_package` 和 `install_package`。部署或安装以 `procora.py` 为配置入口的 `.pcpkg` 时也必须显式授权，不能用预先打包绕过信任门。
 
 `deploy_service` 接受相同参数，并额外要求 `revision`。两次调用的 `source`、`ssh`、`remote_bin`、`service`、`timeout_ms`、`stable_for_ms` 和 `keep` 必须保持一致。Procora 会重新构造预检；文件、平台、选择结果或参数有任何变化都会拒绝旧 revision，不会“尽量继续”。
 
@@ -163,13 +177,13 @@ MCP 客户端可能在没有控制终端的编辑器或后台进程中运行，�
 
 - MCP 服务只应交给可信的本地客户端启动；生命周期工具具有启动和停止本机任务的能力。
 - `deploy_service` 还能修改SSH远端、启动远端Task并清理超出`keep`的旧release；调用前必须展示并确认预检结果。
-- MCP 工具拒绝显式 `procora.py`，因为加载它会以当前用户权限执行可信代码。确需使用时，应在交互式终端中运行 CLI 并确认警告。
-- 目录发现仍只扫描声明式的 `procora.yaml`、`procora.yml`、`procora.toml` 和 `procora.json`，不会自动执行目录中的 Python 文件。
+- Python 入口会以当前用户权限执行可信代码。所有接收路径的配置、构建和部署工具默认拒绝显式入口及目录中的 `procora.py`；只有调用方展示风险并传入 `allow_python: true` 后才执行。
+- `uninstall_package` 的 `purge: true` 会永久清理对应包托管目录；调用前应先用 `list_installed_packages` 核对 Service 与 release。
 - `remove_service` 只删除中心注册，不删除配置或服务目录；MCP 不暴露 `clean`、`deps`、TUI 和自启动管理入口。
 
 ## 6. 常见错误与恢复
 
-- `MCP 不执行显式 procora.py`：改用声明式配置，或在可信交互终端运行CLI。
+- `allow_python=true`：默认信任门拒绝了 Python 入口；检查脚本后显式授权，或改用声明式配置。
 - `部署预检修订已经变化`：重新调用 `preview_deploy`，检查差异后使用新 revision。
 - `SSH 自动登录失败`：在启动 MCP 客户端的同一用户环境检查 `ssh prod`、agent 和 known_hosts。
 - `没有适用于远端平台的变体`：读取错误中的规范化平台键，并在 `binaries.*.variants` 补齐。

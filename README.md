@@ -26,6 +26,7 @@ Procora 把每个项目视为一个 Service，把项目中的进程视为具有�
 - **可移植 Service 包**：确定性 `.pcpkg` 可携带多平台二进制，支持独立验证、解包、本机安装、裸机部署和命名资产推送。
 - **多项目 Center**：统一注册本机服务，支持用户级开机自启动、历史状态和本地 IPC。
 - **自动化接口**：提供脚本友好的 CLI、Shell 补全和 stdio MCP 服务。
+- **Python 原生工作流**：安装器自动提供 Python API，可用 `procora.py` 声明 Service，并从 Python 脚本确定性构建包或调用 MCP。
 
 ```text
 Procora Center
@@ -61,6 +62,8 @@ irm https://raw.githubusercontent.com/laull9/procora/main/scripts/install.ps1 | 
 | Windows | `%LOCALAPPDATA%\Procora\bin\procora.exe` |
 
 脚本不会修改 `PATH`。如果安装后找不到命令，请按安装器提示把目录加入 `PATH`。
+
+检测到 Python 3 时，安装器还会自动安装与 Procora 同版本的零依赖 Python 包；无需 pip 或额外下载。若稍后才安装 Python，可运行 `procora python install`。完整 API 见 [Python API 与脚本化构建](docs/python.md)。
 
 安装后可直接检查或拉取最新正式版本；更新会验证 Release 的 SHA-256，并在更新前全局 Center 已运行时用新版本自动对账：
 
@@ -165,6 +168,20 @@ procora package build . --prepare "python scripts/build_package.py" --deploy pro
 procora push demo.pcpkg --package-entry assets --ssh prod
 ```
 
+Service 也可完全使用 Python 声明，并从普通 Python 脚本构建。唯一的 `Project` 会自动转换为共享配置模型，默认输出到 `dist/<service>.pcpkg`：
+
+```python
+from procora import Project
+
+app = Project("demo")
+app.task("api", ["python", "-m", "app"], restart="on-failure")
+```
+
+```bash
+procora validate .
+python -m procora .
+```
+
 在服务总览按 `p` 可进入包工作台，统一完成包文件操作与已安装 release 的审计、恢复和清理。包文件可二次确认直接删除；同名普通 Service 不会阻塞损坏包安装的独立清理，也不会被误解除。完整格式、确定性边界和使用流程见 [Procora Service 包](docs/packages.md)。
 
 TUI 会随终端尺寸自动切换主从、上下和单列布局；窄屏仍保留当前对象、主操作、`?` 帮助以及 `q/Esc` 返回路径。配置表单在窄屏一次显示一个区域，通过 `Tab` 切换，不会把多个列表挤成不可用的空框。详细尺寸行为见 [CLI 与 TUI](docs/cli.md#自适应终端布局)。
@@ -183,6 +200,7 @@ TUI 会随终端尺寸自动切换主从、上下和单列布局；窄屏仍保�
 | `procora logs <name> <task>` | 查看、搜索或清理 Task 日志 |
 | `procora deploy [path] --ssh <host>` | 无需远端 target，全托管部署完整 Service |
 | `procora package <操作>` | 构建、验证、安装、运行、审计、回滚或清理 `.pcpkg` |
+| `procora python <操作>` | 安装、定位或移除内嵌 Python API |
 | `procora remote <操作>` | 查看或管理当前项目记住的裸机远端 |
 | `procora preview <name>` | 预览配置变更及影响范围 |
 | `procora apply <name> <revision>` | 应用已确认的配置修订 |

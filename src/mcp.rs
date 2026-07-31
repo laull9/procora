@@ -19,7 +19,22 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{cli::api, config::is_python_config, protocol::ServiceActionDto};
+use crate::{
+    cli::api,
+    config::{is_python_config, path_selects_python},
+    protocol::ServiceActionDto,
+};
+
+#[path = "mcp/package_tools.rs"]
+mod package_tools;
+use package_tools::{
+    InstalledPackageParams, PackageBuildParams, PackageExtractParams, PackageInstallParams,
+    PackagePathParams, UninstallPackageParams, build_package, extract_package, install_package,
+    installed_packages, recover_package, rollback_package, uninstall_package,
+};
+#[path = "mcp/deploy_params.rs"]
+mod deploy_params;
+use deploy_params::{DeployParams, DeployPreviewParams, settings as deploy_settings};
 
 /// 编译进二进制的 CLI 与中心服务器语义文档。
 const CLI_GUIDE: &str = include_str!("../docs/cli.md");
@@ -35,6 +50,9 @@ const MCP_GUIDE: &str = include_str!("../docs/mcp.md");
 struct PathParams {
     /// 服务目录或声明式配置文件路径。
     path: PathBuf,
+    /// 显式允许执行可信的 `procora.py`；默认拒绝代码执行。
+    #[serde(default)]
+    allow_python: bool,
 }
 
 /// 只包含一个服务目标的工具参数。
@@ -84,58 +102,6 @@ struct ApplyParams {
     revision: String,
 }
 
-/// 裸机部署预检参数。
-#[derive(Debug, Deserialize, JsonSchema)]
-struct DeployPreviewParams {
-    /// 本机 Service 目录或显式声明式配置文件。
-    #[serde(default = "current_directory")]
-    source: PathBuf,
-    /// SSH config 别名或`[user@]host`，MCP不进行交互询问。
-    ssh: String,
-    /// 远端Procora命令名或不含空格的路径。
-    #[serde(default)]
-    remote_bin: Option<String>,
-    /// 可选的project名称断言，防止部署错Service。
-    #[serde(default)]
-    service: Option<String>,
-    /// 等待新release可用的最长毫秒数。
-    #[serde(default = "default_deploy_timeout")]
-    timeout_ms: u64,
-    /// release持续可用后才确认成功的毫秒数。
-    #[serde(default = "default_stable_window")]
-    stable_for_ms: u64,
-    /// 远端保留的最近release数量，范围1到32。
-    #[serde(default = "default_release_keep")]
-    keep: u32,
-}
-
-/// 经过预检修订确认的裸机部署参数。
-#[derive(Debug, Deserialize, JsonSchema)]
-struct DeployParams {
-    /// 本机 Service 目录或显式声明式配置文件。
-    #[serde(default = "current_directory")]
-    source: PathBuf,
-    /// SSH config 别名或`[user@]host`，只允许非交互式登录。
-    ssh: String,
-    /// `preview_deploy`返回的完整revision。
-    revision: String,
-    /// 远端Procora命令名或不含空格的路径。
-    #[serde(default)]
-    remote_bin: Option<String>,
-    /// 可选的project名称断言，防止部署错Service。
-    #[serde(default)]
-    service: Option<String>,
-    /// 必须与预检相同的验收超时毫秒数。
-    #[serde(default = "default_deploy_timeout")]
-    timeout_ms: u64,
-    /// 必须与预检相同的稳定窗口毫秒数。
-    #[serde(default = "default_stable_window")]
-    stable_for_ms: u64,
-    /// 必须与预检相同的release保留数量。
-    #[serde(default = "default_release_keep")]
-    keep: u32,
-}
-
 /// Procora MCP 工具与内嵌文档 Prompts 服务。
 #[derive(Clone, Debug)]
 pub struct ProcoraMcpServer {
@@ -161,19 +127,27 @@ impl ProcoraMcpServer {
     /// 校验声明式配置且不下载依赖、注册服务或启动 Task。
     #[tool(description = "校验 Procora 声明式配置，不产生运行副作用")]
     fn validate_project(&self, Parameters(params): Parameters<PathParams>) -> CallToolResult {
-        tool_result(declarative_path(params.path).and_then(|path| api::validate_project(&path)))
+        tool_result(
+            trusted_path(params.path, params.allow_python)
+                .and_then(|path| api::validate_project(&path)),
+        )
     }
 
     /// 返回声明式配置中确定性的 Task 启动顺序。
     #[tool(description = "返回 Procora Task 的确定性启动拓扑顺序")]
     fn task_graph(&self, Parameters(params): Parameters<PathParams>) -> CallToolResult {
-        tool_result(declarative_path(params.path).and_then(|path| api::task_graph(&path)))
+        tool_result(
+            trusted_path(params.path, params.allow_python).and_then(|path| api::task_graph(&path)),
+        )
     }
 
     /// 返回带默认值、来源和规范化路径的有效配置。
     #[tool(description = "返回 Procora 规范化后的完整有效配置 JSON")]
     fn effective_config(&self, Parameters(params): Parameters<PathParams>) -> CallToolResult {
-        tool_result(declarative_path(params.path).and_then(|path| api::effective_config(&path)))
+        tool_result(
+            trusted_path(params.path, params.allow_python)
+                .and_then(|path| api::effective_config(&path)),
+        )
     }
 
     /// 查询中心状态且不隐式启动中心。
@@ -197,7 +171,7 @@ impl ProcoraMcpServer {
     /// 注册并启动一个声明式配置服务。
     #[tool(description = "注册并启动一个本地 Procora 声明式配置服务")]
     fn add_service(&self, Parameters(params): Parameters<PathParams>) -> CallToolResult {
-        tool_result(declarative_path(params.path).and_then(api::add_service))
+        tool_result(trusted_path(params.path, params.allow_python).and_then(api::add_service))
     }
 
     /// 对服务执行启动、重启或停止动作。
@@ -224,6 +198,75 @@ impl ProcoraMcpServer {
         tool_result(api::remove_service(&params.target))
     }
 
+    /// 构建确定性 Service 包，可对 Python 配置要求显式信任确认。
+    #[tool(description = "构建确定性 .pcpkg；执行 Python 配置前必须显式设置 allow_python")]
+    fn build_package(&self, Parameters(params): Parameters<PackageBuildParams>) -> CallToolResult {
+        tool_result(build_package(params))
+    }
+
+    /// 读取包清单但不展开内容。
+    #[tool(description = "读取 .pcpkg 清单、逻辑摘要和文件大小")]
+    fn inspect_package(&self, Parameters(params): Parameters<PackagePathParams>) -> CallToolResult {
+        tool_result(absolute_path(params.package).and_then(|path| crate::package::inspect(&path)))
+    }
+
+    /// 流式验证包内全部内容摘要。
+    #[tool(description = "流式验证 .pcpkg 清单及全部 Blob 的大小和 SHA-256")]
+    fn verify_package(&self, Parameters(params): Parameters<PackagePathParams>) -> CallToolResult {
+        tool_result(absolute_path(params.package).and_then(|path| crate::package::verify(&path)))
+    }
+
+    /// 为具体平台安全物化包内容。
+    #[tool(description = "验证并把 .pcpkg 物化到一个尚不存在的目录")]
+    fn extract_package(
+        &self,
+        Parameters(params): Parameters<PackageExtractParams>,
+    ) -> CallToolResult {
+        tool_result(extract_package(params))
+    }
+
+    /// 安装本机包为不可变 release 并执行验活回滚。
+    #[tool(description = "安装 .pcpkg 为本机不可变 release，验活失败时自动回滚")]
+    fn install_package(
+        &self,
+        Parameters(params): Parameters<PackageInstallParams>,
+    ) -> CallToolResult {
+        tool_result(install_package(params))
+    }
+
+    /// 列出本机安装的包、release 与恢复状态。
+    #[tool(description = "列出本机全部已安装 Procora 包和 release 状态")]
+    fn list_installed_packages(&self) -> CallToolResult {
+        tool_result(installed_packages())
+    }
+
+    /// 回滚到历史包 release。
+    #[tool(description = "把已安装包 Service 回滚到指定或最近历史 release")]
+    fn rollback_package(
+        &self,
+        Parameters(params): Parameters<InstalledPackageParams>,
+    ) -> CallToolResult {
+        tool_result(rollback_package(&params))
+    }
+
+    /// 恢复中断的包安装切换。
+    #[tool(description = "恢复处于 pending 状态的中断包安装")]
+    fn recover_package(
+        &self,
+        Parameters(params): Parameters<InstalledPackageParams>,
+    ) -> CallToolResult {
+        tool_result(recover_package(&params))
+    }
+
+    /// 解除包 Service 注册并可选清理数据。
+    #[tool(description = "解除已安装包 Service；purge=true 时永久清理包和 release")]
+    fn uninstall_package(
+        &self,
+        Parameters(params): Parameters<UninstallPackageParams>,
+    ) -> CallToolResult {
+        tool_result(uninstall_package(&params))
+    }
+
     /// 探测远端并生成不会修改远端状态的精确部署预检。
     #[tool(
         description = "只读预检全托管裸机部署：校验配置、探测远端平台、选择二进制并返回必须确认的revision"
@@ -232,18 +275,20 @@ impl ProcoraMcpServer {
         &self,
         Parameters(params): Parameters<DeployPreviewParams>,
     ) -> CallToolResult {
-        tool_result(declarative_path(params.source).and_then(|source| {
-            let settings = deploy_settings(
-                source,
-                params.ssh,
-                params.remote_bin,
-                params.service,
-                params.timeout_ms,
-                params.stable_for_ms,
-                params.keep,
-            );
-            api::deploy::preview(&settings)
-        }))
+        tool_result(
+            trusted_path(params.source, params.allow_python).and_then(|source| {
+                let settings = deploy_settings(
+                    source,
+                    params.ssh,
+                    params.remote_bin,
+                    params.service,
+                    params.timeout_ms,
+                    params.stable_for_ms,
+                    params.keep,
+                );
+                api::deploy::preview(&settings)
+            }),
+        )
     }
 
     /// 使用精确预检修订执行无target全托管裸机部署。
@@ -251,33 +296,36 @@ impl ProcoraMcpServer {
         description = "执行全托管裸机部署；要求preview_deploy的revision，非交互上传、验活并在失败时自动回滚"
     )]
     fn deploy_service(&self, Parameters(params): Parameters<DeployParams>) -> CallToolResult {
-        tool_result(declarative_path(params.source).and_then(|source| {
-            let settings = deploy_settings(
-                source,
-                params.ssh,
-                params.remote_bin,
-                params.service,
-                params.timeout_ms,
-                params.stable_for_ms,
-                params.keep,
-            );
-            let mut observed = Vec::new();
-            let mut reporter = |event: &crate::transfer::DeployEvent| observed.push(event.clone());
-            api::deploy::execute(&settings, Some(&params.revision), &mut reporter).map_err(
-                |error| {
-                    if observed.is_empty() {
-                        error
-                    } else {
-                        let stages = observed
-                            .iter()
-                            .map(|event| format!("[{}] {}", event.phase, event.message))
-                            .collect::<Vec<_>>()
-                            .join("；");
-                        error.context(format!("部署失败前已完成阶段：{stages}"))
-                    }
-                },
-            )
-        }))
+        tool_result(
+            trusted_path(params.source, params.allow_python).and_then(|source| {
+                let settings = deploy_settings(
+                    source,
+                    params.ssh,
+                    params.remote_bin,
+                    params.service,
+                    params.timeout_ms,
+                    params.stable_for_ms,
+                    params.keep,
+                );
+                let mut observed = Vec::new();
+                let mut reporter =
+                    |event: &crate::transfer::DeployEvent| observed.push(event.clone());
+                api::deploy::execute(&settings, Some(&params.revision), &mut reporter).map_err(
+                    |error| {
+                        if observed.is_empty() {
+                            error
+                        } else {
+                            let stages = observed
+                                .iter()
+                                .map(|event| format!("[{}] {}", event.phase, event.message))
+                                .collect::<Vec<_>>()
+                                .join("；");
+                            error.context(format!("部署失败前已完成阶段：{stages}"))
+                        }
+                    },
+                )
+            }),
+        )
     }
 }
 
@@ -379,55 +427,26 @@ fn tool_result<T: Serialize>(result: anyhow::Result<T>) -> CallToolResult {
     }
 }
 
-/// MCP 默认拒绝会执行可信代码的显式 Python 配置入口。
-fn declarative_path(path: PathBuf) -> anyhow::Result<PathBuf> {
-    if is_python_config(&path) {
-        anyhow::bail!("MCP 不执行显式 procora.py；请在可信交互式终端中使用 Procora CLI");
+/// MCP 默认拒绝显式入口或目录发现所触发的 Python 代码执行。
+fn trusted_path(path: PathBuf, allow_python: bool) -> anyhow::Result<PathBuf> {
+    let path = absolute_path(path)?;
+    let python = path_selects_python(&path)
+        || (crate::package::is_package_path(&path)
+            && crate::package::inspect(&path).is_ok_and(|info| {
+                is_python_config(std::path::Path::new(&info.manifest.config.source))
+            }));
+    if python && !allow_python {
+        anyhow::bail!("MCP 默认不执行 procora.py；确认脚本可信后显式设置 allow_python=true");
     }
     Ok(path)
 }
 
-/// 构造MCP固定为非交互式认证的共享部署输入。
-#[allow(clippy::too_many_arguments)]
-fn deploy_settings(
-    source: PathBuf,
-    ssh: String,
-    remote_bin: Option<String>,
-    service: Option<String>,
-    timeout_ms: u64,
-    stable_for_ms: u64,
-    keep: u32,
-) -> api::deploy::DeploySettings {
-    api::deploy::DeploySettings {
-        source,
-        ssh_target: Some(ssh),
-        remote_bin,
-        expected_service: service,
-        timeout_ms,
-        stable_for_ms,
-        keep,
-        batch: true,
+/// 把 MCP 相对路径固定到当前目录并清理 Windows verbatim 前缀。
+fn absolute_path(path: PathBuf) -> anyhow::Result<PathBuf> {
+    if path.is_absolute() {
+        return Ok(crate::platform::simplify_path(&path));
     }
-}
-
-/// MCP省略`source`时与CLI一致使用当前目录。
-fn current_directory() -> PathBuf {
-    PathBuf::from(".")
-}
-
-/// MCP默认部署验收超时。
-fn default_deploy_timeout() -> u64 {
-    30_000
-}
-
-/// MCP默认部署稳定窗口。
-fn default_stable_window() -> u64 {
-    2_000
-}
-
-/// MCP默认`release`保留数量。
-fn default_release_keep() -> u32 {
-    3
+    Ok(crate::platform::current_dir()?.join(path))
 }
 
 /// 把编译时内嵌文档包装成可直接注入会话的 Prompt。

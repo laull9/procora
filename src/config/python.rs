@@ -24,6 +24,8 @@ const MAX_STDOUT_BYTES: usize = 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 /// Python 配置脚本自身最大字节数。
 const MAX_SCRIPT_BYTES: u64 = 1024 * 1024;
+/// 在隔离模式中只注入官方 API 后执行配置脚本的引导代码。
+const PYTHON_BOOTSTRAP: &str = "import os,runpy,sys;script=sys.argv[2];sys.path[:0]=[sys.argv[1],os.path.dirname(script)];sys.argv=[script];runpy.run_path(script,run_name='__main__')";
 /// Linux 上刚写入的解释器文件临时占用时的最大重试次数。
 #[cfg(target_os = "linux")]
 const EXECUTABLE_BUSY_RETRIES: u8 = 3;
@@ -135,7 +137,15 @@ impl PythonConfigRunner {
             "即将以当前用户权限执行显式选择的可信 Python 配置；该机制不是安全沙箱"
         );
         let root = path.parent().unwrap_or_else(|| Path::new("."));
-        let task = python_task(&self.interpreter, path, root);
+        let package_root = crate::python::ensure_package().map_err(|error| {
+            Box::new((
+                python_error(path, format!("无法准备 Procora Python API：{error:#}")),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ))
+        })?;
+        let task = python_task(&self.interpreter, path, root, &package_root);
         let output = run_python_task(&task, self.timeout).map_err(|error| {
             Box::new((
                 python_error(path, error.to_string()),
@@ -163,6 +173,11 @@ impl PythonConfigRunner {
 /// 判断显式路径是否采用唯一受支持的 Python 入口名称。
 pub fn is_python_config(path: &Path) -> bool {
     path.file_name().is_some_and(|name| name == "procora.py")
+}
+
+/// 判断显式入口或目录发现是否可能执行 `procora.py`。
+pub fn path_selects_python(path: &Path) -> bool {
+    is_python_config(path) || (path.is_dir() && path.join("procora.py").is_file())
 }
 
 /// 使用默认解释器执行并构造 `DefinitionSource` 捕获信息。
@@ -211,8 +226,20 @@ pub(crate) fn load_capture(path: &Path) -> ConfigLoadCapture {
 }
 
 /// 构造清空继承环境、关闭 stdin 且启用 Python 隔离模式的任务规范。
-fn python_task(interpreter: &Path, script: &Path, root: &Path) -> TaskSpec {
-    let env = BTreeMap::from([("PROCORA_CONFIG".to_owned(), "1".to_owned())]);
+fn python_task(interpreter: &Path, script: &Path, root: &Path, package_root: &Path) -> TaskSpec {
+    let mut env = BTreeMap::from([
+        ("PROCORA_CONFIG".to_owned(), "1".to_owned()),
+        (
+            "PROCORA_VERSION".to_owned(),
+            env!("CARGO_PKG_VERSION").to_owned(),
+        ),
+    ]);
+    if let Ok(executable) = crate::platform::current_exe() {
+        env.insert(
+            "PROCORA_BIN".to_owned(),
+            executable.to_string_lossy().into_owned(),
+        );
+    }
     TaskSpec {
         command: interpreter.to_string_lossy().into_owned(),
         args: vec![
@@ -220,6 +247,9 @@ fn python_task(interpreter: &Path, script: &Path, root: &Path) -> TaskSpec {
             "-S".to_owned(),
             "-X".to_owned(),
             "utf8".to_owned(),
+            "-c".to_owned(),
+            PYTHON_BOOTSTRAP.to_owned(),
+            package_root.to_string_lossy().into_owned(),
             script.to_string_lossy().into_owned(),
         ],
         cwd: Some(root.to_path_buf()),

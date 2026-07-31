@@ -255,13 +255,13 @@ TUI 会在终端 Resize 后立即重新计算布局，不要求退出重进：
 - `procora source git preview <repository> [--reference REF] [--config PATH]`：受限获取 Git 引用，输出完整 commit、组合修订和配置校验结果；`--local` 才允许显式本地仓库。不会启动 Center、注册服务或运行 Task。
 - `procora source git confirm <repository> <revision> [...]`：按相同来源参数重新获取，只有仓库、commit 与配置闭包修订仍匹配时成功；仍不自动应用。默认缓存位于当前用户 Procora 数据目录，也可用 `--cache` 覆盖。
 
-自启动在 Linux 使用 `systemd --user`，在 macOS 使用 LaunchAgent，在 Windows 使用当前用户的登录触发计划任务。三者都直接监管内部前台 daemon，不通过会再次派生进程的 `procora up`。因此原生托管器能正确观察退出和失败，并在崩溃时按平台定义恢复。
+自启动在 Linux 使用 `systemd --user`，在 macOS 使用 LaunchAgent，在 Windows 使用当前用户的登录触发计划任务。Linux/macOS 直接监管内部前台 daemon；Windows 由无控制台的 WScript 启动脚本隐藏启动并等待同一 daemon，避免登录时出现空白终端。三者都不通过会再次派生进程的 `procora up`，原生托管器仍能观察完整生命周期。
 
 这些注册都以“当前用户登录”为启动时机。Windows 的任务注册和移除会显式唤起 UAC，并在用户取消或权限不足时返回明确诊断；任务本身仍以当前用户受限权限运行。Linux 若要求用户尚未登录时也在系统启动阶段运行，需要由管理员单独配置该用户的 linger；`procora enable` 不会擅自修改这个用户级系统策略。升级后若可执行文件位置发生变化，需要在新二进制下重新执行 `procora enable`。
 
 ## 4. 服务注册与发现
 
-`procora add <path>` 会确保全局服务器运行，然后把路径交给它处理。路径是文件时只编译该显式文件；文件名精确为 `procora.py` 时，CLI 会先提示可信代码执行，再由受控 Python 辅助进程生成 JSON。路径是目录时只扫描第一层的 `procora.yaml`、`procora.yml`、`procora.toml`、`procora.json`，绝不会自动执行 Python。其他 YAML、TOML、JSON 文件不会进入候选集合。
+`procora add <path>` 会确保全局服务器运行，然后把路径交给它处理。路径是文件时只编译该显式文件；文件名精确为 `procora.py` 时，CLI 会先提示可信代码执行，再由受控 Python 辅助进程生成 JSON。路径是目录时扫描第一层的 `procora.py`、`procora.yaml`、`procora.yml`、`procora.toml`、`procora.json`；Python 候选与声明式候选一样，多个合法入口会要求显式选择。其他文件不会进入候选集合。
 
 发现结果必须满足以下一种情况：
 

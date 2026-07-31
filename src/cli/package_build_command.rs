@@ -1,8 +1,9 @@
 //! Procora 包的准备、构建与可选一键部署入口。
 
 use std::{
+    io,
     path::{Path, PathBuf},
-    process::Command as ProcessCommand,
+    process::{Command as ProcessCommand, Stdio},
 };
 
 use anyhow::{Context, bail};
@@ -57,11 +58,15 @@ pub struct PackageBuildArgs {
     /// 安全备份并替换内容不同的已有普通包；失败时恢复原文件。
     #[arg(long)]
     force: bool,
+    /// 只输出稳定 JSON 构建结果，适合 Python 和其他脚本调用。
+    #[arg(long, conflicts_with = "deploy")]
+    json: bool,
 }
 
 /// 执行包准备、确定性构建和可选部署。
 pub(super) fn run(arguments: &PackageBuildArgs) -> anyhow::Result<()> {
     let source = api::absolute_user_path(&arguments.source)?;
+    super::project::warn_python_execution(&source);
     let discovered = crate::config::discover_path(&source)
         .with_context(|| format!("无法发现待打包 Service：{}", source.display()))?;
     let output = arguments.output.as_deref().map_or_else(
@@ -73,13 +78,23 @@ pub(super) fn run(arguments: &PackageBuildArgs) -> anyhow::Result<()> {
         api::absolute_user_path,
     )?;
     let platform = parse_build_platform(&arguments.platform)?;
-    run_prepare_commands(&arguments.prepare, &discovered, &output, &platform)?;
+    run_prepare_commands(
+        &arguments.prepare,
+        &discovered,
+        &output,
+        &platform,
+        arguments.json,
+    )?;
     let result = if arguments.force {
         package::build_replacing(&source, &output, platform)?
     } else {
         package::build(&source, &output, platform)?
     };
-    print_build_result(&result);
+    if arguments.json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        print_build_result(&result);
+    }
     if let Some(ssh_target) = arguments.deploy.as_deref() {
         deploy_built_package(&result, &discovered.root, ssh_target, arguments)?;
     }
@@ -107,6 +122,7 @@ fn run_prepare_commands(
     discovered: &crate::config::DiscoveredProject,
     output: &Path,
     platform: &PackagePlatform,
+    json_output: bool,
 ) -> anyhow::Result<()> {
     let platform = match platform {
         PackagePlatform::All => "all".to_owned(),
@@ -117,15 +133,31 @@ fn run_prepare_commands(
             .map_err(anyhow::Error::msg)
             .with_context(|| format!("无法解析第 {} 条构建准备命令", index + 1))?;
         eprintln!("[准备 {}/{}] {}", index + 1, commands.len(), command_text);
-        let status = ProcessCommand::new(&program)
+        let mut command = ProcessCommand::new(&program);
+        command
             .args(&arguments)
             .current_dir(&discovered.root)
             .env("PROCORA_PACKAGE_SOURCE", &discovered.root)
             .env("PROCORA_PACKAGE_OUTPUT", output)
             .env("PROCORA_PACKAGE_PLATFORM", &platform)
-            .env("PROCORA_PACKAGE_PROJECT", &discovered.compiled.spec.project)
-            .status()
-            .with_context(|| format!("无法启动构建准备程序 `{program}`"))?;
+            .env("PROCORA_PACKAGE_PROJECT", &discovered.compiled.spec.project);
+        let status = if json_output {
+            command.stdout(Stdio::piped());
+            let mut child = command
+                .spawn()
+                .with_context(|| format!("无法启动构建准备程序 `{program}`"))?;
+            let forwarded = child
+                .stdout
+                .take()
+                .map_or(Ok(0), |mut stdout| io::copy(&mut stdout, &mut io::stderr()));
+            let status = child.wait().context("无法等待构建准备程序退出")?;
+            forwarded.context("无法转发构建准备程序 stdout")?;
+            status
+        } else {
+            command
+                .status()
+                .with_context(|| format!("无法启动构建准备程序 `{program}`"))?
+        };
         if !status.success() {
             bail!(
                 "第 {} 条构建准备命令失败（退出 {}）：{}",

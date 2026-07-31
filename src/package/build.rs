@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{Context, bail};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::manifest::{
@@ -29,7 +30,7 @@ pub enum PackagePlatform {
 }
 
 /// 成功构建的包身份与规模摘要。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct PackageBuildResult {
     /// 输出包路径。
     pub path: PathBuf,

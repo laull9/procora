@@ -156,8 +156,8 @@ fn launch_agent_encodes_arguments_and_runs_at_login() {
 fn windows_task_quotes_arguments_with_spaces() {
     let action = definition().windows_task_action();
 
-    assert!(action.starts_with("\"/opt/Procora Bin/procora\" __daemon"));
-    assert!(action.contains("\"/tmp/Procora & Data/procora.sqlite3\""));
+    assert!(action.starts_with("wscript.exe //B //Nologo"));
+    assert!(action.contains("\"/tmp/Procora & Data/center-start.vbs\""));
 }
 
 #[test]
@@ -173,6 +173,29 @@ fn windows_task_runs_non_interactively_at_login() {
     assert!(!arguments.iter().any(|argument| argument == "/IT"));
     assert!(arguments.iter().any(|argument| argument == "/NP"));
     assert!(arguments.windows(2).any(|pair| pair == ["/RL", "LIMITED"]));
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument.starts_with("wscript.exe //B //Nologo"))
+    );
+}
+
+#[test]
+// Windows启动脚本用GUI宿主和隐藏窗口参数拉起前台daemon。
+fn windows_launcher_uses_hidden_wscript_process() {
+    let bytes = definition().windows_launcher_script();
+    assert_eq!(&bytes[..2], &[0xff, 0xfe]);
+    let units = bytes[2..]
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    let script = String::from_utf16(&units).unwrap();
+
+    assert!(script.contains("CreateObject(\"WScript.Shell\")"));
+    assert!(script.contains("__daemon"));
+    assert!(script.contains(", 0, True"));
+    assert!(script.contains("WScript.Quit procoraExitCode"));
+    assert!(script.contains("procora-center-%demo"));
 }
 
 /// 三个原生后端都应提供稳定、面向用户的名称。
@@ -225,13 +248,14 @@ fn windows_task_escapes_quotes_and_trailing_backslashes() {
     let definition = DaemonAutostart::new(
         "C:\\Program Files\\Procora\\",
         "endpoint \"quoted\"",
-        "C:\\Data Path\\state\\",
+        "C:/Data Path/state/procora.sqlite3",
     );
     let action = definition.windows_task_action();
 
-    assert!(action.starts_with("\"C:\\Program Files\\Procora\\\\\" __daemon"));
-    assert!(action.contains("\"endpoint \\\"quoted\\\"\""));
-    assert!(action.ends_with("\"C:\\Data Path\\state\\\\\""));
+    assert!(action.starts_with("wscript.exe //B //Nologo"));
+    assert!(action.ends_with("\"C:/Data Path/state/center-start.vbs\""));
+    let script = definition.windows_launcher_script();
+    assert!(script.len() > 2);
 }
 
 #[test]
