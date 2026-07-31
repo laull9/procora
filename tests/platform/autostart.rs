@@ -122,6 +122,17 @@ fn definition() -> DaemonAutostart {
     )
 }
 
+/// 解码 Windows Script Host 使用的 UTF-16LE 启动脚本。
+fn decode_windows_launcher_script(definition: &DaemonAutostart) -> String {
+    let bytes = definition.windows_launcher_script();
+    assert_eq!(&bytes[..2], &[0xff, 0xfe]);
+    let units = bytes[2..]
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&units).unwrap()
+}
+
 #[test]
 // systemd单元以前台daemon作为主进程。
 fn systemd_unit_uses_foreground_daemon() {
@@ -154,10 +165,12 @@ fn launch_agent_encodes_arguments_and_runs_at_login() {
 #[test]
 // windows任务动作正确引用含空格参数。
 fn windows_task_quotes_arguments_with_spaces() {
-    let action = definition().windows_task_action();
+    let definition = definition();
+    let action = definition.windows_task_action();
+    let launcher = format!("\"{}\"", definition.windows_launcher_path().display());
 
     assert!(action.starts_with("wscript.exe //B //Nologo"));
-    assert!(action.contains("\"/tmp/Procora & Data/center-start.vbs\""));
+    assert!(action.contains(&launcher));
 }
 
 #[test]
@@ -183,13 +196,7 @@ fn windows_task_runs_non_interactively_at_login() {
 #[test]
 // Windows启动脚本用GUI宿主和隐藏窗口参数拉起前台daemon。
 fn windows_launcher_uses_hidden_wscript_process() {
-    let bytes = definition().windows_launcher_script();
-    assert_eq!(&bytes[..2], &[0xff, 0xfe]);
-    let units = bytes[2..]
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-        .collect::<Vec<_>>();
-    let script = String::from_utf16(&units).unwrap();
+    let script = decode_windows_launcher_script(&definition());
 
     assert!(script.contains("CreateObject(\"WScript.Shell\")"));
     assert!(script.contains("__daemon"));
@@ -251,11 +258,12 @@ fn windows_task_escapes_quotes_and_trailing_backslashes() {
         "C:/Data Path/state/procora.sqlite3",
     );
     let action = definition.windows_task_action();
+    let launcher = format!("\"{}\"", definition.windows_launcher_path().display());
 
     assert!(action.starts_with("wscript.exe //B //Nologo"));
-    assert!(action.ends_with("\"C:/Data Path/state/center-start.vbs\""));
-    let script = definition.windows_launcher_script();
-    assert!(script.len() > 2);
+    assert!(action.ends_with(&launcher));
+    let script = decode_windows_launcher_script(&definition);
+    assert!(script.contains(r#"endpoint \""quoted\"""#));
 }
 
 #[test]

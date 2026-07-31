@@ -28,6 +28,17 @@ fn temporary_service(label: &str) -> PathBuf {
     directory
 }
 
+/// 解码 Windows Script Host 使用的 UTF-16LE 启动脚本。
+fn decode_windows_launcher_script(definition: &DaemonAutostart) -> String {
+    let bytes = definition.windows_launcher_script();
+    assert_eq!(&bytes[..2], &[0xff, 0xfe]);
+    let units = bytes[2..]
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&units).unwrap()
+}
+
 #[test]
 // 扩展驱动器与unc路径转换为常规展示路径。
 fn extended_drive_and_unc_paths_are_simplified() {
@@ -97,7 +108,7 @@ fn platform_path_sources_hide_windows_verbatim_prefix() {
 }
 
 #[test]
-// Windows计划任务动作不会向外部命令传播扩展路径前缀。
+// Windows计划任务动作与启动脚本都不会传播扩展路径前缀。
 fn windows_task_action_hides_verbatim_prefix() {
     let definition = DaemonAutostart::new(
         r"\\?\C:\Program Files\Procora\procora.exe",
@@ -105,14 +116,17 @@ fn windows_task_action_hides_verbatim_prefix() {
         r"\\?\C:\ProgramData\Procora\procora.sqlite3",
     );
     let action = definition.windows_task_action();
+    let script = decode_windows_launcher_script(&definition);
 
     assert!(!action.contains(r"\\?\"));
-    assert!(action.contains(r"C:\Program Files\Procora\procora.exe"));
-    assert!(action.contains(r"C:\ProgramData\Procora\procora.sqlite3"));
+    assert!(!script.contains(r"\\?\"));
+    assert!(action.contains(r"C:\ProgramData\Procora\center-start.vbs"));
+    assert!(script.contains(r"C:\Program Files\Procora\procora.exe"));
+    assert!(script.contains(r"C:\ProgramData\Procora\procora.sqlite3"));
 }
 
 #[test]
-// 计划任务动作以Unicode参数保留中文路径，不依赖活动代码页。
+// 计划任务动作与UTF-16脚本保留中文参数，不依赖活动代码页。
 fn windows_task_action_preserves_chinese_paths() {
     let definition = DaemonAutostart::new(
         r"C:\程序\Procora 工具\procora.exe",
@@ -120,10 +134,12 @@ fn windows_task_action_preserves_chinese_paths() {
         r"C:\数据\Procora\中心.sqlite3",
     );
     let action = definition.windows_task_action();
+    let script = decode_windows_launcher_script(&definition);
 
-    assert!(action.contains(r#""C:\程序\Procora 工具\procora.exe""#));
-    assert!(action.contains("procora-center-北京"));
-    assert!(action.contains(r"C:\数据\Procora\中心.sqlite3"));
+    assert!(action.contains(r"C:\数据\Procora\center-start.vbs"));
+    assert!(script.contains(r"C:\程序\Procora 工具\procora.exe"));
+    assert!(script.contains("procora-center-北京"));
+    assert!(script.contains(r"C:\数据\Procora\中心.sqlite3"));
 }
 
 #[test]
